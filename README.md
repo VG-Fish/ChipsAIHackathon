@@ -19,6 +19,29 @@ This repo currently covers phases 1-3.
 numbers (~3,800 parameters, ~92% accuracy) are the target this project is
 measured against for the final, dendrite-compressed model.
 
+## Status
+
+- **M0 (data pipeline, models, tests)** — done. Full pipeline validated
+  end-to-end against the real downloaded dataset.
+- **M1 (baseline sanity check, no augmentation)** — done. 15 epochs,
+  `configs/train/baseline.yaml`:
+
+  | Model | Params | Test accuracy | FAR | FRR |
+  |---|---|---|---|---|
+  | DS-CNN-M | 146,902 | 96.52% | 2.52% | 4.19% |
+  | DS-CNN-L | 467,942 | 97.27% | 1.45% | 3.76% |
+
+  Both already approach/exceed the ~92% reference without augmentation —
+  expected, since this 6-way task is easier than the 35-word benchmark DS-CNN
+  was originally designed for. Confirms the data/model/training loop are
+  correct.
+- **Augmentation (`src/kws/data/augment.py`)** — implemented and verified
+  (unit tests + a real-data end-to-end check). Fixed a bug found during
+  verification: `speed_perturb` was resampling down then immediately back up,
+  which round-trips to ~the original signal (no real speed change) at 2x the
+  compute; now does a single resample reinterpreted at the original rate.
+- **M2 (full augmented training across XS/S/M/L)** — not yet run.
+
 ## Task setup
 
 Target classes: a handful of keywords (`configs/data/speech_commands_v2.yaml
@@ -40,9 +63,11 @@ src/kws/
   models/       # DSConvBlock + parameterized DSCNN
   optimize/     # structured pruning, distillation, PTQ/QAT spikes
   export/       # ONNX export + parity check
+  utils/        # device selection, metrics (FAR/FRR), seeding, logging
   train.py      # training entrypoint
   evaluate.py   # accuracy / per-class F1 / confusion matrix / FAR-FRR
-tests/          # split integrity, feature shapes, model shapes, pruning, ONNX parity
+tests/          # split integrity, feature/augmentation correctness, model shapes,
+                # pruning, ONNX parity
 ```
 
 ## Setup
