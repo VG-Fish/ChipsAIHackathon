@@ -1,0 +1,8 @@
+# DS-CNN-L: ~468K params (measured via torchinfo/thop for 6-way task, input (40, 98)).
+# Accuracy-first champion / potential KD teacher.
+name: ds_cnn_l
+initial_channels: 172
+initial_kernel: 10
+initial_stride: 2
+block_channels: [276, 276, 276, 276, 276, 276]
+dropout: 0.4

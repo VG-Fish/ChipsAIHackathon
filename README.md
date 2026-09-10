@@ -1,1 +1,145 @@
-This is our project for the Purdue Chips & AI Hardware Hackathon.
+# KWS on MRAM/ESP32 — Purdue Chips & AI Hardware Hackathon
+
+An optimized, accurate keyword-spotting (KWS) model, compressed with
+[Perforated AI](https://github.com/PerforatedAI/PerforatedAI) dendrites, and
+deployed to an ESP32 with attached MRAM for on-device wake-word detection.
+
+## Project phases
+
+1. **Accurate model** — train a DS-CNN keyword spotter on Google Speech Commands v2.
+2. **Optimize** — structured pruning, knowledge distillation, quantization spikes.
+3. **Compress with dendrites** — grow Perforated AI dendrites on a tiny base
+   model to close the accuracy gap without the parameter cost of a large network.
+4. **Deploy** — run the compressed model on an ESP32 + MRAM against live
+   microphone audio.
+
+This repo currently covers phases 1-3.
+
+**Reference benchmark**: Edge Impulse's published small-keyword-spotting
+numbers (~3,800 parameters, ~92% accuracy) are the target this project is
+measured against for the final, dendrite-compressed model.
+
+## Task setup
+
+Target classes: a handful of keywords (`configs/data/speech_commands_v2.yaml
+-> target_keywords`, default `["yes", "no", "on", "off"]`) plus two synthesized
+classes:
+- `_unknown_` — pooled from the ~29 remaining Speech Commands v2 words (real,
+  in-domain negative examples, not an external corpus)
+- `_silence_` — fresh random crops of background noise, resampled every epoch
+
+## Repo layout
+
+```
+configs/
+  data/speech_commands_v2.yaml   # dataset, target keywords, features, splits
+  model/ds_cnn_{xs,s,m,l}.yaml   # DS-CNN size variants
+  train/{baseline,full,qat}.yaml # training regimens
+src/kws/
+  data/         # download, splits, dataset, silence, unknown, features, augment
+  models/       # DSConvBlock + parameterized DSCNN
+  optimize/     # structured pruning, distillation, PTQ/QAT spikes
+  export/       # ONNX export + parity check
+  train.py      # training entrypoint
+  evaluate.py   # accuracy / per-class F1 / confusion matrix / FAR-FRR
+tests/          # split integrity, feature shapes, model shapes, pruning, ONNX parity
+```
+
+## Setup
+
+```bash
+python3 -m venv KWS_venv
+source KWS_venv/bin/activate        # Windows: KWS_venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+Works on Mac, Windows, and Linux. Two portability notes baked into the code:
+- Audio I/O uses `soundfile`, not `torchaudio.load`/`save` — recent
+  `torchaudio` routes those through TorchCodec, which needs a
+  system-installed FFmpeg. `soundfile` ships self-contained wheels on all
+  three platforms, so no extra system install is needed.
+- Training device auto-selects CUDA (Windows/Linux+NVIDIA) → MPS (Apple
+  Silicon) → CPU (`kws.utils.device.get_device`).
+
+### Windows setup
+
+1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/windows/)
+   (not the Microsoft Store version) and check "Add python.exe to PATH" during
+   install. Verify with `python --version` in a new terminal.
+2. **Clone and enter the repo**:
+   ```powershell
+   git clone <this-repo-url>
+   cd ChipsAIHackathon
+   ```
+3. **Create and activate the venv**:
+   ```powershell
+   python -m venv KWS_venv
+   KWS_venv\Scripts\Activate.ps1      # PowerShell
+   KWS_venv\Scripts\activate.bat      # cmd.exe instead
+   ```
+   If PowerShell refuses to run the activation script with an error like
+   *"running scripts is disabled on this system"*, that's the default
+   `Restricted` execution policy blocking it — run this once in that
+   PowerShell session first, then retry activation:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   ```
+4. **Install dependencies**:
+   ```powershell
+   pip install -r requirements.txt
+   pip install -e .
+   ```
+   `pip install torch` on Windows pulls a CUDA-enabled build automatically if
+   you have a compatible NVIDIA GPU + driver, otherwise it falls back to CPU
+   at runtime — either way `kws.utils.device.get_device()` picks the right
+   device automatically. To target a specific CUDA version instead of the
+   default, use the selector at
+   [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/)
+   for the correct `--index-url`.
+5. **Runtime dependency**: PyTorch on Windows requires the
+   [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+   to be installed (most Windows machines already have it; if `import torch`
+   fails with a DLL load error, this is the fix).
+6. Everything else — dataset download, training, evaluation, export — uses
+   the exact same `python -m kws....` commands shown in Usage below (no
+   `source`/path-separator changes needed; Python's path handling normalizes
+   the forward slashes used in this repo's configs and CLI args on Windows
+   too). Make sure you have a few GB of free disk space before step 1 of
+   Usage — the dataset download + extraction is ~2.3GB.
+
+## Usage
+
+```bash
+# 1. Download + MD5-verify Google Speech Commands v2 (~2.3GB)
+python -m kws.data.download
+
+# 2. Train (pick a model size and regimen)
+python -m kws.train \
+  --model-config configs/model/ds_cnn_xs.yaml \
+  --train-config configs/train/full.yaml \
+  --checkpoint models/checkpoints/ds_cnn_xs.pt
+
+# 3. Evaluate (accuracy, per-class F1, confusion matrix, FAR/FRR)
+python -m kws.evaluate --checkpoint models/checkpoints/ds_cnn_xs.pt \
+  --report reports/ds_cnn_xs.json
+
+# 4. Export to ONNX (with a PyTorch-vs-ONNXRuntime parity check)
+python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs.pt \
+  --onnx-path models/exported/ds_cnn_xs.onnx
+
+# 5. Structured pruning + fine-tune (DS-CNN-L, secondary comparison arm)
+python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
+  --keep-ratio 0.5 --out-checkpoint models/checkpoints/ds_cnn_l_pruned.pt
+```
+
+Run tests with `pytest tests/`.
+
+## Model sizes (6-way task: 4 keywords + unknown + silence)
+
+| Variant   | Params  | Role                                              |
+|-----------|---------|----------------------------------------------------|
+| DS-CNN-XS | ~3,850  | Primary Phase 3 dendrite-growth starting point     |
+| DS-CNN-S  | ~24K    | Secondary MCU-friendly reference point             |
+| DS-CNN-M  | ~147K   | Mid-size comparison                                |
+| DS-CNN-L  | ~468K   | Accuracy ceiling / pruning & KD teacher             |

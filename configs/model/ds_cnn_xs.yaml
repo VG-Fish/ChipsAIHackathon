@@ -1,0 +1,10 @@
+# DS-CNN-XS: sized to land near the ~3,800-parameter Edge Impulse reference
+# point for a 6-way task (4 target keywords + unknown + silence).
+# Actual param count (measured via torchinfo/thop): ~3850 for 6 classes,
+# input (40, 98). Re-measure if target_keywords/num_classes changes.
+name: ds_cnn_xs
+initial_channels: 18
+initial_kernel: 5
+initial_stride: 2
+block_channels: [40, 40]
+dropout: 0.2

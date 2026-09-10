@@ -1,0 +1,13 @@
+torch
+torchaudio
+soundfile
+onnx
+onnxscript
+onnxruntime
+scikit-learn
+numpy
+pyyaml
+tensorboard
+thop
+torchinfo
+pytest
