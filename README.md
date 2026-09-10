@@ -73,11 +73,13 @@ tests/          # split integrity, feature/augmentation correctness, model shape
 ## Setup
 
 ```bash
-python3 -m venv KWS_venv
-source KWS_venv/bin/activate        # Windows: KWS_venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e .
+uv sync
 ```
+
+Install `uv` first if needed by following the instructions at
+<https://docs.astral.sh/uv/getting-started/installation/>. `uv sync` creates a
+project-local `.venv`, installs the package in editable mode, and installs the
+locked runtime and development dependencies from `uv.lock`.
 
 Works on Mac, Windows, and Linux. Two portability notes baked into the code:
 - Audio I/O uses `soundfile`, not `torchaudio.load`/`save` — recent
@@ -89,45 +91,36 @@ Works on Mac, Windows, and Linux. Two portability notes baked into the code:
 
 ### Windows setup
 
-1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/windows/)
-   (not the Microsoft Store version) and check "Add python.exe to PATH" during
-   install. Verify with `python --version` in a new terminal.
+1. **Install `uv`** using the
+   [official installer](https://docs.astral.sh/uv/getting-started/installation/).
+   `uv` will provision a compatible Python version when needed.
 2. **Clone and enter the repo**:
    ```powershell
    git clone <this-repo-url>
    cd ChipsAIHackathon
    ```
-3. **Create and activate the venv**:
+3. **Create the environment and install dependencies**:
    ```powershell
-   python -m venv KWS_venv
-   KWS_venv\Scripts\Activate.ps1      # PowerShell
-   KWS_venv\Scripts\activate.bat      # cmd.exe instead
+   uv sync
    ```
-   If PowerShell refuses to run the activation script with an error like
-   *"running scripts is disabled on this system"*, that's the default
-   `Restricted` execution policy blocking it — run this once in that
-   PowerShell session first, then retry activation:
-   ```powershell
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-   ```
-4. **Install dependencies**:
-   ```powershell
-   pip install -r requirements.txt
-   pip install -e .
-   ```
-   `pip install torch` on Windows pulls a CUDA-enabled build automatically if
+   Run project commands through `uv run`; shell activation is not required.
+   The resolved PyTorch build uses CUDA when a compatible build and NVIDIA GPU
+   are available, otherwise the code falls back to CPU at runtime.
+4. **Optional CUDA-specific PyTorch build**: if the default resolved build is
+   not appropriate for your CUDA version, configure a PyTorch package index as
+   documented by PyTorch and regenerate the lockfile. PyTorch on Windows
+   requires the
+   [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+   (most Windows machines already have it).
+   `torch` on Windows can use CUDA if
    you have a compatible NVIDIA GPU + driver, otherwise it falls back to CPU
    at runtime — either way `kws.utils.device.get_device()` picks the right
    device automatically. To target a specific CUDA version instead of the
    default, use the selector at
    [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/)
    for the correct `--index-url`.
-5. **Runtime dependency**: PyTorch on Windows requires the
-   [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
-   to be installed (most Windows machines already have it; if `import torch`
-   fails with a DLL load error, this is the fix).
-6. Everything else — dataset download, training, evaluation, export — uses
-   the exact same `python -m kws....` commands shown in Usage below (no
+5. Everything else — dataset download, training, evaluation, export — uses
+   the exact same `uv run python -m kws....` commands shown in Usage below (no
    `source`/path-separator changes needed; Python's path handling normalizes
    the forward slashes used in this repo's configs and CLI args on Windows
    too). Make sure you have a few GB of free disk space before step 1 of
@@ -137,28 +130,28 @@ Works on Mac, Windows, and Linux. Two portability notes baked into the code:
 
 ```bash
 # 1. Download + MD5-verify Google Speech Commands v2 (~2.3GB)
-python -m kws.data.download
+uv run python -m kws.data.download
 
 # 2. Train (pick a model size and regimen)
-python -m kws.train \
+uv run python -m kws.train \
   --model-config configs/model/ds_cnn_xs.yaml \
   --train-config configs/train/full.yaml \
   --checkpoint models/checkpoints/ds_cnn_xs.pt
 
 # 3. Evaluate (accuracy, per-class F1, confusion matrix, FAR/FRR)
-python -m kws.evaluate --checkpoint models/checkpoints/ds_cnn_xs.pt \
+uv run python -m kws.evaluate --checkpoint models/checkpoints/ds_cnn_xs.pt \
   --report reports/ds_cnn_xs.json
 
 # 4. Export to ONNX (with a PyTorch-vs-ONNXRuntime parity check)
-python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs.pt \
+uv run python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs.pt \
   --onnx-path models/exported/ds_cnn_xs.onnx
 
 # 5. Structured pruning + fine-tune (DS-CNN-L, secondary comparison arm)
-python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
+uv run python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
   --keep-ratio 0.5 --out-checkpoint models/checkpoints/ds_cnn_l_pruned.pt
 ```
 
-Run tests with `pytest tests/`.
+Run tests with `uv run pytest tests/`.
 
 ## Model sizes (6-way task: 4 keywords + unknown + silence)
 

@@ -2,6 +2,25 @@
 name = "kws"
 version = "0.1.0"
 requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "onnx",
+    "onnxruntime",
+    "onnxscript",
+    "pyyaml",
+    "scikit-learn",
+    "soundfile",
+    "tensorboard",
+    "thop",
+    "torch",
+    "torchaudio",
+    "torchinfo",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
