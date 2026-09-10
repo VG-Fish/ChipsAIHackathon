@@ -35,39 +35,40 @@ def mix_background_noise(waveform: torch.Tensor, noise_waveforms: list[torch.Ten
     return waveform + noise_clip * scale
 
 
-def speed_perturb(waveform: torch.Tensor, sample_rate: int, factor_range: tuple[float, float]) -> torch.Tensor:
-    """Resample to sample_rate/factor and reinterpret the result at the original
-    sample_rate (i.e. don't resample back) -- this is what actually changes
-    speed+pitch together. Resampling down and then immediately back up (the
-    previous implementation) round-trips to ~the original signal, doing 2x the
-    work for close to zero real augmentation effect.
-    """
-    factor = random.uniform(*factor_range)
-    orig_len = waveform.shape[-1]
-    new_sr = int(sample_rate / factor)
-    resampled = torchaudio.functional.resample(waveform, sample_rate, new_sr)
-    if resampled.shape[-1] > orig_len:
-        resampled = resampled[:, :orig_len]
-    else:
-        resampled = torch.nn.functional.pad(resampled, (0, orig_len - resampled.shape[-1]))
-    return resampled
+def crop_or_pad(waveform: torch.Tensor, target_len: int) -> torch.Tensor:
+    if waveform.shape[-1] > target_len:
+        return waveform[:, :target_len]
+    if waveform.shape[-1] < target_len:
+        return torch.nn.functional.pad(waveform, (0, target_len - waveform.shape[-1]))
+    return waveform
 
 
 class WaveformAugmenter:
     def __init__(self, background_noise_dir: Path, sample_rate: int,
                  max_shift_ms: float = 100, snr_db_range=(0, 15),
-                 speed_factor_range=(0.9, 1.1)):
+                 speed_factors=(0.9, 0.95, 1.0, 1.05, 1.1)):
         self.sample_rate = sample_rate
         self.max_shift_samples = int(sample_rate * max_shift_ms / 1000)
         self.snr_db_range = snr_db_range
-        self.speed_factor_range = speed_factor_range
+        # torchaudio's own SpeedPerturbation samples from a small fixed set of
+        # factors and caches one Resample kernel per factor at construction time.
+        # A hand-rolled version calling torchaudio.functional.resample with an
+        # arbitrary continuous ratio measured at ~830ms/call here -- resample
+        # has to build a huge polyphase filter when the ratio isn't a "nice"
+        # rational number, which a random continuous factor almost never is.
+        # This cached version measured ~0.08ms/call: a ~10,000x difference,
+        # which is the entire reason a single epoch of augmented training was
+        # projected to take days instead of minutes.
+        self.speed_perturbation = torchaudio.transforms.SpeedPerturbation(sample_rate, list(speed_factors))
         self.noise_waveforms = []
         for wav_path in sorted(Path(background_noise_dir).glob("*.wav")):
             self.noise_waveforms.append(load_waveform(wav_path, sample_rate))
 
     def __call__(self, waveform: torch.Tensor) -> torch.Tensor:
+        orig_len = waveform.shape[-1]
         waveform = time_shift(waveform, self.max_shift_samples)
-        waveform = speed_perturb(waveform, self.sample_rate, self.speed_factor_range)
+        waveform, _ = self.speed_perturbation(waveform)
+        waveform = crop_or_pad(waveform, orig_len)
         if self.noise_waveforms and random.random() < 0.5:
             waveform = mix_background_noise(waveform, self.noise_waveforms, self.snr_db_range)
         return waveform

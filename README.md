@@ -156,6 +156,10 @@ python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs.pt \
 # 5. Structured pruning + fine-tune (DS-CNN-L, secondary comparison arm)
 python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
   --keep-ratio 0.5 --out-checkpoint models/checkpoints/ds_cnn_l_pruned.pt
+
+# 6. Manual/ad-hoc testing (as opposed to the automated test-split metrics above)
+python -m kws.infer --checkpoint models/checkpoints/ds_cnn_l_full.pt --wav path/to/clip.wav
+python -m kws.live_infer --checkpoint models/checkpoints/ds_cnn_l_full.pt  # live mic demo
 ```
 
 Run tests with `pytest tests/`.

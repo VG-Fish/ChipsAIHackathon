@@ -1,6 +1,7 @@
 torch
 torchaudio
 soundfile
+sounddevice
 onnx
 onnxscript
 onnxruntime

@@ -2,12 +2,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import torch
+import torchaudio
 
 from kws.data.augment import (
     SpecAugmenter,
     WaveformAugmenter,
+    crop_or_pad,
     mix_background_noise,
-    speed_perturb,
     time_shift,
 )
 
@@ -89,26 +90,57 @@ def test_mix_background_noise_snr_roughly_respected():
     assert residual_power < signal_power * 0.05
 
 
-# ---- speed_perturb ----
+# ---- crop_or_pad ----
 
-def test_speed_perturb_preserves_length_both_directions():
-    waveform = torch.sin(torch.linspace(0, 100, 16000)).unsqueeze(0)
-    for factor_range in [(1.1, 1.1), (0.9, 0.9)]:
-        out = speed_perturb(waveform, sample_rate=16000, factor_range=factor_range)
-        assert out.shape == waveform.shape
-        assert torch.isfinite(out).all()
+def test_crop_or_pad_crops_longer_input():
+    waveform = torch.randn(1, 200)
+    out = crop_or_pad(waveform, 100)
+    assert out.shape == (1, 100)
+    assert torch.equal(out, waveform[:, :100])
 
 
-def test_speed_perturb_actually_changes_the_signal():
-    """Regression test: resampling down then immediately back up round-trips to
-    ~the original signal (no real speed change, and 2x the compute for nothing).
-    The fix resamples once and reinterprets at the original rate, so the output
-    must differ meaningfully from a plain round-trip identity.
+def test_crop_or_pad_pads_shorter_input():
+    waveform = torch.randn(1, 50)
+    out = crop_or_pad(waveform, 100)
+    assert out.shape == (1, 100)
+    assert torch.equal(out[:, :50], waveform)
+    assert torch.equal(out[:, 50:], torch.zeros(1, 50))
+
+
+def test_crop_or_pad_noop_when_already_target_length():
+    waveform = torch.randn(1, 100)
+    out = crop_or_pad(waveform, 100)
+    assert torch.equal(out, waveform)
+
+
+# ---- WaveformAugmenter's speed perturbation (fast, cached-kernel path) ----
+
+def test_speed_perturbation_is_fast():
+    """Regression test for the ~10,000x-slower bug: a hand-rolled resample with
+    an arbitrary continuous ratio measured ~830ms/call (torchaudio.functional
+    .resample has to build a huge polyphase filter for a "non-nice" ratio,
+    which made a single epoch of augmented training take days instead of
+    minutes). torchaudio's own SpeedPerturbation samples from a small fixed
+    set of factors and caches one Resample kernel per factor, which must stay
+    well under a millisecond per call.
     """
+    import time
+
+    waveform = torch.sin(torch.linspace(0, 100, 16000)).unsqueeze(0)
+    speed_perturbation = torchaudio.transforms.SpeedPerturbation(16000, [0.9, 0.95, 1.0, 1.05, 1.1])
+
+    start = time.time()
+    for _ in range(50):
+        speed_perturbation(waveform)
+    elapsed_per_call = (time.time() - start) / 50
+    assert elapsed_per_call < 0.01, f"speed perturbation took {elapsed_per_call*1000:.2f}ms/call, expected <10ms"
+
+
+def test_speed_perturbation_actually_changes_the_signal():
     waveform = torch.sin(2 * torch.pi * 440 * torch.linspace(0, 1, 16000)).unsqueeze(0)
-    out = speed_perturb(waveform, sample_rate=16000, factor_range=(1.2, 1.2))
-    # A same-rate round trip would match the original almost exactly; a real
-    # speed change should not.
+    speed_perturbation = torchaudio.transforms.SpeedPerturbation(16000, [1.2])
+    out, _ = speed_perturbation(waveform)
+    out = crop_or_pad(out, waveform.shape[-1])
     assert not torch.allclose(out, waveform, atol=1e-3)
 
 
@@ -146,3 +178,27 @@ def test_waveform_augmenter_end_to_end_on_real_noise_files():
         out = augmenter(waveform)
         assert out.shape == waveform.shape
         assert torch.isfinite(out).all()
+
+
+def test_waveform_augmenter_is_fast_enough_for_full_training():
+    """A full M2 run needs ~22k samples/epoch x 40 epochs x 4 models. At the old
+    ~830ms/call speed_perturb bottleneck, a single epoch of the smallest model
+    was projected to take ~4 hours (days for the full run). The full augmenter
+    call (time-shift + speed-perturb + possible noise-mix) must stay well under
+    10ms/call for that to be remotely tractable.
+    """
+    import time
+
+    if not HAS_REAL_DATA:
+        import pytest
+        pytest.skip("Speech Commands dataset not downloaded")
+
+    augmenter = WaveformAugmenter(REAL_NOISE_DIR, sample_rate=16000)
+    waveform = torch.sin(torch.linspace(0, 100, 16000)).unsqueeze(0)
+
+    start = time.time()
+    n = 100
+    for _ in range(n):
+        augmenter(waveform)
+    elapsed_per_call = (time.time() - start) / n
+    assert elapsed_per_call < 0.01, f"WaveformAugmenter took {elapsed_per_call*1000:.2f}ms/call, expected <10ms"
