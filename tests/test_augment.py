@@ -6,6 +6,9 @@ import torch
 from kws.data.augment import (
     SpecAugmenter,
     WaveformAugmenter,
+    _cached_resampler,
+    _candidate_resample_rates,
+    _quantized_resample_rate,
     mix_background_noise,
     speed_perturb,
     time_shift,
@@ -110,6 +113,21 @@ def test_speed_perturb_actually_changes_the_signal():
     # A same-rate round trip would match the original almost exactly; a real
     # speed change should not.
     assert not torch.allclose(out, waveform, atol=1e-3)
+
+
+def test_speed_perturb_uses_small_rational_rate_grid_and_cached_kernels():
+    assert _candidate_resample_rates(16000, (0.9, 1.1)) == list(range(14400, 17601, 400))
+    assert _quantized_resample_rate(16000, 1.1) == 14400
+    assert _quantized_resample_rate(16000, 0.9) == 17600
+
+    _cached_resampler.cache_clear()
+    waveform = torch.randn(1, 16000)
+    with patch("kws.data.augment.random.uniform", return_value=1.1):
+        speed_perturb(waveform, 16000, (0.9, 1.1))
+        speed_perturb(waveform, 16000, (0.9, 1.1))
+    cache_info = _cached_resampler.cache_info()
+    assert cache_info.misses == 1
+    assert cache_info.hits == 1
 
 
 # ---- SpecAugmenter ----

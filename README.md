@@ -153,6 +153,13 @@ uv run python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt 
 
 Run tests with `uv run pytest tests/`.
 
+Training configs expose `num_workers`, `persistent_workers`, and
+`prefetch_factor` for overlapping audio preparation with accelerator work. The
+default configs use four persistent workers with two batches prefetched per
+worker. Speed/pitch augmentation snaps random factors to a fine rational rate
+grid and reuses prebuilt resampling kernels, avoiding the very large one-off
+sinc kernels produced by arbitrary integer sample-rate pairs.
+
 ## Model sizes (6-way task: 4 keywords + unknown + silence)
 
 | Variant   | Params  | Role                                              |

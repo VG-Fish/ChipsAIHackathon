@@ -8,9 +8,9 @@ import torch
 import torch.ao.quantization as tq
 import torch.nn as nn
 import yaml
-from torch.utils.data import DataLoader
 
 from kws.data.dataset import build_datasets
+from kws.data.loader import build_data_loader
 from kws.data.splits import TEST, TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
 from kws.train import build_lr_scheduler, evaluate_loss_acc
@@ -50,8 +50,8 @@ def quantize_aware_train(checkpoint_path: str, data_cfg: dict, train_cfg: dict, 
 
     set_seed(train_cfg["seed"])
     datasets, label_map = build_datasets(data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"])
-    train_loader = DataLoader(datasets[TRAIN], batch_size=train_cfg["batch_size"], shuffle=True, num_workers=0)
-    val_loader = DataLoader(datasets[VAL], batch_size=train_cfg["batch_size"], shuffle=False, num_workers=0)
+    train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
+    val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
 
     criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
     optimizer = torch.optim.AdamW(wrapped.parameters(), lr=train_cfg["lr"], weight_decay=train_cfg["weight_decay"])

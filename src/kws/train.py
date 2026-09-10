@@ -5,9 +5,9 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import yaml
-from torch.utils.data import DataLoader
 
 from kws.data.dataset import build_datasets
+from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
 from kws.utils.device import get_device
@@ -55,8 +55,14 @@ def train_model(model, datasets, label_map: dict, model_cfg: dict, train_cfg: di
     Used both for training a fresh model from scratch and for fine-tuning a model
     that's already been structurally modified (e.g. after channel pruning).
     """
-    train_loader = DataLoader(datasets[TRAIN], batch_size=train_cfg["batch_size"], shuffle=True, num_workers=0)
-    val_loader = DataLoader(datasets[VAL], batch_size=train_cfg["batch_size"], shuffle=False, num_workers=0)
+    train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
+    val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
+    logger.info(
+        "DataLoader workers=%d persistent=%s prefetch_factor=%s",
+        train_loader.num_workers,
+        train_loader.persistent_workers,
+        train_loader.prefetch_factor,
+    )
 
     criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
     optimizer = torch.optim.AdamW(model.parameters(), lr=train_cfg["lr"], weight_decay=train_cfg["weight_decay"])

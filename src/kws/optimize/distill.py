@@ -9,9 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
-from torch.utils.data import DataLoader
 
 from kws.data.dataset import build_datasets
+from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
 from kws.train import build_lr_scheduler, evaluate_loss_acc
@@ -50,8 +50,8 @@ def distill(teacher_checkpoint: str, student_checkpoint: str, data_cfg: dict, tr
 
     set_seed(train_cfg["seed"])
     datasets, label_map = build_datasets(data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"])
-    train_loader = DataLoader(datasets[TRAIN], batch_size=train_cfg["batch_size"], shuffle=True, num_workers=0)
-    val_loader = DataLoader(datasets[VAL], batch_size=train_cfg["batch_size"], shuffle=False, num_workers=0)
+    train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
+    val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
 
     optimizer = torch.optim.AdamW(student.parameters(), lr=train_cfg["lr"], weight_decay=train_cfg["weight_decay"])
     total_steps = train_cfg["epochs"] * len(train_loader)

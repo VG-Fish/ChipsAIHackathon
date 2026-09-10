@@ -2,6 +2,9 @@
 augment: false
 epochs: 15
 batch_size: 128
+num_workers: 4
+persistent_workers: true
+prefetch_factor: 2
 lr: 0.001
 weight_decay: 0.0001
 label_smoothing: 0.1
