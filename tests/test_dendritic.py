@@ -2,7 +2,12 @@ import torch
 import yaml
 
 from kws.models.ds_cnn import build_ds_cnn
-from kws.optimize.dendritic import build_cycle_base, estimate_one_dendrite_params
+from kws.optimize.dendritic import (
+    build_cycle_base,
+    estimate_one_dendrite_params,
+    read_pai_architecture_results,
+)
+from kws.optimize.dendritic_prune_loop import candidate_widths, judge_candidate
 
 
 def test_cycle1_base_hits_expected_size_and_widths(tmp_path):
@@ -45,3 +50,39 @@ def test_cycle1_base_hits_expected_size_and_widths(tmp_path):
     with torch.no_grad():
         output = model(torch.zeros(2, 1, *checkpoint["input_shape"]))
     assert output.shape == (2, checkpoint["num_classes"])
+
+
+def test_read_pai_architecture_results_selects_best_deployable_row(tmp_path):
+    run_dir = tmp_path / "pai_w18"
+    run_dir.mkdir()
+    (run_dir / "pai_w18_best_arch_scores.csv").write_text(
+        "Param Counts,Max Valid Scores,Train\n"
+        "1716,0.8895,0.69\n"
+        "2946,0.9061,0.75\n"
+    )
+
+    accuracy, parameters = read_pai_architecture_results(str(run_dir))
+
+    assert accuracy == 0.9061
+    assert parameters == 2946
+
+
+def test_pruning_widths_descend_to_configured_minimum():
+    assert candidate_widths(18, 14, 1) == [18, 17, 16, 15, 14]
+    assert candidate_widths(18, 12, 3) == [18, 15, 12]
+
+
+def test_pruning_stops_below_accuracy_floor():
+    accepted = judge_candidate(0.901, 0.90, 0.906, None)
+    degraded = judge_candidate(0.899, 0.90, 0.901, None)
+
+    assert accepted.accepted
+    assert not degraded.accepted
+    assert "below" in degraded.reason
+
+
+def test_optional_relative_drop_rule():
+    decision = judge_candidate(0.902, 0.90, 0.910, 0.005)
+
+    assert not decision.accepted
+    assert "dropped" in decision.reason

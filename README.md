@@ -31,6 +31,20 @@ The three-dendrite capacity check has passed. The checked-in configuration is
 the full one-dendrite experiment and uses validation accuracy only for model
 selection.
 
+After that first width-18 run completes, continue the size search with:
+
+```bash
+uv run --env-file .env python -m kws.optimize.dendritic_prune_loop
+```
+
+The loop reuses the completed width-18 result, then tests widths 17, 16, and so
+on. Each candidate is independently channel-pruned from the same trained XS
+checkpoint and receives a complete dynamic PerforatedAI cycle. It stops at the
+first candidate below 90% validation accuracy, keeps the last accepted model,
+and writes the decision trail to `reports/dendritic_prune_loop.yaml`. The test
+split is not loaded during this search. Tune the width range and degradation
+rule in `configs/train/dendritic_prune_loop.yaml`.
+
 ## Status
 
 - **M0 (data pipeline, models, tests)** — done. Full pipeline validated
@@ -167,6 +181,9 @@ uv run python -m kws.optimize.distill \
 # 6. Structured pruning + fine-tune (DS-CNN-L, secondary comparison arm)
 uv run python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
   --keep-ratio 0.5 --out-checkpoint models/checkpoints/ds_cnn_l_pruned.pt
+
+# 7. Progressive base-width pruning + dynamic dendrite search (validation only)
+uv run --env-file .env python -m kws.optimize.dendritic_prune_loop
 ```
 
 Run tests with `uv run pytest tests/`.

@@ -1,4 +1,4 @@
-"""Run a size-focused PerforatedAI dendrite cycle on a pruned DS-CNN.
+"""Run one size-focused PerforatedAI dendrite cycle on a pruned DS-CNN.
 
 The first cycle starts from the trained XS checkpoint, removes channels to
 form a 1,716-parameter XXS base model, and perforates its two complete
@@ -8,7 +8,10 @@ consulted by this module.
 """
 
 import argparse
+import csv
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import monotonic
 
 import torch
 import torch.nn as nn
@@ -28,6 +31,19 @@ from kws.utils.logging import get_logger
 from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class DendriticCycleResult:
+    """Deployment-relevant result from one completed PAI cycle."""
+
+    save_name: str
+    block_channels: list[int]
+    base_params: int
+    deployed_params: int
+    best_val_acc: float
+    epochs: int
+    elapsed_seconds: float
 
 
 def load_yaml(path: str) -> dict:
@@ -88,6 +104,26 @@ def estimate_one_dendrite_params(model: nn.Module) -> int:
     )
 
 
+def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
+    """Return the best validation score and its deployed parameter count.
+
+    PAI's architecture summary contains neuron-mode maxima only, so it avoids
+    treating the temporary candidate-correlation phase as a deployable model.
+    """
+    path = Path(save_name) / f"{Path(save_name).name}_best_arch_scores.csv"
+    if not path.exists():
+        raise FileNotFoundError(f"PAI architecture results not found: {path}")
+
+    rows: list[tuple[float, int]] = []
+    with path.open(newline="") as file:
+        for row in csv.DictReader(file):
+            rows.append((float(row["Max Valid Scores"]), int(row["Param Counts"])))
+    if not rows:
+        raise ValueError(f"PAI architecture results are empty: {path}")
+    best_val_acc, deployed_params = max(rows, key=lambda item: item[0])
+    return best_val_acc, deployed_params
+
+
 def configure_perforatedai(config: dict, device: torch.device) -> None:
     """Apply the paper's size-focused, correlation-based PAI settings."""
     testing = config["testing_dendrite_capacity"]
@@ -143,8 +179,9 @@ def run_cycle(
     model_cfg: dict,
     train_cfg: dict,
     save_name: str,
-) -> None:
+) -> DendriticCycleResult:
     """Run PAI's alternating neuron/dendrite phases using validation accuracy."""
+    started_at = monotonic()
     set_seed(train_cfg["seed"])
     device = get_device()
     base, checkpoint, model_cfg = build_cycle_base(
@@ -230,13 +267,26 @@ def run_cycle(
                 model, train_cfg, len(train_loader)
             )
 
-    # PAI owns its architecture checkpoints.  Preserve the source metadata next
-    # to them so the later exporter/evaluator can reconstruct the experiment.
-    metadata_path = Path(save_name) / "cycle1_metadata.yaml"
+    best_val_acc, deployed_params = read_pai_architecture_results(save_name)
+    result = DendriticCycleResult(
+        save_name=save_name,
+        block_channels=list(model_cfg["block_channels"]),
+        base_params=base_params,
+        deployed_params=deployed_params,
+        best_val_acc=best_val_acc,
+        epochs=epoch + 1,
+        elapsed_seconds=monotonic() - started_at,
+    )
+
+    # PAI owns its architecture checkpoints. Preserve the source metadata next
+    # to them so the exporter, evaluator, and pruning search can reconstruct it.
+    metadata_path = Path(save_name) / "cycle_metadata.yaml"
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     with open(metadata_path, "w") as f:
         yaml.safe_dump(
             {
+                "status": "complete",
+                "result": asdict(result),
                 "source_checkpoint": checkpoint_path,
                 "source_val_acc": checkpoint.get("val_acc"),
                 "base_model_cfg": model_cfg,
@@ -249,6 +299,7 @@ def run_cycle(
             f,
             sort_keys=False,
         )
+    return result
 
 
 def main() -> None:
