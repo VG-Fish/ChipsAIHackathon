@@ -1,0 +1,33 @@
+[project]
+name = "kws"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "onnx",
+    "onnxruntime",
+    "onnxscript",
+    "perforatedai>=3.2.8",
+    "perforatedbp>=3.2.7",
+    "pyyaml",
+    "scikit-learn",
+    "soundfile",
+    "tensorboard",
+    "thop",
+    "torch",
+    "torchao>=0.18.0",
+    "torchaudio",
+    "torchinfo",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
