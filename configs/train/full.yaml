@@ -1,0 +1,14 @@
+# M2 full training config: augmentation + full LR schedule. Used for the
+# framework's step-1 teacher (DS-CNN-L/M) and for the independently trained XS
+# that warm-starts the step-2 student.
+augment: true
+epochs: 40
+batch_size: 128
+num_workers: 4
+persistent_workers: true
+prefetch_factor: 2
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+seed: 0

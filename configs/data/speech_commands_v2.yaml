@@ -1,0 +1,33 @@
+# Google Speech Commands v2 data configuration.
+dataset:
+  url: "http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
+  md5: "6b74f3901214cb2c2934e98196829835"
+  root: "data/raw/speech_commands_v0.02"
+  sample_rate: 16000
+  clip_seconds: 1.0
+
+# Target keywords are the "real" classes. Everything else becomes the pooled
+# "unknown" class.
+target_keywords: ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
+
+unknown:
+  # Words pooled into "unknown" = all v2 words minus target_keywords.
+  # Draw this multiple of the average target-keyword class count per split.
+  target_ratio_to_avg_keyword_count: 2.0
+
+silence:
+  background_noise_dir: "_background_noise_"
+  # Synthesize this multiple of the average target-keyword class count per split.
+  target_ratio_to_avg_keyword_count: 2.0
+  min_gain: 0.1
+  max_gain: 1.0
+
+features:
+  type: "logmel"  # logmel | mfcc
+  n_mels: 40
+  win_length_ms: 30
+  hop_length_ms: 10
+
+splits:
+  testing_list: "testing_list.txt"
+  validation_list: "validation_list.txt"
