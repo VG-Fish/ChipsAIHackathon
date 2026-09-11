@@ -41,7 +41,10 @@ def candidate_widths(start: int, minimum: int, step: int) -> list[int]:
         raise ValueError("channel_step must be positive")
     if start < minimum:
         raise ValueError("start_channels must be >= minimum_channels")
-    return list(range(start, minimum - 1, -step))
+    widths = list(range(start, minimum - 1, -step))
+    if widths[-1] != minimum:
+        widths.append(minimum)
+    return widths
 
 
 def judge_candidate(
@@ -156,6 +159,7 @@ def run_pruning_search(
     save_prefix = search_cfg["save_prefix"]
     summary_path = Path(search_cfg["summary_path"])
     reuse_run = search_cfg.get("reuse_completed_start_run")
+    reuse_completed_candidates = search_cfg.get("reuse_completed_candidates", True)
 
     summary = {
         "status": "running",
@@ -173,10 +177,26 @@ def run_pruning_search(
 
     for index, width in enumerate(widths):
         save_name = f"{save_prefix}_w{width}"
+        completed_run = None
         if index == 0 and reuse_run:
-            result = _load_completed_result(reuse_run, width, checkpoint_path)
-            logger.info("Reusing completed width-%d run from %s", width, reuse_run)
+            completed_run = reuse_run
+        elif reuse_completed_candidates and (
+            Path(save_name) / "final_clean_pai.pt"
+        ).exists():
+            completed_run = save_name
+
+        if completed_run:
+            result = _load_completed_result(completed_run, width, checkpoint_path)
+            logger.info(
+                "Reusing completed width-%d run from %s", width, completed_run
+            )
         else:
+            run_dir = Path(save_name)
+            if run_dir.exists() and any(run_dir.iterdir()):
+                raise ValueError(
+                    f"Refusing to overwrite partial run {save_name!r}. Resume it "
+                    "with PerforatedAI or choose a different save_prefix."
+                )
             candidate_train_cfg = dict(train_cfg)
             candidate_train_cfg["pruning"] = {"keep_ratio": width / source_width}
             result = run_cycle(

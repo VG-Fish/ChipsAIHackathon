@@ -70,6 +70,7 @@ def test_read_pai_architecture_results_selects_best_deployable_row(tmp_path):
 def test_pruning_widths_descend_to_configured_minimum():
     assert candidate_widths(18, 14, 1) == [18, 17, 16, 15, 14]
     assert candidate_widths(18, 12, 3) == [18, 15, 12]
+    assert candidate_widths(18, 13, 3) == [18, 15, 13]
 
 
 def test_pruning_stops_below_accuracy_floor():
