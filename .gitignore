@@ -13,6 +13,7 @@ models/checkpoints/
 models/exported/
 reports/*.png
 reports/*.json
+reports/*.log
 dendritic_*/
 
 .DS_Store
