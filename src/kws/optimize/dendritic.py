@@ -123,6 +123,7 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     GPA.pc.set_perforated_backpropagation(True)
     GPA.pc.set_dendrite_update_mode(True)
     GPA.pc.set_unwrapped_modules_confirmed(True)
+    GPA.pc.set_configuration_confirmed(True)
     GPA.pc.set_verbose(False)
     GPA.pc.set_silent(False)
 
@@ -271,7 +272,7 @@ def main() -> None:
         "--checkpoint",
         default="models/checkpoints/ds_cnn_xs_distilled_warm.pt",
     )
-    parser.add_argument("--save-name", default="models/dendritic_cycle1_debug")
+    parser.add_argument("--save-name", default="dendritic_cycle1_debug")
     args = parser.parse_args()
 
     run_cycle(

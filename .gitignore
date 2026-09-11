@@ -16,3 +16,4 @@ reports/*.json
 
 .DS_Store
 :memory:.ses
+.env
