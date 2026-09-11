@@ -15,3 +15,4 @@ reports/*.png
 reports/*.json
 
 .DS_Store
+:memory:.ses

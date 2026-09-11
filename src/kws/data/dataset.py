@@ -1,5 +1,6 @@
 """torch Dataset for the small-keyword-set KWS task: target keywords + unknown + silence."""
 import random
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,7 +70,7 @@ class SpeechCommandsKWSDataset(Dataset):
 
 
 def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
-                    label_map: dict[str, int], unknown_pool: set[str],
+                    label_map: dict[str, int], unknown_pool: Collection[str],
                     max_ratio_to_avg_keyword_count: float,
                     silence_fraction_of_epoch: float, rng: random.Random) -> list[Entry]:
     by_word: dict[str, list[str]] = {}
@@ -87,7 +88,10 @@ def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
 
     avg_keyword_count = sum(keyword_counts) / max(len(keyword_counts), 1)
     cap = unknown_sample_cap(avg_keyword_count, max_ratio_to_avg_keyword_count)
-    unknown_paths = [p for w in unknown_pool for p in by_word.get(w, [])]
+    # Sets have process-dependent iteration order because of Python hash
+    # randomization. Sort the pool before shuffling so a fixed ``rng`` seed
+    # selects the same unknown examples in every process.
+    unknown_paths = [p for w in sorted(unknown_pool) for p in by_word.get(w, [])]
     rng.shuffle(unknown_paths)
     unknown_paths = unknown_paths[:cap]
     unknown_label = label_map[UNKNOWN_LABEL_NAME]
@@ -136,7 +140,7 @@ def build_datasets(data_cfg: dict, augment: bool, seed: int = 0):
     rng = random.Random(seed)
     for split in (TRAIN, VAL, TEST):
         entries = _build_entries(
-            split_index, split, label_map, set(unknown_pool),
+            split_index, split, label_map, unknown_pool,
             unknown_cfg["max_ratio_to_avg_keyword_count"],
             silence_cfg["fraction_of_epoch"], rng,
         )

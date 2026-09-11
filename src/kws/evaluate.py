@@ -13,6 +13,7 @@ from kws.models.ds_cnn import build_ds_cnn
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
 from kws.utils.metrics import compute_metrics
+from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
 
@@ -42,15 +43,21 @@ def main():
     parser.add_argument("--data-config", default="configs/data/speech_commands_v2.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--report", default=None, help="Optional path to write JSON metrics report")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Seed for deterministic test-set construction (default: 0)")
     args = parser.parse_args()
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)
 
+    # In particular, this fixes the synthesized silence crops and gains for a
+    # given evaluation seed. Training still seeds itself separately and keeps
+    # drawing fresh silence samples throughout training.
+    set_seed(args.seed)
     device = get_device()
     model, ckpt = load_model_from_checkpoint(args.checkpoint, device)
 
-    datasets, label_map = build_datasets(data_cfg, augment=False)
+    datasets, label_map = build_datasets(data_cfg, augment=False, seed=args.seed)
     label_names = [name for name, _ in sorted(label_map.items(), key=lambda kv: kv[1])]
     test_loader = DataLoader(datasets[TEST], batch_size=128, shuffle=False, num_workers=0)
 
