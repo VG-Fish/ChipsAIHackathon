@@ -6,6 +6,7 @@ from kws.optimize.dendritic import (
     build_cycle_base,
     estimate_one_dendrite_params,
     read_pai_architecture_results,
+    _restore_single_dendrite_skip_weights,
 )
 from kws.optimize.dendritic_prune_loop import candidate_widths, judge_candidate
 
@@ -87,3 +88,24 @@ def test_optional_relative_drop_rule():
 
     assert not decision.accepted
     assert "dropped" in decision.reason
+
+
+def test_restore_single_dendrite_skip_weights():
+    class CleanModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer_array = torch.nn.ModuleList([torch.nn.Identity(), torch.nn.Identity()])
+
+    class CleanNetwork(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = torch.nn.ModuleList([CleanModule()])
+
+    model = CleanNetwork()
+    weights = {"blocks.0": [torch.tensor([[0.25, -0.5]])]}
+
+    restored = _restore_single_dendrite_skip_weights(model, weights)
+
+    assert restored == 1
+    assert torch.equal(model.blocks[0].skip_weights[0], weights["blocks.0"][0])
+    assert not model.blocks[0].skip_weights[0].requires_grad

@@ -124,6 +124,103 @@ def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
     return best_val_acc, deployed_params
 
 
+def _collect_dendrite_top_weights(model: nn.Module) -> dict[str, list[torch.Tensor]]:
+    """Copy PAI's learned dendrite-to-output coefficients before cleanup.
+
+    ``prepare_final_model`` deep-copies the network and, in the installed PAI
+    release, drops the only ``skip_weights`` entry when a module has exactly
+    one integrated dendrite.  Those coefficients are required for inference,
+    so collect them while the full PAI modules are still available.
+    """
+    top_weights: dict[str, list[torch.Tensor]] = {}
+    for name, module in model.named_modules():
+        if not hasattr(module, "dendrites_to_top"):
+            continue
+        weights = getattr(module, "dendrites_to_top")
+        if len(weights):
+            top_weights[name] = [weight.detach().cpu().clone() for weight in weights]
+    return top_weights
+
+
+def _restore_single_dendrite_skip_weights(
+    clean_model: nn.Module,
+    top_weights: dict[str, list[torch.Tensor]],
+) -> int:
+    """Restore one-dendrite skip coefficients omitted by PAI cleanup.
+
+    PAI's clean wrapper stores the dendrite branch first and the neuron branch
+    second.  With one dendrite, its clean-wrapper constructor intentionally
+    omits ``skip_weights``; adding the saved coefficient makes the forward
+    pass compute ``neuron + coefficient * dendrite`` again.
+    """
+    restored = 0
+    for name, weights in top_weights.items():
+        if len(weights) != 1:
+            # Multi-dendrite cleanup has its own skip-weight handling.  The
+            # current experiments deliberately deploy one dendrite only.
+            continue
+        try:
+            clean_module = clean_model.get_submodule(name)
+        except AttributeError as exc:
+            raise RuntimeError(
+                f"PAI cleanup removed expected module {name!r}; refusing to "
+                "write an unverifiable final checkpoint"
+            ) from exc
+        if not hasattr(clean_module, "layer_array") or len(clean_module.layer_array) < 2:
+            raise RuntimeError(
+                f"PAI cleanup module {name!r} has no two-branch layer_array"
+            )
+        if hasattr(clean_module, "skip_weights"):
+            continue
+        clean_module.skip_weights = nn.ParameterList(
+            [nn.Parameter(weights[0].clone(), requires_grad=False)]
+        )
+        restored += 1
+    return restored
+
+
+def export_final_pai_model(model: nn.Module, save_name: str) -> nn.Module:
+    """Write a clean, inference-ready PAI checkpoint with branch parity.
+
+    PerforatedAI writes ``final_clean_pai.pt`` automatically when a cycle
+    ends.  That release omits the single-dendrite skip coefficients, so this
+    wrapper repeats the cleanup, restores those coefficients, and atomically
+    replaces the library-generated file.  The returned model is the exact
+    model represented by the saved tensors and is useful for parity checks.
+    """
+    top_weights = _collect_dendrite_top_weights(model)
+    clean_model = UPA.prepare_final_model(model)
+    restored = _restore_single_dendrite_skip_weights(clean_model, top_weights)
+    clean_model.eval()
+
+    path = Path(save_name) / "final_clean_pai.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tensors = {
+        name: tensor.detach().cpu().contiguous()
+        for name, tensor in clean_model.state_dict().items()
+    }
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        UPA.save_file(
+            tensors,
+            temporary,
+            metadata={
+                "format": "perforatedai_clean_inference",
+                "single_dendrite_skip_weights_restored": str(restored),
+            },
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    logger.info(
+        "Exported parity-checked PAI model to %s (restored %d one-dendrite "
+        "skip coefficient sets)",
+        path,
+        restored,
+    )
+    return clean_model
+
+
 def configure_perforatedai(config: dict, device: torch.device) -> None:
     """Apply the paper's size-focused, correlation-based PAI settings."""
     testing = config["testing_dendrite_capacity"]
@@ -259,6 +356,7 @@ def run_cycle(
         )
 
         if training_complete:
+            export_final_pai_model(model, save_name)
             logger.info("PAI cycle complete; results saved under %s", save_name)
             break
         if restructured:
