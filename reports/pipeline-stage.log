@@ -1,0 +1,54 @@
+Building dendrites with Perforated Backpropagation
+2026-09-11 11:40:00,067 [WARNING] __main__: Configured optional student warm-start checkpoint models/checkpoints/ds_cnn_xs_12class.pt is missing; training the student from scratch
+2026-09-11 11:40:00,071 [INFO] __main__: Stage 2: distilling models/checkpoints/ds_cnn_l_12class.pt -> configs/model/ds_cnn_xs.yaml
+2026-09-11 11:40:01,480 [WARNING] kws.data.loader: macOS DataLoader workers are disabled because this PyTorch build cannot start torch_shm_manager reliably; using num_workers=0
+2026-09-11 11:40:01,480 [WARNING] kws.data.loader: macOS DataLoader workers are disabled because this PyTorch build cannot start torch_shm_manager reliably; using num_workers=0
+2026-09-11 11:41:11,479 [INFO] kws.train: distill-ds_cnn_xs epoch 1/40 train_loss=1.6603 val_loss=2.3303 val_acc=0.2633
+2026-09-11 11:41:11,487 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.2633) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:42:24,576 [INFO] kws.train: distill-ds_cnn_xs epoch 2/40 train_loss=1.5722 val_loss=2.1791 val_acc=0.2814
+2026-09-11 11:42:24,583 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.2814) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:43:28,934 [INFO] kws.train: distill-ds_cnn_xs epoch 3/40 train_loss=1.4914 val_loss=2.0743 val_acc=0.2845
+2026-09-11 11:43:28,946 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.2845) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:44:32,173 [INFO] kws.train: distill-ds_cnn_xs epoch 4/40 train_loss=1.4360 val_loss=1.9716 val_acc=0.3365
+2026-09-11 11:44:32,186 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.3365) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:45:35,411 [INFO] kws.train: distill-ds_cnn_xs epoch 5/40 train_loss=1.3933 val_loss=1.8958 val_acc=0.3807
+2026-09-11 11:45:35,423 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.3807) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:46:38,668 [INFO] kws.train: distill-ds_cnn_xs epoch 6/40 train_loss=1.3654 val_loss=1.8446 val_acc=0.4361
+2026-09-11 11:46:38,681 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.4361) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:47:42,407 [INFO] kws.train: distill-ds_cnn_xs epoch 7/40 train_loss=1.3305 val_loss=1.7714 val_acc=0.4856
+2026-09-11 11:47:42,416 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.4856) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:48:45,932 [INFO] kws.train: distill-ds_cnn_xs epoch 8/40 train_loss=1.2930 val_loss=1.6867 val_acc=0.5479
+2026-09-11 11:48:45,944 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.5479) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:49:50,474 [INFO] kws.train: distill-ds_cnn_xs epoch 9/40 train_loss=1.2687 val_loss=1.6544 val_acc=0.5506
+2026-09-11 11:49:50,483 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.5506) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:50:55,645 [INFO] kws.train: distill-ds_cnn_xs epoch 10/40 train_loss=1.2467 val_loss=1.5784 val_acc=0.5961
+2026-09-11 11:50:55,659 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.5961) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:52:01,387 [INFO] kws.train: distill-ds_cnn_xs epoch 11/40 train_loss=1.2334 val_loss=1.5596 val_acc=0.6064
+2026-09-11 11:52:01,395 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.6064) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:53:06,125 [INFO] kws.train: distill-ds_cnn_xs epoch 12/40 train_loss=1.2183 val_loss=1.5449 val_acc=0.6125
+2026-09-11 11:53:06,138 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.6125) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:54:10,961 [INFO] kws.train: distill-ds_cnn_xs epoch 13/40 train_loss=1.2075 val_loss=1.5311 val_acc=0.6114
+2026-09-11 11:55:17,434 [INFO] kws.train: distill-ds_cnn_xs epoch 14/40 train_loss=1.1940 val_loss=1.4734 val_acc=0.6582
+2026-09-11 11:55:17,442 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.6582) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:56:24,027 [INFO] kws.train: distill-ds_cnn_xs epoch 15/40 train_loss=1.1860 val_loss=1.4598 val_acc=0.6723
+2026-09-11 11:56:24,035 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.6723) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:57:28,723 [INFO] kws.train: distill-ds_cnn_xs epoch 16/40 train_loss=1.1746 val_loss=1.4692 val_acc=0.6515
+2026-09-11 11:58:32,334 [INFO] kws.train: distill-ds_cnn_xs epoch 17/40 train_loss=1.1647 val_loss=1.4249 val_acc=0.6914
+2026-09-11 11:58:32,346 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.6914) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 11:59:36,093 [INFO] kws.train: distill-ds_cnn_xs epoch 18/40 train_loss=1.1516 val_loss=1.4015 val_acc=0.7007
+2026-09-11 11:59:36,105 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7007) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:00:39,388 [INFO] kws.train: distill-ds_cnn_xs epoch 19/40 train_loss=1.1430 val_loss=1.4064 val_acc=0.6868
+2026-09-11 12:01:43,595 [INFO] kws.train: distill-ds_cnn_xs epoch 20/40 train_loss=1.1358 val_loss=1.3678 val_acc=0.7059
+2026-09-11 12:01:43,607 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7059) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:02:46,715 [INFO] kws.train: distill-ds_cnn_xs epoch 21/40 train_loss=1.1278 val_loss=1.3614 val_acc=0.7101
+2026-09-11 12:02:46,728 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7101) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:03:50,845 [INFO] kws.train: distill-ds_cnn_xs epoch 22/40 train_loss=1.1228 val_loss=1.3579 val_acc=0.7121
+2026-09-11 12:03:50,858 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7121) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:04:55,410 [INFO] kws.train: distill-ds_cnn_xs epoch 23/40 train_loss=1.1173 val_loss=1.3459 val_acc=0.7121
+2026-09-11 12:06:00,734 [INFO] kws.train: distill-ds_cnn_xs epoch 24/40 train_loss=1.1166 val_loss=1.3413 val_acc=0.7155
+2026-09-11 12:06:00,742 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7155) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:07:06,487 [INFO] kws.train: distill-ds_cnn_xs epoch 25/40 train_loss=1.1115 val_loss=1.3352 val_acc=0.7169
+2026-09-11 12:07:06,496 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7169) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:08:13,273 [INFO] kws.train: distill-ds_cnn_xs epoch 26/40 train_loss=1.1069 val_loss=1.3282 val_acc=0.7192
+2026-09-11 12:08:13,285 [INFO] kws.optimize.distill: Saved new best distilled checkpoint (val_acc=0.7192) -> models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+2026-09-11 12:09:18,966 [INFO] kws.train: distill-ds_cnn_xs epoch 27/40 train_loss=1.1049 val_loss=1.3341 val_acc=0.7176

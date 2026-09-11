@@ -1,32 +1,46 @@
 import pytest
 import yaml
 
+from kws.optimize.dendritic_prune_loop import search_fingerprint
 from kws.optimize.distill import distillation_fingerprint
 from kws.pipeline import (
     STAGES,
+    _resolve_optional_checkpoint,
     select_deployment_candidate,
     validate_sparsity_report,
 )
-from kws.optimize.dendritic_prune_loop import search_fingerprint
 
 
 def _sweep():
     return {
         "pareto": {
             "frontier": [
-                {"label": "w18", "accuracy": 0.918,
-                 "costs": {"deployed_params": 2946.0, "latency_ms_p50": 0.30},
-                 "save_name": "dendritic_prune_w18"},
-                {"label": "w15", "accuracy": 0.900,
-                 "costs": {"deployed_params": 2514.0, "latency_ms_p50": 0.24},
-                 "save_name": "dendritic_prune_w15"},
+                {
+                    "label": "w18",
+                    "accuracy": 0.918,
+                    "costs": {"deployed_params": 2946.0, "latency_ms_p50": 0.30},
+                    "save_name": "dendritic_prune_w18",
+                },
+                {
+                    "label": "w15",
+                    "accuracy": 0.900,
+                    "costs": {"deployed_params": 2514.0, "latency_ms_p50": 0.24},
+                    "save_name": "dendritic_prune_w15",
+                },
             ]
         }
     }
 
 
 def test_stages_cover_the_six_framework_steps():
-    assert STAGES == ("teacher", "student", "sparsity", "cluster", "quantize", "benchmark")
+    assert STAGES == (
+        "teacher",
+        "student",
+        "sparsity",
+        "cluster",
+        "quantize",
+        "benchmark",
+    )
 
 
 def test_selection_minimizes_the_configured_cost_axis():
@@ -51,6 +65,19 @@ def test_selection_refuses_an_unrecorded_cost_axis():
     config = {"sparsity": {"select_by": "activation_peak_bytes"}}
     with pytest.raises(ValueError, match="unrecorded cost"):
         select_deployment_candidate(_sweep(), config)
+
+
+def test_missing_optional_student_warm_start_falls_back_to_fresh_training(tmp_path):
+    missing = tmp_path / "missing-warm-start.pt"
+
+    assert _resolve_optional_checkpoint(str(missing)) is None
+
+
+def test_existing_optional_student_warm_start_is_used(tmp_path):
+    warm_start = tmp_path / "warm-start.pt"
+    warm_start.write_bytes(b"checkpoint")
+
+    assert _resolve_optional_checkpoint(str(warm_start)) == str(warm_start)
 
 
 def test_student_recipe_fingerprint_covers_training_inputs(tmp_path):

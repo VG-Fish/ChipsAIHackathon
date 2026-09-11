@@ -1,10 +1,18 @@
 """Shared DataLoader construction for overlapped input processing."""
+
+import sys
 from collections.abc import Mapping
 
 from torch.utils.data import DataLoader, Dataset
 
+from kws.utils.logging import get_logger
 
-def build_data_loader(dataset: Dataset, train_cfg: Mapping, *, shuffle: bool) -> DataLoader:
+logger = get_logger(__name__)
+
+
+def build_data_loader(
+    dataset: Dataset, train_cfg: Mapping, *, shuffle: bool
+) -> DataLoader:
     """Build a loader whose workers survive and prefetch across epochs.
 
     Worker-specific options must be omitted when ``num_workers`` is zero;
@@ -15,10 +23,20 @@ def build_data_loader(dataset: Dataset, train_cfg: Mapping, *, shuffle: bool) ->
         raise ValueError("num_workers must be non-negative")
 
     batch_size = int(train_cfg["batch_size"])
+    prefetch_factor = None
     if num_workers:
         prefetch_factor = int(train_cfg.get("prefetch_factor", 2))
         if prefetch_factor <= 0:
             raise ValueError("prefetch_factor must be positive")
+        if sys.platform == "darwin":
+            logger.warning(
+                "macOS DataLoader workers are disabled because this PyTorch "
+                "build cannot start torch_shm_manager reliably; using "
+                "num_workers=0"
+            )
+            num_workers = 0
+
+    if num_workers:
         return DataLoader(
             dataset=dataset,
             batch_size=batch_size,

@@ -1,0 +1,28 @@
+Building dendrites with Perforated Backpropagation
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/vishy/Desktop/ChipsAIHackathon/src/kws/pipeline.py", line 946, in <module>
+    main()
+    ~~~~^^
+  File "/Users/vishy/Desktop/ChipsAIHackathon/src/kws/pipeline.py", line 942, in main
+    run_pipeline(load_yaml(args.config), stages, force=args.force)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vishy/Desktop/ChipsAIHackathon/src/kws/pipeline.py", line 674, in run_pipeline
+    student_report = stage_student(config, force=force)
+  File "/Users/vishy/Desktop/ChipsAIHackathon/src/kws/pipeline.py", line 183, in stage_student
+    expected_recipe = distillation_fingerprint(
+        config["teacher"]["checkpoint"],
+    ...<3 lines>...
+        student_cfg.get("warm_start_checkpoint"),
+    )
+  File "/Users/vishy/Desktop/ChipsAIHackathon/src/kws/optimize/distill.py", line 61, in distillation_fingerprint
+    file_sha256(student_checkpoint) if student_checkpoint else None
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Users/vishy/Desktop/ChipsAIHackathon/src/kws/optimize/kd.py", line 35, in file_sha256
+    with Path(path).open("rb") as file:
+         ~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/vishy/.pyenv/versions/3.13.11/lib/python3.13/pathlib/_local.py", line 537, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'models/checkpoints/ds_cnn_xs_12class.pt'

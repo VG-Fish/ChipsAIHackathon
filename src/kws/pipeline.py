@@ -148,7 +148,8 @@ def stage_teacher(config: dict, *, force: bool) -> dict:
             )
         logger.info(
             "Stage 1: reusing teacher %s (val_acc=%s)",
-            checkpoint, existing.get("val_acc"),
+            checkpoint,
+            existing.get("val_acc"),
         )
         model = build_ds_cnn(
             existing["model_cfg"],
@@ -173,10 +174,27 @@ def stage_teacher(config: dict, *, force: bool) -> dict:
     return {"status": "trained", "checkpoint": str(checkpoint), "val_acc": val_acc}
 
 
+def _resolve_optional_checkpoint(path: str | None) -> str | None:
+    """Use a configured warm start only when its artifact is available."""
+    if not path:
+        return None
+    if Path(path).is_file():
+        return path
+    logger.warning(
+        "Configured optional student warm-start checkpoint %s is missing; "
+        "training the student from scratch",
+        path,
+    )
+    return None
+
+
 def stage_student(config: dict, *, force: bool) -> dict:
-    """Step 2: distill the fixed teacher into the deployment-shaped student."""
+    """Step 2: distill the fixed teacher into the deployment student."""
     student_cfg = config["student"]
     checkpoint = Path(student_cfg["checkpoint"])
+    warm_start_checkpoint = _resolve_optional_checkpoint(
+        student_cfg.get("warm_start_checkpoint")
+    )
     student_model_cfg = load_yaml(student_cfg["model_config"])
     student_data_cfg = load_yaml(config["data_config"])
     student_train_cfg = load_yaml(student_cfg["train_config"])
@@ -185,7 +203,7 @@ def stage_student(config: dict, *, force: bool) -> dict:
         student_model_cfg,
         student_data_cfg,
         student_train_cfg,
-        student_cfg.get("warm_start_checkpoint"),
+        warm_start_checkpoint,
     )
     if checkpoint.exists() and not force:
         existing = torch.load(checkpoint, map_location="cpu", weights_only=False)
@@ -212,9 +230,7 @@ def stage_student(config: dict, *, force: bool) -> dict:
                 f"{recorded_teacher_sha!r}, expected {expected_teacher_sha!r}; "
                 "re-distill it with --force"
             )
-        recorded_recipe = (existing.get("distillation") or {}).get(
-            "recipe_fingerprint"
-        )
+        recorded_recipe = (existing.get("distillation") or {}).get("recipe_fingerprint")
         if recorded_recipe != expected_recipe:
             raise ValueError(
                 f"student checkpoint {checkpoint} has recipe fingerprint "
@@ -223,7 +239,8 @@ def stage_student(config: dict, *, force: bool) -> dict:
             )
         logger.info(
             "Stage 2: reusing distilled student %s (val_acc=%s)",
-            checkpoint, existing.get("val_acc"),
+            checkpoint,
+            existing.get("val_acc"),
         )
         return {
             "status": "reused",
@@ -236,7 +253,8 @@ def stage_student(config: dict, *, force: bool) -> dict:
 
     logger.info(
         "Stage 2: distilling %s -> %s",
-        config["teacher"]["checkpoint"], student_cfg["model_config"],
+        config["teacher"]["checkpoint"],
+        student_cfg["model_config"],
     )
     val_acc = distill(
         config["teacher"]["checkpoint"],
@@ -244,7 +262,7 @@ def stage_student(config: dict, *, force: bool) -> dict:
         student_data_cfg,
         student_train_cfg,
         checkpoint,
-        student_checkpoint=student_cfg.get("warm_start_checkpoint"),
+        student_checkpoint=warm_start_checkpoint,
     )
     return {
         "status": "distilled",
@@ -357,12 +375,17 @@ def select_deployment_candidate(sweep: dict, config: dict) -> dict:
         chosen = min(frontier, key=lambda point: point["costs"][select_by])
     logger.info(
         "Selected %s off the frontier by %s: accuracy %.4f, costs %s",
-        chosen["label"], select_by, chosen["accuracy"], chosen["costs"],
+        chosen["label"],
+        select_by,
+        chosen["accuracy"],
+        chosen["costs"],
     )
     return chosen
 
 
-def load_candidate_model(candidate: dict, config: dict) -> tuple[torch.nn.Module, tuple[int, int], int]:
+def load_candidate_model(
+    candidate: dict, config: dict
+) -> tuple[torch.nn.Module, tuple[int, int], int]:
     """Rebuild the selected candidate's deployment graph.
 
     The dendritic graph is PerforatedAI's clean export, whose architecture is
@@ -406,7 +429,10 @@ def load_candidate_model(candidate: dict, config: dict) -> tuple[torch.nn.Module
             "content provenance; rerun the sparsity stage"
         )
     recorded_teacher = metadata.get("teacher_checkpoint")
-    if recorded_teacher is not None and recorded_teacher != config["teacher"]["checkpoint"]:
+    if (
+        recorded_teacher is not None
+        and recorded_teacher != config["teacher"]["checkpoint"]
+    ):
         raise ValueError(
             f"candidate {save_name!r} used teacher {recorded_teacher!r}, "
             f"not the configured teacher {config['teacher']['checkpoint']!r}"
@@ -536,9 +562,13 @@ def stage_cluster(
             else None
         ),
     )
-    learned = codebook_finetune(model, train_loader, val_loader, device, train_cfg, kd=kd)
+    learned = codebook_finetune(
+        model, train_loader, val_loader, device, train_cfg, kd=kd
+    )
     projector = bake_codebooks(model, bits=spec.bits)
-    artifact_path = Path(cluster_cfg.get("checkpoint", "models/exported/kws_clustered.pt"))
+    artifact_path = Path(
+        cluster_cfg.get("checkpoint", "models/exported/kws_clustered.pt")
+    )
     save_clustered_model(
         model,
         projector,
@@ -667,7 +697,13 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
         teacher_report = stage_teacher(config, force=force)
         report["stages"]["1_teacher"] = teacher_report
         if force or teacher_report.get("status") != "reused":
-            for stage in ("2_student", "3_sparsity", "4_cluster", "5_quantize", "6_benchmark"):
+            for stage in (
+                "2_student",
+                "3_sparsity",
+                "4_cluster",
+                "5_quantize",
+                "6_benchmark",
+            ):
                 report["stages"].pop(stage, None)
         checkpoint_report()
     if "student" in stages:
@@ -681,7 +717,11 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
         old_sweep = report["stages"].get("3_sparsity")
         new_sweep = stage_sparsity(config, force=force)
         report["stages"]["3_sparsity"] = new_sweep
-        if force or not old_sweep or old_sweep.get("fingerprint") != new_sweep.get("fingerprint"):
+        if (
+            force
+            or not old_sweep
+            or old_sweep.get("fingerprint") != new_sweep.get("fingerprint")
+        ):
             for stage in ("4_cluster", "5_quantize", "6_benchmark"):
                 report["stages"].pop(stage, None)
         checkpoint_report()

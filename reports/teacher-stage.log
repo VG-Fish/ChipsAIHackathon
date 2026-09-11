@@ -1,0 +1,68 @@
+Building dendrites with Perforated Backpropagation
+2026-09-11 04:55:38,264 [INFO] __main__: Stage 1: training teacher configs/model/ds_cnn_l.yaml
+2026-09-11 04:55:39,208 [INFO] kws.train: Model ds_cnn_l: 469604 params, input_shape=(40, 101), num_classes=12
+2026-09-11 04:55:39,209 [WARNING] kws.data.loader: macOS DataLoader workers are disabled because this PyTorch build cannot start torch_shm_manager reliably; using num_workers=0
+2026-09-11 04:55:39,209 [WARNING] kws.data.loader: macOS DataLoader workers are disabled because this PyTorch build cannot start torch_shm_manager reliably; using num_workers=0
+2026-09-11 04:55:39,209 [INFO] kws.train: DataLoader workers=0 persistent=False prefetch_factor=None
+2026-09-11 04:58:49,073 [INFO] kws.train: ds_cnn_l epoch 1/40 train_loss=2.1788 val_loss=1.4593 val_acc=0.6750
+2026-09-11 04:58:49,093 [INFO] kws.train: Saved new best checkpoint (val_acc=0.6750) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:02:02,753 [INFO] kws.train: ds_cnn_l epoch 2/40 train_loss=1.3370 val_loss=0.9619 val_acc=0.8590
+2026-09-11 05:02:02,771 [INFO] kws.train: Saved new best checkpoint (val_acc=0.8590) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:05:08,043 [INFO] kws.train: ds_cnn_l epoch 3/40 train_loss=1.0693 val_loss=0.7838 val_acc=0.9350
+2026-09-11 05:05:08,059 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9350) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:08:03,005 [INFO] kws.train: ds_cnn_l epoch 4/40 train_loss=0.9893 val_loss=0.7779 val_acc=0.9458
+2026-09-11 05:08:03,021 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9458) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:10:56,829 [INFO] kws.train: ds_cnn_l epoch 5/40 train_loss=0.9460 val_loss=0.7531 val_acc=0.9510
+2026-09-11 05:10:56,846 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9510) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:13:50,138 [INFO] kws.train: ds_cnn_l epoch 6/40 train_loss=0.9156 val_loss=0.7441 val_acc=0.9483
+2026-09-11 05:17:57,031 [INFO] kws.train: ds_cnn_l epoch 7/40 train_loss=0.8975 val_loss=0.7291 val_acc=0.9541
+2026-09-11 05:17:57,048 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9541) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:20:48,732 [INFO] kws.train: ds_cnn_l epoch 8/40 train_loss=0.8821 val_loss=0.6949 val_acc=0.9556
+2026-09-11 05:20:48,749 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9556) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:23:40,844 [INFO] kws.train: ds_cnn_l epoch 9/40 train_loss=0.8614 val_loss=0.6912 val_acc=0.9572
+2026-09-11 05:23:40,861 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9572) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:26:33,144 [INFO] kws.train: ds_cnn_l epoch 10/40 train_loss=0.8542 val_loss=0.6853 val_acc=0.9581
+2026-09-11 05:26:33,160 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9581) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:29:22,765 [INFO] kws.train: ds_cnn_l epoch 11/40 train_loss=0.8454 val_loss=0.6749 val_acc=0.9657
+2026-09-11 05:29:22,782 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9657) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:32:12,950 [INFO] kws.train: ds_cnn_l epoch 12/40 train_loss=0.8343 val_loss=0.6726 val_acc=0.9634
+2026-09-11 05:35:03,276 [INFO] kws.train: ds_cnn_l epoch 13/40 train_loss=0.8235 val_loss=0.6593 val_acc=0.9639
+2026-09-11 05:37:53,199 [INFO] kws.train: ds_cnn_l epoch 14/40 train_loss=0.8138 val_loss=0.6542 val_acc=0.9670
+2026-09-11 05:37:53,216 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9670) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:40:42,572 [INFO] kws.train: ds_cnn_l epoch 15/40 train_loss=0.8093 val_loss=0.6517 val_acc=0.9668
+2026-09-11 05:43:31,785 [INFO] kws.train: ds_cnn_l epoch 16/40 train_loss=0.8069 val_loss=0.6451 val_acc=0.9689
+2026-09-11 05:43:31,803 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9689) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:46:21,083 [INFO] kws.train: ds_cnn_l epoch 17/40 train_loss=0.7972 val_loss=0.6508 val_acc=0.9680
+2026-09-11 05:49:10,275 [INFO] kws.train: ds_cnn_l epoch 18/40 train_loss=0.7903 val_loss=0.6406 val_acc=0.9686
+2026-09-11 05:51:59,612 [INFO] kws.train: ds_cnn_l epoch 19/40 train_loss=0.7865 val_loss=0.6405 val_acc=0.9699
+2026-09-11 05:51:59,628 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9699) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:54:48,831 [INFO] kws.train: ds_cnn_l epoch 20/40 train_loss=0.7830 val_loss=0.6476 val_acc=0.9703
+2026-09-11 05:54:48,848 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9703) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 05:57:38,225 [INFO] kws.train: ds_cnn_l epoch 21/40 train_loss=0.7762 val_loss=0.6348 val_acc=0.9699
+2026-09-11 06:00:27,620 [INFO] kws.train: ds_cnn_l epoch 22/40 train_loss=0.7694 val_loss=0.6302 val_acc=0.9722
+2026-09-11 06:00:27,637 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9722) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:03:17,232 [INFO] kws.train: ds_cnn_l epoch 23/40 train_loss=0.7682 val_loss=0.6314 val_acc=0.9728
+2026-09-11 06:03:17,250 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9728) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:06:06,748 [INFO] kws.train: ds_cnn_l epoch 24/40 train_loss=0.7620 val_loss=0.6305 val_acc=0.9709
+2026-09-11 06:08:56,336 [INFO] kws.train: ds_cnn_l epoch 25/40 train_loss=0.7613 val_loss=0.6239 val_acc=0.9740
+2026-09-11 06:08:56,353 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9740) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:11:46,050 [INFO] kws.train: ds_cnn_l epoch 26/40 train_loss=0.7499 val_loss=0.6266 val_acc=0.9753
+2026-09-11 06:11:46,067 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9753) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:14:35,579 [INFO] kws.train: ds_cnn_l epoch 27/40 train_loss=0.7524 val_loss=0.6251 val_acc=0.9724
+2026-09-11 06:17:25,163 [INFO] kws.train: ds_cnn_l epoch 28/40 train_loss=0.7481 val_loss=0.6213 val_acc=0.9738
+2026-09-11 06:20:14,644 [INFO] kws.train: ds_cnn_l epoch 29/40 train_loss=0.7435 val_loss=0.6195 val_acc=0.9765
+2026-09-11 06:20:14,661 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9765) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:23:04,275 [INFO] kws.train: ds_cnn_l epoch 30/40 train_loss=0.7403 val_loss=0.6178 val_acc=0.9755
+2026-09-11 06:25:53,893 [INFO] kws.train: ds_cnn_l epoch 31/40 train_loss=0.7396 val_loss=0.6167 val_acc=0.9749
+2026-09-11 06:28:43,443 [INFO] kws.train: ds_cnn_l epoch 32/40 train_loss=0.7340 val_loss=0.6141 val_acc=0.9763
+2026-09-11 06:31:33,015 [INFO] kws.train: ds_cnn_l epoch 33/40 train_loss=0.7347 val_loss=0.6161 val_acc=0.9765
+2026-09-11 06:34:22,534 [INFO] kws.train: ds_cnn_l epoch 34/40 train_loss=0.7326 val_loss=0.6156 val_acc=0.9776
+2026-09-11 06:34:22,551 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9776) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:37:12,169 [INFO] kws.train: ds_cnn_l epoch 35/40 train_loss=0.7297 val_loss=0.6145 val_acc=0.9778
+2026-09-11 06:37:12,186 [INFO] kws.train: Saved new best checkpoint (val_acc=0.9778) -> models/checkpoints/ds_cnn_l_12class.pt
+2026-09-11 06:40:01,758 [INFO] kws.train: ds_cnn_l epoch 36/40 train_loss=0.7330 val_loss=0.6162 val_acc=0.9769
+2026-09-11 06:42:51,248 [INFO] kws.train: ds_cnn_l epoch 37/40 train_loss=0.7305 val_loss=0.6146 val_acc=0.9772
+2026-09-11 06:45:40,742 [INFO] kws.train: ds_cnn_l epoch 38/40 train_loss=0.7287 val_loss=0.6143 val_acc=0.9772
+2026-09-11 06:48:30,250 [INFO] kws.train: ds_cnn_l epoch 39/40 train_loss=0.7279 val_loss=0.6151 val_acc=0.9765
+2026-09-11 06:51:19,829 [INFO] kws.train: ds_cnn_l epoch 40/40 train_loss=0.7271 val_loss=0.6142 val_acc=0.9763
+2026-09-11 06:51:19,834 [INFO] __main__: Pipeline report written to reports/pipeline/pipeline.yaml
