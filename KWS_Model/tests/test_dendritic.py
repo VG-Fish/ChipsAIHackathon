@@ -253,3 +253,51 @@ def test_an_unreadable_pai_mode_leaves_requires_grad_alone():
 
     assert mode == "?"
     assert {name: p.requires_grad for name, p in model.named_parameters()} == original
+
+
+def test_pai_optimizer_keeps_kd_adapter_outside_pai_parameter_filter(monkeypatch):
+    from kws.optimize import dendritic
+
+    class FakeTracker:
+        def set_optimizer_instance(self, optimizer):
+            self.optimizer = optimizer
+
+    class FakeKD:
+        def __init__(self):
+            self.adapter = torch.nn.Linear(2, 3, bias=False)
+
+        def extra_parameters(self):
+            return list(self.adapter.parameters())
+
+    tracker = FakeTracker()
+    monkeypatch.setattr(dendritic.GPA, "pai_tracker", tracker)
+    model = torch.nn.Linear(2, 2)
+    kd = FakeKD()
+    train_cfg = {
+        "lr": 0.001,
+        "weight_decay": 0.0001,
+        "warmup_fraction": 0.05,
+        "epochs": 2,
+        "dendritic_schedule_epochs": 2,
+    }
+
+    optimizer, _, adapter_optimizer, _ = dendritic._make_optimizer_and_scheduler(
+        model, train_cfg, loader_length=4, kd=kd
+    )
+
+    model_parameter_ids = {id(parameter) for parameter in model.parameters()}
+    adapter_parameter_ids = {id(parameter) for parameter in kd.extra_parameters()}
+    pai_parameter_ids = {
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    adapter_optimizer_ids = {
+        id(parameter)
+        for group in adapter_optimizer.param_groups
+        for parameter in group["params"]
+    }
+
+    assert tracker.optimizer is optimizer
+    assert pai_parameter_ids == model_parameter_ids
+    assert adapter_optimizer_ids == adapter_parameter_ids

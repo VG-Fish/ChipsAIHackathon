@@ -659,11 +659,11 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
 
 
 def _make_optimizer_and_scheduler(model, train_cfg: dict, loader_length: int, *, kd=None):
+    # PerforatedAI must own an optimizer containing only parameters from its
+    # wrapped/tracked model. A KD feature adapter is a separate, training-only
+    # module, so putting it in this optimizer makes PAI's parameter filter enter
+    # its interactive debugger because the adapter has no PAI parameter_type.
     parameters = list(model.parameters())
-    if kd is not None:
-        # The feature adapter is a training-only projection; it has to be
-        # optimized alongside the student or the feature loss cannot descend.
-        parameters += list(kd.extra_parameters())
     optimizer = torch.optim.AdamW(
         parameters,
         lr=train_cfg["lr"],
@@ -676,7 +676,25 @@ def _make_optimizer_and_scheduler(model, train_cfg: dict, loader_length: int, *,
         train_cfg["warmup_fraction"],
     )
     GPA.pai_tracker.set_optimizer_instance(optimizer)
-    return optimizer, scheduler
+
+    adapter_optimizer = None
+    adapter_scheduler = None
+    if kd is not None:
+        adapter_parameters = list(kd.extra_parameters())
+        if adapter_parameters:
+            adapter_optimizer = torch.optim.AdamW(
+                adapter_parameters,
+                lr=train_cfg["lr"],
+                weight_decay=train_cfg["weight_decay"],
+            )
+            adapter_scheduler = build_lr_scheduler(
+                adapter_optimizer,
+                int(train_cfg.get("dendritic_schedule_epochs", train_cfg["epochs"]))
+                * loader_length,
+                train_cfg["warmup_fraction"],
+            )
+
+    return optimizer, scheduler, adapter_optimizer, adapter_scheduler
 
 
 def run_cycle(
@@ -813,7 +831,12 @@ def run_cycle(
         )
 
     criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
-    optimizer, scheduler = _make_optimizer_and_scheduler(
+    (
+        optimizer,
+        scheduler,
+        adapter_optimizer,
+        adapter_scheduler,
+    ) = _make_optimizer_and_scheduler(
         model, train_cfg, len(train_loader), kd=kd
     )
 
@@ -842,6 +865,8 @@ def run_cycle(
         for features, labels in train_loader:
             features, labels = features.to(device), labels.to(device)
             optimizer.zero_grad()
+            if adapter_optimizer is not None:
+                adapter_optimizer.zero_grad()
             if kd is None:
                 logits = model(features)
                 loss = criterion(logits, labels)
@@ -857,7 +882,11 @@ def run_cycle(
                 loss = kd(features, logits, labels, student_features)["total"]
             loss.backward()
             optimizer.step()
+            if adapter_optimizer is not None:
+                adapter_optimizer.step()
             scheduler.step()
+            if adapter_scheduler is not None:
+                adapter_scheduler.step()
             running_loss += loss.item() * labels.size(0)
             train_correct += (logits.argmax(dim=1) == labels).sum().item()
             train_count += labels.size(0)
@@ -910,7 +939,12 @@ def run_cycle(
             break
         if restructured:
             logger.info("PAI restructured the network; resetting optimizer phase")
-            optimizer, scheduler = _make_optimizer_and_scheduler(
+            (
+                optimizer,
+                scheduler,
+                adapter_optimizer,
+                adapter_scheduler,
+            ) = _make_optimizer_and_scheduler(
                 model, train_cfg, len(train_loader), kd=kd
             )
 
