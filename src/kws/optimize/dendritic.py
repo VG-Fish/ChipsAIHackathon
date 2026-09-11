@@ -72,8 +72,9 @@ def build_cycle_base(
 def estimate_one_dendrite_params(model: nn.Module) -> int:
     """Estimate deployed parameters after one dendrite on blocks and head.
 
-    Each selected module is copied once and gains one scalar connection per
-    output channel. PAI's temporary candidates and scaffolding are excluded.
+    Each selected module is copied once. PAI folds its branch connections
+    during deployment cleanup, so temporary candidates and connection
+    scaffolding are excluded from the deployed parameter count.
     """
     selected_modules = [*model.blocks, model.fc]
     dendrite_params = sum(
@@ -81,16 +82,9 @@ def estimate_one_dendrite_params(model: nn.Module) -> int:
         for module in selected_modules
         for parameter in module.parameters()
     )
-    connection_params = sum(
-        module.pointwise.out_channels
-        if isinstance(module, DSConvBlock)
-        else module.out_features
-        for module in selected_modules
-    )
     return (
         sum(parameter.numel() for parameter in model.parameters())
         + dendrite_params
-        + connection_params
     )
 
 
@@ -272,7 +266,7 @@ def main() -> None:
         "--checkpoint",
         default="models/checkpoints/ds_cnn_xs_distilled_warm.pt",
     )
-    parser.add_argument("--save-name", default="dendritic_cycle1_debug")
+    parser.add_argument("--save-name", default="dendritic_xxs_cycle1")
     args = parser.parse_args()
 
     run_cycle(

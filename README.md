@@ -20,17 +20,16 @@ numbers (~3,800 parameters, ~92% accuracy) are the target this project is
 measured against for the final, dendrite-compressed model.
 
 The first size-focused dendrite cycle starts from the warm-distilled XS model,
-prunes it to a 1,716-parameter XXS base, and initially runs PerforatedAI's
-capacity check on its complete depthwise-separable blocks and classifier:
+prunes it to a 1,716-parameter XXS base, and runs PerforatedAI on its complete
+depthwise-separable blocks and classifier:
 
 ```bash
 uv run python -m kws.optimize.dendritic
 ```
 
-The capacity check uses validation accuracy only. After it reports that three
-dendrites were added successfully, set `testing_dendrite_capacity: false` in
-`configs/train/dendritic_cycle1.yaml` and use a new `--save-name` for the full
-one-dendrite experiment.
+The three-dendrite capacity check has passed. The checked-in configuration is
+the full one-dendrite experiment and uses validation accuracy only for model
+selection.
 
 ## Status
 

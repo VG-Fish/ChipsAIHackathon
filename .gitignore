@@ -13,6 +13,7 @@ models/checkpoints/
 models/exported/
 reports/*.png
 reports/*.json
+dendritic_*/
 
 .DS_Store
 :memory:.ses

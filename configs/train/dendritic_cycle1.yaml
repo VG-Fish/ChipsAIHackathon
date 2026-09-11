@@ -3,9 +3,9 @@
 # Start from the warm-distilled XS checkpoint and structurally prune its two
 # pointwise channel widths from 40 to 18 (3,850 -> 1,716 parameters). Perforate
 # both complete depthwise-separable blocks and the classifier, but leave the
-# stem unchanged. One deployed dendrite is estimated at 2,988 parameters.
-# The initial capacity check temporarily exercises three dendrites; switch this
-# flag to false only after that check succeeds.
+# stem unchanged. PAI's capacity check measured one deployed dendrite at 2,946
+# parameters. The initial three-dendrite capacity check completed successfully;
+# this configuration now runs the real one-dendrite experiment.
 augment: true
 epochs: 40
 batch_size: 128
@@ -27,7 +27,7 @@ pruning:
   keep_ratio: 0.45
 
 perforatedai:
-  testing_dendrite_capacity: true
+  testing_dendrite_capacity: false
   max_dendrites: 1
   n_epochs_to_switch: 25
   improvement_threshold: [0.001, 0.0001, 0.0]

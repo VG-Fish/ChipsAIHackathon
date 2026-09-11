@@ -39,7 +39,7 @@ def test_cycle1_base_hits_expected_size_and_widths(tmp_path):
     assert model_cfg["name"] == "ds_cnn_xxs"
     assert model_cfg["block_channels"] == [18, 18]
     assert sum(parameter.numel() for parameter in model.parameters()) == 1716
-    assert estimate_one_dendrite_params(model) == 2988
+    assert estimate_one_dendrite_params(model) == 2946
 
     model.eval()
     with torch.no_grad():
