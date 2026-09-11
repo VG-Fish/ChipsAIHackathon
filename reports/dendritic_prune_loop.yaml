@@ -1,0 +1,22 @@
+status: running
+selection_split: validation
+test_split_used: false
+source_checkpoint: models/checkpoints/ds_cnn_xs_distilled_warm.pt
+source_block_width: 40
+minimum_validation_accuracy: 0.9
+maximum_accuracy_drop: null
+candidates:
+- &id001
+  save_name: dendritic_xxs_cycle1
+  block_channels:
+  - 18
+  - 18
+  base_params: 1716
+  deployed_params: 2946
+  best_val_acc: 0.9186757826556315
+  epochs: 852
+  elapsed_seconds: 0.0
+  accepted: true
+  reason: validation objective satisfied
+last_accepted: *id001
+stopped_on: null
