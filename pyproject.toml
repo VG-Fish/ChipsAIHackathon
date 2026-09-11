@@ -15,6 +15,7 @@ dependencies = [
     "tensorboard",
     "thop",
     "torch",
+    "torchao>=0.18.0",
     "torchaudio",
     "torchinfo",
 ]

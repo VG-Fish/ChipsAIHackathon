@@ -1,15 +1,26 @@
-"""Run one size-focused PerforatedAI dendrite cycle on a pruned DS-CNN.
+"""Framework steps 3c-3e: the perforation/dendrite phase and its KD resume.
 
-The first cycle starts from the trained XS checkpoint, removes channels to
-form a 1,716-parameter XXS base model, and perforates its two complete
-depthwise-separable blocks plus its classifier. PAI's validation tracker
-controls neuron/dendrite phase changes; the test split is never loaded or
-consulted by this module.
+One candidate enters here already pruned and KD-fine-tuned (steps 3a-3b) and
+leaves with a recorded accuracy and deployment cost. In between:
+
+- **3c, perforation.** PerforatedAI freezes the base weights, trains candidate
+  dendritic residual nodes against the residual correlation, then selects the
+  useful ones and freezes them into the network. The phase trail this module
+  records makes that freeze/select/freeze cycle auditable after the fact rather
+  than taking the library's word for it.
+- **3d, resume.** The dendrites are fixed; the base student weights are not yet
+  adapted to them. So the clean deployment graph resumes KD fine-tuning on its
+  active parameters, with the same fixed teacher used everywhere else.
+- **3e, record.** Validation accuracy plus latency, memory, and compute, so the
+  step-3f Pareto rule has all four axes to compare candidates on.
+
+The test split is never loaded or consulted by this module.
 """
 
 import argparse
 import csv
-from dataclasses import asdict, dataclass
+import hashlib
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import monotonic
 
@@ -24,13 +35,62 @@ from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
 from kws.models.layers import DSConvBlock
+from kws.optimize.kd import (
+    DistillationCriterion,
+    FrozenTeacher,
+    KDWeights,
+    file_sha256,
+    supports_pooled_features,
+)
 from kws.optimize.prune import prune_ds_cnn
-from kws.train import build_lr_scheduler, evaluate_loss_acc
+from kws.train import (
+    build_lr_scheduler,
+    evaluate_loss_acc,
+    keep_frozen_batchnorm_eval,
+    run_finetune,
+    set_train_mode_preserving_frozen_batchnorm,
+    train_model,
+)
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
+from kws.utils.profile import profile_model
 from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
+
+FRAMEWORK_CYCLE_VERSION = 2
+
+
+def cycle_fingerprint(
+    checkpoint_path: str,
+    teacher_checkpoint: str | None,
+    data_cfg: dict,
+    model_cfg: dict,
+    train_cfg: dict,
+) -> str:
+    """Stable identity for every input that can change one candidate run."""
+    encoded = yaml.safe_dump(
+        {
+            "framework_cycle_version": FRAMEWORK_CYCLE_VERSION,
+            "checkpoint_path": checkpoint_path,
+            "checkpoint_sha256": file_sha256(checkpoint_path),
+            "teacher_checkpoint": teacher_checkpoint,
+            "teacher_sha256": (
+                file_sha256(teacher_checkpoint) if teacher_checkpoint else None
+            ),
+            "data": data_cfg,
+            "model": model_cfg,
+            "train": train_cfg,
+        },
+        sort_keys=True,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+# Parameters PerforatedAI adds are named for the structure they belong to.
+# Classifying by name is what lets the phase trail below separate "base student
+# weights" from "dendritic residual nodes" without depending on PAI internals.
+DENDRITE_PARAMETER_MARKERS = ("dendrite", "candidate", "to_top", "pb_")
 
 
 @dataclass(frozen=True)
@@ -44,6 +104,12 @@ class DendriticCycleResult:
     best_val_acc: float
     epochs: int
     elapsed_seconds: float
+    pai_deployed_params: int | None = None
+    cost: dict | None = None
+    distillation: dict | None = None
+    resume: dict | None = None
+    prune_finetune: dict | None = None
+    phase_trail: list[dict] = field(default_factory=list)
 
 
 def load_yaml(path: str) -> dict:
@@ -221,6 +287,330 @@ def export_final_pai_model(model: nn.Module, save_name: str) -> nn.Module:
     return clean_model
 
 
+def ensure_clean_dendrite_skip_weights(
+    model: nn.Module,
+    state_dict: dict[str, torch.Tensor],
+) -> None:
+    """Add PAI's optional clean-graph skip coefficients before loading a state.
+
+    PAI omits ``skip_weights`` when cleaning a module with one dendrite, while
+    :func:`export_final_pai_model` restores those coefficients because they are
+    part of the deployed residual computation.  A later process reconstructs
+    the graph through PAI's loader, so it must recreate the optional
+    ``ParameterList`` before loading either the clean artifact or the resumed
+    KD checkpoint.  The helper is deliberately driven by the checkpoint keys,
+    which keeps old PAI artifacts without skip coefficients loadable too.
+    """
+    device = next(model.parameters()).device
+    grouped: dict[str, list[tuple[int, torch.Tensor]]] = {}
+    marker = ".skip_weights."
+    for key, tensor in state_dict.items():
+        if marker not in key:
+            continue
+        module_name, index_text = key.rsplit(marker, 1)
+        if not index_text.isdigit():
+            continue
+        grouped.setdefault(module_name, []).append((int(index_text), tensor))
+
+    for module_name, entries in grouped.items():
+        try:
+            module = model.get_submodule(module_name)
+        except AttributeError as exc:
+            raise RuntimeError(
+                f"clean checkpoint references missing PAI module {module_name!r}"
+            ) from exc
+        if not hasattr(module, "skip_weights"):
+            module.skip_weights = nn.ParameterList()
+        skip_weights = module.skip_weights
+        for index, tensor in sorted(entries):
+            while len(skip_weights) <= index:
+                skip_weights.append(
+                    nn.Parameter(
+                        torch.zeros_like(tensor, device=device),
+                        requires_grad=False,
+                    )
+                )
+            if skip_weights[index].shape != tensor.shape:
+                raise RuntimeError(
+                    f"skip coefficient shape mismatch for {module_name!r}: "
+                    f"{skip_weights[index].shape} != {tensor.shape}"
+                )
+            skip_weights[index].requires_grad_(False)
+
+
+def _is_dendrite_parameter(name: str, model: nn.Module | None = None) -> bool:
+    """Recognize PAI residual parameters in both training and clean graphs.
+
+    PAI uses different names before and after cleanup. During training a
+    residual lives below ``dendrite_module`` (while its
+    ``dendrite_module.parent_module`` is still the base). In the clean graph,
+    the selected dendrites are ``layer_array[:-1]`` and the original base
+    module is ``layer_array[-1]``. The module is needed to distinguish the
+    last branch from a dendrite when more than one branch is present.
+    """
+    parts = name.lower().split(".")
+    if "dendrites_to_top" in parts or "skip_weights" in parts:
+        return True
+
+    for index, part in enumerate(parts):
+        if part == "layer_array" and index + 1 < len(parts):
+            branch = parts[index + 1]
+            if branch.isdigit():
+                branch_index = int(branch)
+                if model is not None:
+                    array_name = ".".join(parts[: index + 1])
+                    try:
+                        layer_array = model.get_submodule(array_name)
+                    except AttributeError:
+                        layer_array = None
+                    if layer_array is not None and hasattr(layer_array, "__len__"):
+                        return branch_index < len(layer_array) - 1
+                # The only safe name-only assumption is the one-dendrite
+                # deployment used by this cycle: branch zero is residual.
+                return branch_index == 0
+        if part == "dendrite_module":
+            # PAI stores the original neuron under this wrapper as
+            # ``dendrite_module.parent_module``. That subtree remains base.
+            return "parent_module" not in parts[index + 1:]
+
+    lowered = name.lower()
+    return any(marker in lowered for marker in DENDRITE_PARAMETER_MARKERS)
+
+
+def current_pai_mode(default: str = "?") -> str:
+    """PerforatedAI's current phase: ``n`` = neuron training, ``p`` = dendrite.
+
+    Read defensively: the tracker's internals are not a public API, and the
+    phase trail is diagnostic, so an unreadable mode must not end a run.
+    """
+    try:
+        return str(GPA.pai_tracker.member_vars["mode"])
+    except Exception:  # noqa: BLE001 - diagnostics must never break training
+        return default
+
+
+def describe_learning_phase(model: nn.Module) -> dict:
+    """Which parameters are frozen right now, split into base vs dendritic.
+
+    Step 3c requires the base weights to be frozen while dendrites train. PAI
+    does that freezing itself; this reports what actually happened so the claim
+    is checkable in the run record instead of assumed.
+    """
+    groups = {
+        "base": {"trainable": 0, "frozen": 0},
+        "dendrite": {"trainable": 0, "frozen": 0},
+    }
+    for name, parameter in model.named_parameters():
+        group = "dendrite" if _is_dendrite_parameter(name, model) else "base"
+        key = "trainable" if parameter.requires_grad else "frozen"
+        groups[group][key] += parameter.numel()
+    return {
+        "mode": current_pai_mode(),
+        "total_params": UPA.count_params(model),
+        **groups,
+    }
+
+
+def enforce_base_weight_freeze(model: nn.Module) -> int:
+    """Freeze every non-dendritic parameter; return how many were still live.
+
+    Belt and braces over PAI's own freezing: if a future release leaves a base
+    tensor trainable during the dendrite phase, the dendrites would learn
+    against a moving target and the correlation scores that select them would
+    be measuring the wrong thing.
+    """
+    frozen = 0
+    for name, parameter in model.named_parameters():
+        if not _is_dendrite_parameter(name, model) and parameter.requires_grad:
+            parameter.requires_grad = False
+            frozen += parameter.numel()
+    return frozen
+
+
+def restore_base_weight_training(model: nn.Module) -> int:
+    """Re-enable the base weights; the counterpart to the dendrite-phase freeze.
+
+    Enforcing the freeze without this would leave the base permanently frozen
+    after the first dendrite phase, and neuron mode would train nothing.
+    """
+    restored = 0
+    for name, parameter in model.named_parameters():
+        if not _is_dendrite_parameter(name, model) and not parameter.requires_grad:
+            parameter.requires_grad = True
+            restored += parameter.numel()
+    return restored
+
+
+def apply_phase_freezing(model: nn.Module) -> str:
+    """Set requires_grad to match PerforatedAI's current phase.
+
+    Neuron mode trains the base; dendrite mode holds it still while candidates
+    are scored. PAI sets this itself -- re-asserting it each epoch is what makes
+    step 3c's "freeze the relevant base weights" a property of this pipeline
+    rather than an assumption about the library. An unreadable mode changes
+    nothing, so a PAI internals change degrades to the library's own behaviour.
+    """
+    mode = current_pai_mode()
+    if mode == "p":
+        enforce_base_weight_freeze(model)
+    elif mode == "n":
+        restore_base_weight_training(model)
+    return mode
+
+
+def freeze_selected_dendrites(model: nn.Module) -> int:
+    """Freeze the dendrites PAI selected, leaving the base student active.
+
+    This is the boundary between steps 3c and 3d: the dendritic residual nodes
+    are settled, and the KD resume that follows adapts only the base student
+    parameters to them.
+    """
+    frozen = 0
+    for name, parameter in model.named_parameters():
+        if _is_dendrite_parameter(name, model) and parameter.requires_grad:
+            parameter.requires_grad = False
+            frozen += parameter.numel()
+    return frozen
+
+
+def resume_kd_finetune(
+    clean_model: nn.Module,
+    datasets,
+    train_cfg: dict,
+    device: torch.device,
+    teacher: FrozenTeacher,
+    input_shape: tuple[int, int],
+    save_name: str,
+    baseline_val_acc: float = 0.0,
+) -> dict:
+    """Framework step 3d: resume KD fine-tuning of the active student parameters.
+
+    The dendrites were selected and frozen against a base network that has not
+    seen them. Re-running the task + KD objective over the clean deployment
+    graph lets the base weights settle around the capacity the dendrites added,
+    and it runs on the exact graph that gets exported -- not on the PAI training
+    wrapper, whose extra scaffolding is gone by deployment.
+    """
+    epochs = int(train_cfg.get("resume_epochs", 0))
+    if epochs < 1:
+        return {"status": "skipped", "reason": "resume_epochs is not set"}
+
+    frozen_dendrites = freeze_selected_dendrites(clean_model)
+    active = [
+        parameter for parameter in clean_model.parameters() if parameter.requires_grad
+    ]
+    if not active:
+        return {
+            "status": "skipped",
+            "reason": "no active parameters remain after dendrite selection",
+        }
+
+    clean_model.to(device)
+    kd = DistillationCriterion(
+        teacher,
+        KDWeights.from_config(train_cfg.get("distillation")),
+        train_cfg["label_smoothing"],
+        device,
+        student_feature_dim=(
+            _clean_feature_dim(clean_model, input_shape)
+            if supports_pooled_features(clean_model, input_shape)
+            else None
+        ),
+    )
+    train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
+    val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
+
+    logger.info(
+        "Step 3d: resuming KD fine-tuning for %d epochs on %d active parameters "
+        "(%d dendrite parameters frozen)",
+        epochs,
+        sum(parameter.numel() for parameter in active),
+        frozen_dendrites,
+    )
+    initial_state = {
+        name: tensor.detach().cpu().clone()
+        for name, tensor in clean_model.state_dict().items()
+    }
+    best_state: dict[str, torch.Tensor] = {}
+
+    def keep_best(model, _val_acc):
+        best_state.clear()
+        best_state.update(
+            {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
+        )
+
+    result = run_finetune(
+        clean_model,
+        train_loader,
+        val_loader,
+        device,
+        train_cfg,
+        kd=kd,
+        parameters=active,
+        on_best=keep_best,
+        epochs=epochs,
+        label="resume-kd",
+    )
+    improved = result.best_val_acc > baseline_val_acc
+    if best_state and improved:
+        clean_model.load_state_dict(best_state)
+    elif not improved:
+        clean_model.load_state_dict(initial_state)
+
+    if not improved:
+        logger.info(
+            "Step 3d did not improve %.4f baseline (best %.4f); keeping the "
+            "pre-resume clean graph",
+            baseline_val_acc,
+            result.best_val_acc,
+        )
+        return {
+            "status": "no_improvement",
+            "epochs": epochs,
+            "best_val_acc": baseline_val_acc,
+            "resume_best_val_acc": result.best_val_acc,
+            "frozen_dendrite_params": frozen_dendrites,
+            "active_params": sum(parameter.numel() for parameter in active),
+            "distillation": kd.describe(),
+            "history": result.history,
+        }
+
+    path = Path(save_name) / "resumed_clean_pai.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_state_dict": clean_model.state_dict(),
+            "stage": "dendrite_kd_resume",
+            "val_acc": result.best_val_acc,
+            "input_shape": list(input_shape),
+            "num_classes": teacher.num_classes,
+            "num_keywords": teacher.num_keywords,
+            "teacher_checkpoint": teacher.checkpoint_path,
+            "distillation": kd.describe(),
+        },
+        path,
+    )
+    logger.info(
+        "Step 3d complete: val_acc %.4f -> %s", result.best_val_acc, path,
+    )
+    return {
+        "status": "complete",
+        "epochs": epochs,
+        "best_val_acc": result.best_val_acc,
+        "frozen_dendrite_params": frozen_dendrites,
+        "active_params": sum(parameter.numel() for parameter in active),
+        "distillation": kd.describe(),
+        "checkpoint": str(path),
+        "history": result.history,
+    }
+
+
+def _clean_feature_dim(model: nn.Module, input_shape: tuple[int, int]) -> int:
+    device = next(model.parameters()).device
+    with torch.no_grad():
+        return model.forward_features(torch.zeros(1, 1, *input_shape, device=device)).shape[1]
+
+
 def configure_perforatedai(config: dict, device: torch.device) -> None:
     """Apply the paper's size-focused, correlation-based PAI settings."""
     testing = config["testing_dendrite_capacity"]
@@ -255,15 +645,21 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     GPA.pc.set_silent(False)
 
 
-def _make_optimizer_and_scheduler(model, train_cfg: dict, loader_length: int):
+def _make_optimizer_and_scheduler(model, train_cfg: dict, loader_length: int, *, kd=None):
+    parameters = list(model.parameters())
+    if kd is not None:
+        # The feature adapter is a training-only projection; it has to be
+        # optimized alongside the student or the feature loss cannot descend.
+        parameters += list(kd.extra_parameters())
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        parameters,
         lr=train_cfg["lr"],
         weight_decay=train_cfg["weight_decay"],
     )
     scheduler = build_lr_scheduler(
         optimizer,
-        train_cfg["epochs"] * loader_length,
+        int(train_cfg.get("dendritic_schedule_epochs", train_cfg["epochs"]))
+        * loader_length,
         train_cfg["warmup_fraction"],
     )
     GPA.pai_tracker.set_optimizer_instance(optimizer)
@@ -276,32 +672,103 @@ def run_cycle(
     model_cfg: dict,
     train_cfg: dict,
     save_name: str,
+    *,
+    teacher_checkpoint: str | None = None,
 ) -> DendriticCycleResult:
-    """Run PAI's alternating neuron/dendrite phases using validation accuracy."""
+    """Run steps 3c-3e for one candidate: perforate, resume with KD, measure.
+
+    ``teacher_checkpoint`` is the same fixed teacher every other stage uses. If
+    it is omitted the cycle falls back to plain task loss, which is the older
+    behaviour and still useful for isolating the dendrites' own contribution.
+    """
     started_at = monotonic()
     set_seed(train_cfg["seed"])
+    pruning_kind = train_cfg.get("pruning", {}).get("kind", "structured")
+    if pruning_kind != "structured":
+        raise ValueError(
+            "The dendritic width sweep supports structured pruning only; "
+            f"use kws.optimize.prune for {pruning_kind!r}"
+        )
     device = get_device()
     base, checkpoint, model_cfg = build_cycle_base(
         checkpoint_path,
         train_cfg["pruning"]["keep_ratio"],
         target_model_cfg=model_cfg,
     )
+    # ``build_cycle_base`` deliberately constructs on CPU because checkpoints
+    # are device-neutral.  The pre-dendrite KD phase moves its batches to the
+    # selected accelerator, so the model must follow before that first forward.
+    base = base.to(device)
+    fingerprint = cycle_fingerprint(
+        checkpoint_path, teacher_checkpoint, data_cfg, model_cfg, train_cfg
+    )
     base_params = sum(parameter.numel() for parameter in base.parameters())
+    input_shape = tuple(checkpoint["input_shape"])
+    run_dir = Path(save_name)
+    run_dir.mkdir(parents=True, exist_ok=True)
     logger.info(
-        "Cycle-1 XXS base: %d params, estimated one-dendrite deployment: %d "
+        "Dendrite-cycle base: %d params, estimated one-dendrite deployment: %d "
         "params, block_channels=%s",
         base_params,
         estimate_one_dendrite_params(base),
         model_cfg["block_channels"],
     )
 
-    datasets, _ = build_datasets(
+    datasets, label_map = build_datasets(
         data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"]
     )
+
+    teacher = FrozenTeacher(teacher_checkpoint, device) if teacher_checkpoint else None
+
+    # Framework steps 3a-3b are intentionally a separate phase from PAI. The
+    # student first has to adapt to the structurally smaller graph with task +
+    # KD loss; otherwise the first PAI neuron phase is doing double duty and a
+    # run cannot prove that pruning itself was fine-tuned before perforation.
+    prune_finetune = {"status": "skipped", "reason": "no teacher supplied"}
+    if teacher is not None:
+        pre_checkpoint = run_dir / "pruned_kd.pt"
+        pre_kd = DistillationCriterion(
+            teacher,
+            KDWeights.from_config(train_cfg.get("distillation")),
+            train_cfg["label_smoothing"],
+            device,
+            student_feature_dim=base.fc.in_features,
+        )
+        pre_val_acc = train_model(
+            base,
+            datasets,
+            label_map,
+            model_cfg,
+            train_cfg,
+            pre_checkpoint,
+            device,
+            checkpoint["num_keywords"],
+            kd=pre_kd,
+            extra_checkpoint_fields={
+                "stage": "pruned_kd_finetune",
+                "sparsity": train_cfg.get("pruning"),
+                "distillation": pre_kd.describe(),
+            },
+        )
+        best_pruned = torch.load(pre_checkpoint, map_location=device, weights_only=False)
+        base.load_state_dict(best_pruned["model_state_dict"])
+        prune_finetune = {
+            "status": "complete",
+            "best_val_acc": pre_val_acc,
+            "checkpoint": str(pre_checkpoint),
+            "distillation": pre_kd.describe(),
+        }
+        logger.info(
+            "Steps 3a-3b complete: pruned student KD val_acc=%.4f -> %s",
+            pre_val_acc,
+            pre_checkpoint,
+        )
+
     train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
     val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
 
-    configure_perforatedai(train_cfg["perforatedai"], device)
+    pai_cfg = train_cfg["perforatedai"]
+    configure_perforatedai(pai_cfg, device)
     model = UPA.perforate_model(
         base,
         doing_pai=True,
@@ -311,23 +778,70 @@ def run_cycle(
     ).to(device)
     logger.info("PAI-wrapped initial parameter count: %d", UPA.count_params(model))
 
+    kd = None
+    if teacher is not None:
+        # PAI rewrites the module tree, so whether the pooled features survive
+        # is a property of the wrapped object and has to be probed, not assumed.
+        kd = DistillationCriterion(
+            teacher,
+            KDWeights.from_config(train_cfg.get("distillation")),
+            train_cfg["label_smoothing"],
+            device,
+            student_feature_dim=(
+                _clean_feature_dim(model, input_shape)
+                if supports_pooled_features(model, input_shape)
+                else None
+            ),
+        )
+        logger.info(
+            "Dendrite cycle distilling from %s (feature loss %s)",
+            teacher_checkpoint,
+            "on" if kd.uses_features else "off",
+        )
+
     criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
     optimizer, scheduler = _make_optimizer_and_scheduler(
-        model, train_cfg, len(train_loader)
+        model, train_cfg, len(train_loader), kd=kd
     )
+
+    freeze_base = bool(pai_cfg.get("enforce_base_weight_freeze", True))
+    phase_trail: list[dict] = [{"epoch": 0, **describe_learning_phase(model)}]
+    last_mode = phase_trail[0]["mode"]
 
     epoch = -1
     while True:
         epoch += 1
-        model.train()
+        set_train_mode_preserving_frozen_batchnorm(model)
+        if freeze_base:
+            # Step 3c: the base weights stay fixed while candidate dendrites
+            # are scored, so the correlation that selects them is measured
+            # against a network that is not simultaneously moving -- and they
+            # are handed back the moment neuron training resumes.
+            apply_phase_freezing(model)
+            # PAI may change requires_grad during the call above. Re-apply the
+            # BatchNorm rule after that phase transition as well.
+            keep_frozen_batchnorm_eval(model)
+        if kd is not None:
+            kd.train()
         running_loss = 0.0
         train_correct = 0
         train_count = 0
         for features, labels in train_loader:
             features, labels = features.to(device), labels.to(device)
             optimizer.zero_grad()
-            logits = model(features)
-            loss = criterion(logits, labels)
+            if kd is None:
+                logits = model(features)
+                loss = criterion(logits, labels)
+            else:
+                student_features = (
+                    model.forward_features(features) if kd.uses_features else None
+                )
+                logits = (
+                    model.classify_features(student_features)
+                    if student_features is not None
+                    else model(features)
+                )
+                loss = kd(features, logits, labels, student_features)["total"]
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -337,6 +851,8 @@ def run_cycle(
 
         train_loss = running_loss / train_count
         train_acc = train_correct / train_count
+        if kd is not None:
+            kd.eval()
         val_loss, val_acc = evaluate_loss_acc(model, val_loader, device, criterion)
         GPA.pai_tracker.add_extra_score(train_acc, "Train")
         model, restructured, training_complete = (
@@ -345,9 +861,10 @@ def run_cycle(
         model = model.to(device)
 
         logger.info(
-            "epoch %d train_loss=%.4f train_acc=%.4f val_loss=%.4f "
+            "epoch %d mode=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f "
             "val_acc=%.4f params=%d",
             epoch + 1,
+            current_pai_mode(),
             train_loss,
             train_acc,
             val_loss,
@@ -355,17 +872,77 @@ def run_cycle(
             UPA.count_params(model),
         )
 
+        mode = current_pai_mode()
+        if mode != last_mode or restructured:
+            phase = {"epoch": epoch + 1, "restructured": restructured, **describe_learning_phase(model)}
+            phase_trail.append(phase)
+            logger.info(
+                "PAI phase -> %s: base %d trainable / %d frozen, dendrite %d "
+                "trainable / %d frozen",
+                phase["mode"],
+                phase["base"]["trainable"],
+                phase["base"]["frozen"],
+                phase["dendrite"]["trainable"],
+                phase["dendrite"]["frozen"],
+            )
+            last_mode = mode
+
         if training_complete:
-            export_final_pai_model(model, save_name)
+            clean_model = export_final_pai_model(model, save_name)
             logger.info("PAI cycle complete; results saved under %s", save_name)
             break
         if restructured:
             logger.info("PAI restructured the network; resetting optimizer phase")
             optimizer, scheduler = _make_optimizer_and_scheduler(
-                model, train_cfg, len(train_loader)
+                model, train_cfg, len(train_loader), kd=kd
             )
 
     best_val_acc, deployed_params = read_pai_architecture_results(save_name)
+
+    # Step 3d: resume KD fine-tuning of the active student parameters.
+    resume = {"status": "skipped", "reason": "no teacher supplied"}
+    if teacher is not None:
+        resume = resume_kd_finetune(
+            clean_model,
+            datasets,
+            train_cfg,
+            device,
+            teacher,
+            input_shape,
+            save_name,
+            baseline_val_acc=best_val_acc,
+        )
+        if resume.get("status") == "complete":
+            logger.info(
+                "KD resume improved validation accuracy %.4f -> %.4f",
+                best_val_acc,
+                resume["best_val_acc"],
+            )
+            best_val_acc = resume["best_val_acc"]
+
+    # Step 3e: record latency, memory, and compute for the exported graph.
+    profile_device = torch.device(
+        train_cfg.get("deployment", {}).get("profile_device", "cpu")
+    )
+    cost = profile_model(
+        clean_model.to(profile_device),
+        input_shape,
+        device=profile_device,
+        bits_per_weight=int(train_cfg.get("deployment", {}).get("bits_per_weight", 32)),
+        latency_iterations=int(train_cfg.get("deployment", {}).get("latency_iterations", 50)),
+    ).as_dict()
+    logger.info(
+        "Step 3e: %d deployed params, %d MACs, %d weight bytes, %.3f ms p50",
+        deployed_params,
+        cost["macs"],
+        cost["weight_bytes"],
+        cost["latency_ms_p50"],
+    )
+
+    # PAI's CSV excludes clean-graph parameters such as restored skip
+    # coefficients. The profiled clean graph is the deployment authority.
+    pai_deployed_params = deployed_params
+    deployed_params = int(cost["params"])
     result = DendriticCycleResult(
         save_name=save_name,
         block_channels=list(model_cfg["block_channels"]),
@@ -374,25 +951,40 @@ def run_cycle(
         best_val_acc=best_val_acc,
         epochs=epoch + 1,
         elapsed_seconds=monotonic() - started_at,
+        pai_deployed_params=pai_deployed_params,
+        cost=cost,
+        distillation=kd.describe() if kd is not None else None,
+        resume=resume,
+        prune_finetune=prune_finetune,
+        phase_trail=phase_trail,
     )
 
     # PAI owns its architecture checkpoints. Preserve the source metadata next
     # to them so the exporter, evaluator, and pruning search can reconstruct it.
     metadata_path = Path(save_name) / "cycle_metadata.yaml"
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    clean_artifact_path = Path(save_name) / "final_clean_pai.pt"
     with open(metadata_path, "w") as f:
         yaml.safe_dump(
             {
+                "framework_cycle_version": FRAMEWORK_CYCLE_VERSION,
+                "fingerprint": fingerprint,
                 "status": "complete",
                 "result": asdict(result),
                 "source_checkpoint": checkpoint_path,
+                "source_checkpoint_sha256": file_sha256(checkpoint_path),
                 "source_val_acc": checkpoint.get("val_acc"),
+                "teacher_checkpoint": teacher_checkpoint,
+                "teacher_sha256": (
+                    file_sha256(teacher_checkpoint) if teacher_checkpoint else None
+                ),
+                "clean_artifact_sha256": file_sha256(clean_artifact_path),
                 "base_model_cfg": model_cfg,
                 "base_params": base_params,
                 "selection_split": "validation",
                 "test_split_used": False,
                 "objective": train_cfg["objective"],
-                "perforatedai": train_cfg["perforatedai"],
+                "perforatedai": pai_cfg,
             },
             f,
             sort_keys=False,
@@ -416,6 +1008,11 @@ def main() -> None:
         default="models/checkpoints/ds_cnn_xs_distilled_warm.pt",
     )
     parser.add_argument("--save-name", default="dendritic_xxs_cycle1")
+    parser.add_argument(
+        "--teacher-checkpoint",
+        default="models/checkpoints/ds_cnn_l.pt",
+        help="Fixed teacher for the cycle's KD loss and the step-3d resume",
+    )
     args = parser.parse_args()
 
     run_cycle(
@@ -424,6 +1021,7 @@ def main() -> None:
         load_yaml(args.model_config),
         load_yaml(args.train_config),
         args.save_name,
+        teacher_checkpoint=args.teacher_checkpoint,
     )
 
 

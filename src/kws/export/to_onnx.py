@@ -11,10 +11,19 @@ from kws.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def export_to_onnx(checkpoint_path: str, onnx_path: str, atol: float = 1e-4) -> None:
-    device = torch.device("cpu")
-    model, ckpt = load_model_from_checkpoint(checkpoint_path, device)
-    input_shape = tuple(ckpt["input_shape"])
+def export_module_to_onnx(
+    model: torch.nn.Module,
+    input_shape: tuple[int, int],
+    onnx_path: str,
+    atol: float = 1e-4,
+) -> float:
+    """Export any live module and verify parity; returns the max abs difference.
+
+    Taking a module rather than a checkpoint path is what lets the pipeline
+    export a model whose architecture cannot be rebuilt from a config -- a
+    PerforatedAI clean graph, or one carrying codebook parametrizations.
+    """
+    model = model.to("cpu").eval()
     dummy = torch.randn(1, 1, *input_shape)
 
     Path(onnx_path).parent.mkdir(parents=True, exist_ok=True)
@@ -31,11 +40,17 @@ def export_to_onnx(checkpoint_path: str, onnx_path: str, atol: float = 1e-4) -> 
     session = ort.InferenceSession(onnx_path)
     onnx_out = session.run(None, {"features": dummy.numpy()})[0]
 
-    max_diff = np.abs(torch_out - onnx_out).max()
+    max_diff = float(np.abs(torch_out - onnx_out).max())
     logger.info("Max abs diff between PyTorch and ONNX Runtime outputs: %e", max_diff)
     if max_diff > atol:
         raise ValueError(f"ONNX parity check failed: max diff {max_diff} > tolerance {atol}")
     logger.info("ONNX parity check passed (tolerance=%e)", atol)
+    return max_diff
+
+
+def export_to_onnx(checkpoint_path: str, onnx_path: str, atol: float = 1e-4) -> None:
+    model, ckpt = load_model_from_checkpoint(checkpoint_path, torch.device("cpu"))
+    export_module_to_onnx(model, tuple(ckpt["input_shape"]), onnx_path, atol)
 
 
 def main():

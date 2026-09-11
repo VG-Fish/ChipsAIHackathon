@@ -1,13 +1,17 @@
-# First size-focused PerforatedAI cycle.
+# Framework step 3 for one sparsity target: prune the student, KD fine-tune it,
+# run the perforation/dendrite phase, resume KD fine-tuning, and record cost.
 #
-# Start from the warm-distilled XS checkpoint and structurally prune its two
-# pointwise channel widths from 40 to 18 (3,850 -> 1,716 parameters). Perforate
-# both complete depthwise-separable blocks and the classifier, but leave the
-# stem unchanged. PAI's capacity check measured one deployed dendrite at 2,946
-# parameters. The initial three-dendrite capacity check completed successfully;
-# this configuration now runs the real one-dendrite experiment.
+# Each candidate starts from the warm-distilled XS checkpoint and is
+# structurally pruned to the width the sweep is testing. Both complete
+# depthwise-separable blocks and the classifier are perforated; the stem is
+# left alone. PAI's capacity check measured one deployed dendrite on the
+# width-18 base at 2,946 parameters.
 augment: true
 epochs: 40
+# The PAI loop is dynamically terminated and recorded runs take longer than
+# the pre-finetune budget. This is the intended cosine horizon; the scheduler
+# clamps after it rather than oscillating if PAI runs longer.
+dendritic_schedule_epochs: 130
 batch_size: 128
 num_workers: 4
 persistent_workers: true
@@ -18,13 +22,33 @@ label_smoothing: 0.1
 warmup_fraction: 0.05
 seed: 0
 
+# Step 3d: epochs of KD fine-tuning on the clean deployment graph after the
+# dendrites are selected and frozen. Set to 0 to skip the resume phase.
+resume_epochs: 8
+
 objective:
   metric: validation_accuracy
   minimum: 0.90
   minimize: deployed_parameters
 
+# The KD term used inside the dendrite cycle and in the step-3d resume. Feature
+# distillation is used when the wrapped model still exposes pooled features and
+# is renormalized away when it does not.
+distillation:
+  temperature: 1.0
+  feature_weight: 0.3
+  response_weight: 0.1
+  classification_weight: 0.6
+
 pruning:
+  kind: structured
   keep_ratio: 0.45
+
+# Step 3e: how the deployment cost is measured for the Pareto comparison.
+deployment:
+  bits_per_weight: 8
+  latency_iterations: 50
+  profile_device: cpu
 
 perforatedai:
   testing_dendrite_capacity: false
@@ -36,3 +60,7 @@ perforatedai:
   max_dendrite_tries: 2
   forward_function: tanh
   conversion: blocks_and_linear
+  # Step 3c requires the base weights to hold still while candidate dendrites
+  # are scored. PAI freezes them itself; this re-asserts it every epoch so a
+  # library change cannot quietly invalidate the correlation scores.
+  enforce_base_weight_freeze: true

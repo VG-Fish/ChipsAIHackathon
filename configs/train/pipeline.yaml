@@ -1,0 +1,59 @@
+# The compression framework, end to end.
+#
+#   1. teacher    strong full-precision teacher
+#   2. student    deployment-shaped student, distilled from the teacher
+#   3. sparsity   per-target: prune -> KD fine-tune -> dendrites -> KD resume ->
+#                 record accuracy/latency/memory/compute -> Pareto stop
+#   4. cluster    layer-wise weight clustering + codebook learning
+#   5. quantize   quantization-aware distillation fine-tuning
+#   6. benchmark  export and benchmark the exact inference graph
+#
+# Run all of it with `python -m kws.pipeline`, or one stage at a time with
+# `--stages sparsity`. Stages reuse existing artifacts unless `--force`.
+data_config: configs/data/speech_commands_v2.yaml
+report_path: reports/pipeline/pipeline.yaml
+
+teacher:
+  model_config: configs/model/ds_cnn_l.yaml
+  train_config: configs/train/full.yaml
+  checkpoint: models/checkpoints/ds_cnn_l.pt
+
+student:
+  # XS is the deployment-shaped architecture: ~3,850 parameters, sized against
+  # the ~3,800-parameter Edge Impulse reference point.
+  model_config: configs/model/ds_cnn_xs.yaml
+  train_config: configs/train/distill_imc.yaml
+  checkpoint: models/checkpoints/ds_cnn_xs_distilled_warm.pt
+  # Warm-starting from the independently trained XS beat distilling from
+  # scratch by 6.3 points of test accuracy (79.3% -> 85.6%), so it stays on.
+  warm_start_checkpoint: models/checkpoints/ds_cnn_xs.pt
+
+sparsity:
+  train_config: configs/train/dendritic_cycle1.yaml
+  search_config: configs/train/dendritic_prune_loop.yaml
+  # Which frontier point stages 4-6 continue from: a cost key to minimize
+  # (deployed_params, macs, latency_ms_p50, weight_bytes,
+  # activation_peak_bytes) or "accuracy".
+  select_by: deployed_params
+
+cluster:
+  train_config: configs/train/cluster.yaml
+  checkpoint: models/exported/kws_clustered.pt
+  bits: 4            # 16 shared values per layer -> 4-bit weight indices
+  min_weights: 64    # below this a 16-entry centroid table costs more than it saves
+  kmeans_iterations: 30
+
+quantize:
+  train_config: configs/train/qat.yaml
+  checkpoint: models/exported/kws_int8_qad.pt
+
+benchmark:
+  # This is the automated host proxy. It does not claim ESP32 + MRAM numbers;
+  # those require the device runtime and hardware in the loop.
+  target: onnxruntime-cpu
+  torchscript_target: torchscript-cpu
+  onnx_path: models/exported/kws_deployed.onnx
+  report_path: reports/pipeline/benchmark.json
+  split: testing
+  latency_iterations: 200
+  bits_per_weight: 8

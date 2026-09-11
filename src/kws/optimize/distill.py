@@ -1,28 +1,68 @@
-"""IMC-oriented KWS knowledge distillation from Song et al., Interspeech 2022.
+"""Framework step 2: distill the fixed teacher into the deployment student.
 
-The paper combines feature-based distillation, response-based distillation, and
-ground-truth classification. Teacher and student encoder widths differ in this
-project, so a training-only linear adapter maps student features to the teacher
-width. The adapter is intentionally absent from the saved deployment model.
+The three losses -- feature, response, and ground-truth classification -- come
+from Song et al., "Knowledge Distillation for In-Memory Keyword Spotting
+Model" (Interspeech 2022). They now live in :mod:`kws.optimize.kd` because
+every later stage distills from the same fixed teacher with the same objective;
+this module is the stage that produces the strong student baseline the sparsity
+sweep starts from.
+
+Teacher and student encoder widths differ here, so a training-only linear
+adapter maps student features to the teacher width. The adapter is
+intentionally absent from the saved deployment model.
 """
 import argparse
+import hashlib
 from pathlib import Path
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import yaml
 
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
-from kws.train import build_lr_scheduler, evaluate_loss_acc
+from kws.optimize.kd import (
+    DistillationCriterion,
+    FrozenTeacher,
+    KDWeights,
+    distillation_losses,
+    file_sha256,
+)
+from kws.train import run_finetune
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
 from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
+
+
+def distillation_fingerprint(
+    teacher_checkpoint: str,
+    student_model_cfg: dict,
+    data_cfg: dict,
+    train_cfg: dict,
+    student_checkpoint: str | None = None,
+) -> str:
+    """Stable identity for the complete stage-2 training recipe.
+
+    A checkpoint is reusable only when its architecture, teacher contents,
+    data recipe, optimization/KD settings, and optional warm start all match.
+    Paths alone are not sufficient because a file can be replaced in place.
+    """
+    payload = {
+        "teacher_checkpoint": teacher_checkpoint,
+        "teacher_sha256": file_sha256(teacher_checkpoint),
+        "student_model": student_model_cfg,
+        "data": data_cfg,
+        "train": train_cfg,
+        "student_checkpoint": student_checkpoint,
+        "student_checkpoint_sha256": (
+            file_sha256(student_checkpoint) if student_checkpoint else None
+        ),
+    }
+    encoded = yaml.safe_dump(payload, sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def imc_distillation_losses(
@@ -38,41 +78,25 @@ def imc_distillation_losses(
     classification_weight: float,
     label_smoothing: float,
 ) -> dict[str, torch.Tensor]:
-    """Return the paper's weighted feature, response, and classification losses."""
-    if temperature <= 0:
-        raise ValueError("temperature must be positive")
-    weights = (feature_weight, response_weight, classification_weight)
-    if any(weight < 0 for weight in weights):
-        raise ValueError("distillation weights must be non-negative")
-    if abs(sum(weights) - 1.0) > 1e-6:
-        raise ValueError("distillation weights must sum to 1")
-    if student_features.shape != teacher_features.shape:
-        raise ValueError(
-            "student and teacher features must match after projection: "
-            f"{student_features.shape} != {teacher_features.shape}"
-        )
+    """The paper's weighted feature, response, and classification losses.
 
-    classification_loss = F.cross_entropy(
-        student_logits, labels, label_smoothing=label_smoothing,
+    Kept as the paper-named entry point onto the shared implementation.
+    """
+    weights = KDWeights(
+        temperature=temperature,
+        feature_weight=feature_weight,
+        response_weight=response_weight,
+        classification_weight=classification_weight,
     )
-    soft_student = F.log_softmax(student_logits / temperature, dim=1)
-    soft_teacher = F.softmax(teacher_logits / temperature, dim=1)
-    response_loss = (
-        F.kl_div(soft_student, soft_teacher, reduction="batchmean")
-        * (temperature ** 2)
+    return distillation_losses(
+        student_logits,
+        teacher_logits,
+        labels,
+        weights=weights,
+        label_smoothing=label_smoothing,
+        student_features=student_features,
+        teacher_features=teacher_features,
     )
-    feature_loss = F.mse_loss(student_features, teacher_features)
-    total_loss = (
-        feature_weight * feature_loss
-        + response_weight * response_loss
-        + classification_weight * classification_loss
-    )
-    return {
-        "total": total_loss,
-        "feature": feature_loss,
-        "response": response_loss,
-        "classification": classification_loss,
-    }
 
 
 def distill(
@@ -83,36 +107,31 @@ def distill(
     out_checkpoint: Path,
     student_checkpoint: str | None = None,
 ) -> float:
+    """Train the student against the fixed teacher; return the best val accuracy."""
     set_seed(train_cfg["seed"])
     device = get_device()
 
-    teacher_ckpt = torch.load(teacher_checkpoint, map_location=device, weights_only=False)
-    input_shape = tuple(teacher_ckpt["input_shape"])
-    num_classes = teacher_ckpt["num_classes"]
+    teacher = FrozenTeacher(teacher_checkpoint, device)
+    input_shape = teacher.input_shape
+    num_classes = teacher.num_classes
+    recipe_fingerprint = distillation_fingerprint(
+        teacher_checkpoint,
+        student_model_cfg,
+        data_cfg,
+        train_cfg,
+        student_checkpoint,
+    )
 
-    # Build the fresh student first so constructing the frozen teacher cannot
-    # affect its seeded initialization.
     student = build_ds_cnn(student_model_cfg, input_shape, num_classes).to(device)
     if student_checkpoint is not None:
-        initial_student_ckpt = torch.load(student_checkpoint, map_location=device, weights_only=False)
-        if initial_student_ckpt["model_cfg"] != student_model_cfg:
+        initial = torch.load(student_checkpoint, map_location=device, weights_only=False)
+        if initial["model_cfg"] != student_model_cfg:
             raise ValueError("student checkpoint architecture does not match student model config")
-        student.load_state_dict(initial_student_ckpt["model_state_dict"])
+        student.load_state_dict(initial["model_state_dict"])
 
-    teacher = build_ds_cnn(teacher_ckpt["model_cfg"], input_shape, num_classes)
-    teacher.load_state_dict(teacher_ckpt["model_state_dict"])
-    teacher.to(device).eval()
-    for p in teacher.parameters():
-        p.requires_grad = False
-
-    # Song et al. directly compare equal-width encoders. Our XS and L models
-    # have different widths, so this adapter makes the representations
-    # comparable and is discarded after training.
-    feature_adapter = nn.Linear(
-        student.fc.in_features, teacher.fc.in_features, bias=False,
-    ).to(device)
-
-    datasets, label_map = build_datasets(data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"])
+    datasets, label_map = build_datasets(
+        data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"],
+    )
     if len(label_map) != num_classes:
         raise ValueError(
             f"data config has {len(label_map)} classes but teacher has {num_classes}"
@@ -120,103 +139,46 @@ def distill(
     train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
     val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
 
-    optimizer = torch.optim.AdamW(
-        list(student.parameters()) + list(feature_adapter.parameters()),
-        lr=train_cfg["lr"],
-        weight_decay=train_cfg["weight_decay"],
+    kd = DistillationCriterion(
+        teacher,
+        KDWeights.from_config(train_cfg.get("distillation")),
+        train_cfg["label_smoothing"],
+        device,
+        student_feature_dim=student.fc.in_features,
     )
-    total_steps = train_cfg["epochs"] * len(train_loader)
-    scheduler = build_lr_scheduler(optimizer, total_steps, train_cfg["warmup_fraction"])
-    eval_criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
-    kd_cfg = train_cfg.get("distillation", {})
-    temperature = float(kd_cfg.get("temperature", 1.0))
-    feature_weight = float(kd_cfg.get("feature_weight", 0.3))
-    response_weight = float(kd_cfg.get("response_weight", 0.1))
-    classification_weight = float(kd_cfg.get("classification_weight", 0.6))
-
-    best_val_acc = 0.0
     out_checkpoint.parent.mkdir(parents=True, exist_ok=True)
 
-    for epoch in range(train_cfg["epochs"]):
-        student.train()
-        feature_adapter.train()
-        running_losses = {
-            "total": 0.0,
-            "feature": 0.0,
-            "response": 0.0,
-            "classification": 0.0,
-        }
-        for features, labels in train_loader:
-            features, labels = features.to(device), labels.to(device)
-            with torch.no_grad():
-                teacher_features = teacher.forward_features(features)
-                teacher_logits = teacher.classify_features(teacher_features)
-            student_features = student.forward_features(features)
-            student_logits = student.classify_features(student_features)
-            projected_student_features = feature_adapter(student_features)
-            losses = imc_distillation_losses(
-                student_logits,
-                teacher_logits,
-                projected_student_features,
-                teacher_features,
-                labels,
-                temperature=temperature,
-                feature_weight=feature_weight,
-                response_weight=response_weight,
-                classification_weight=classification_weight,
-                label_smoothing=train_cfg["label_smoothing"],
-            )
-            optimizer.zero_grad()
-            losses["total"].backward()
-            optimizer.step()
-            scheduler.step()
-            for name, loss in losses.items():
-                running_losses[name] += loss.item() * labels.size(0)
+    def save_best(model, val_acc):
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "model_cfg": student_model_cfg,
+            "input_shape": input_shape,
+            "num_classes": num_classes,
+            "label_map": label_map,
+            "num_keywords": teacher.num_keywords,
+            "val_acc": val_acc,
+            "distillation": {
+                "method": "song22c_imc_feature_response",
+                "student_initialization": (
+                    str(student_checkpoint) if student_checkpoint else "fresh"
+                ),
+                "recipe_fingerprint": recipe_fingerprint,
+                **kd.describe(),
+            },
+        }, out_checkpoint)
+        logger.info("Saved new best distilled checkpoint (val_acc=%.4f) -> %s", val_acc, out_checkpoint)
 
-        train_losses = {
-            name: value / len(datasets[TRAIN])
-            for name, value in running_losses.items()
-        }
-        val_loss, val_acc = evaluate_loss_acc(student, val_loader, device, eval_criterion)
-        logger.info(
-            "epoch %d/%d train_loss=%.4f (cls=%.4f feat=%.4f resp=%.4f) "
-            "val_loss=%.4f val_acc=%.4f",
-            epoch + 1,
-            train_cfg["epochs"],
-            train_losses["total"],
-            train_losses["classification"],
-            train_losses["feature"],
-            train_losses["response"],
-            val_loss,
-            val_acc,
-        )
-
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save({
-                "model_state_dict": student.state_dict(),
-                "model_cfg": student_model_cfg,
-                "input_shape": input_shape,
-                "num_classes": num_classes,
-                "label_map": label_map,
-                "num_keywords": teacher_ckpt["num_keywords"],
-                "val_acc": val_acc,
-                "distillation": {
-                    "method": "song22c_imc_feature_response",
-                    "teacher_checkpoint": str(teacher_checkpoint),
-                    "student_initialization": (
-                        str(student_checkpoint) if student_checkpoint else "fresh"
-                    ),
-                    "temperature": temperature,
-                    "feature_weight": feature_weight,
-                    "response_weight": response_weight,
-                    "classification_weight": classification_weight,
-                    "feature_adapter": "training_only_linear_not_saved",
-                },
-            }, out_checkpoint)
-            logger.info("Saved new best distilled checkpoint (val_acc=%.4f) -> %s", val_acc, out_checkpoint)
-
-    return best_val_acc
+    result = run_finetune(
+        student,
+        train_loader,
+        val_loader,
+        device,
+        train_cfg,
+        kd=kd,
+        on_best=save_best,
+        label=f'distill-{student_model_cfg["name"]}',
+    )
+    return result.best_val_acc
 
 
 def main():

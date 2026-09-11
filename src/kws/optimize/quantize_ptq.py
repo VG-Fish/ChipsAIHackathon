@@ -9,7 +9,6 @@ import argparse
 import os
 from pathlib import Path
 
-import numpy as np
 import onnxruntime as ort
 import yaml
 from onnxruntime.quantization import QuantType, quantize_dynamic
@@ -17,6 +16,7 @@ from torch.utils.data import DataLoader
 
 from kws.data.dataset import build_datasets
 from kws.data.splits import TEST
+from kws.export.benchmark import run_split_through_graph
 from kws.export.to_onnx import export_to_onnx
 from kws.utils.logging import get_logger
 from kws.utils.metrics import compute_metrics
@@ -39,14 +39,11 @@ def quantize_ptq(checkpoint_path: str, data_cfg: dict, onnx_fp32_path: Path, onn
     num_keywords = sum(1 for n in label_names if n not in ("_unknown_", "_silence_"))
     test_loader = DataLoader(datasets[TEST], batch_size=128, shuffle=False, num_workers=0)
 
+    # The export fixes the batch dimension at 1 -- the deployment shape -- so the
+    # graph is scored one sample at a time, the way the device runs it.
     session = ort.InferenceSession(str(onnx_int8_path))
-    y_true, y_pred = [], []
-    for features, labels in test_loader:
-        logits = session.run(None, {"features": features.numpy()})[0]
-        y_pred.extend(np.argmax(logits, axis=1).tolist())
-        y_true.extend(labels.numpy().tolist())
-
-    metrics = compute_metrics(np.array(y_true), np.array(y_pred), num_keywords, label_names)
+    y_true, y_pred = run_split_through_graph(session, "features", test_loader)
+    metrics = compute_metrics(y_true, y_pred, num_keywords, label_names)
     metrics["fp32_size_bytes"] = fp32_size
     metrics["int8_size_bytes"] = int8_size
     logger.info("PTQ int8 test accuracy: %.4f  FAR: %.4f  FRR: %.4f", metrics["accuracy"], metrics["far"], metrics["frr"])

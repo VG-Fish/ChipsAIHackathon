@@ -1,6 +1,6 @@
-# M2 full training config: augmentation + full LR schedule, the run whose accuracy
-# is checked against the ~92% Edge Impulse reference (DS-CNN-L/M) or used as the
-# Phase 3 dendrite-growth starting point (DS-CNN-XS).
+# M2 full training config: augmentation + full LR schedule. Used for the
+# framework's step-1 teacher (DS-CNN-L/M) and for the independently trained XS
+# that warm-starts the step-2 student.
 augment: true
 epochs: 40
 batch_size: 128
