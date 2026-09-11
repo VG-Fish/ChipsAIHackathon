@@ -22,9 +22,13 @@ def test_forward_pass_shape(config_path):
     x = torch.randn(2, 1, *input_shape)
     with torch.no_grad():
         out = model(x)
+        encoded = model.forward_features(x)
+        out_from_features = model.classify_features(encoded)
 
     assert out.shape == (2, num_classes)
     assert torch.isfinite(out).all()
+    assert encoded.shape == (2, model.fc.in_features)
+    assert torch.equal(out, out_from_features)
 
 
 @pytest.mark.parametrize("config_path", MODEL_CONFIGS)

@@ -54,13 +54,19 @@ class DSCNN(nn.Module):
             out = self.blocks(self.stem(dummy))
         return out.shape[2], out.shape[3]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Return the pooled encoder representation before dropout/classification."""
         x = self.stem(x)
         x = self.blocks(x)
         x = self.pool(x)
-        x = torch.flatten(x, 1)
-        x = self.dropout(x)
-        return self.fc(x)
+        return torch.flatten(x, 1)
+
+    def classify_features(self, features: torch.Tensor) -> torch.Tensor:
+        """Classify a pooled encoder representation."""
+        return self.fc(self.dropout(features))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classify_features(self.forward_features(x))
 
 
 def build_ds_cnn(model_cfg: dict, input_shape: tuple[int, int], num_classes: int) -> DSCNN:

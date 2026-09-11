@@ -146,7 +146,13 @@ uv run python -m kws.evaluate --checkpoint models/checkpoints/ds_cnn_xs.pt \
 uv run python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs.pt \
   --onnx-path models/exported/ds_cnn_xs.onnx
 
-# 5. Structured pruning + fine-tune (DS-CNN-L, secondary comparison arm)
+# 5. IMC-oriented feature + response distillation (Large teacher -> fresh XS student)
+uv run python -m kws.optimize.distill \
+  --teacher-checkpoint models/checkpoints/ds_cnn_l.pt \
+  --student-model-config configs/model/ds_cnn_xs.yaml \
+  --out-checkpoint models/checkpoints/ds_cnn_xs_distilled.pt
+
+# 6. Structured pruning + fine-tune (DS-CNN-L, secondary comparison arm)
 uv run python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
   --keep-ratio 0.5 --out-checkpoint models/checkpoints/ds_cnn_l_pruned.pt
 ```
