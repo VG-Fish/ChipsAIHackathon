@@ -1,5 +1,5 @@
 stages:
-  - teacher_1:
+  - 1_teacher:
     status: trained
     checkpoint: models/checkpoints/ds_cnn_l_12class.pt
     val_acc: 0.9778206364513018
