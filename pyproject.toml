@@ -7,6 +7,8 @@ dependencies = [
     "onnx",
     "onnxruntime",
     "onnxscript",
+    "perforatedai>=3.2.8",
+    "perforatedbp>=3.2.7",
     "pyyaml",
     "scikit-learn",
     "soundfile",

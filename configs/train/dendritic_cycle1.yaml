@@ -1,0 +1,38 @@
+# First size-focused PerforatedAI cycle.
+#
+# Start from the warm-distilled XS checkpoint and structurally prune its two
+# pointwise channel widths from 40 to 18 (3,850 -> 1,716 parameters). Perforate
+# both complete depthwise-separable blocks and the classifier, but leave the
+# stem unchanged. One deployed dendrite is estimated at 2,988 parameters.
+# The initial capacity check temporarily exercises three dendrites; switch this
+# flag to false only after that check succeeds.
+augment: true
+epochs: 40
+batch_size: 128
+num_workers: 4
+persistent_workers: true
+prefetch_factor: 2
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+seed: 0
+
+objective:
+  metric: validation_accuracy
+  minimum: 0.90
+  minimize: deployed_parameters
+
+pruning:
+  keep_ratio: 0.45
+
+perforatedai:
+  testing_dendrite_capacity: true
+  max_dendrites: 1
+  n_epochs_to_switch: 25
+  improvement_threshold: [0.001, 0.0001, 0.0]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 2
+  forward_function: tanh
+  conversion: blocks_and_linear
