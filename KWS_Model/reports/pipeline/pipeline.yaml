@@ -1,8 +1,14 @@
 stages:
   - 1_teacher:
-    status: trained
-    checkpoint: models/checkpoints/ds_cnn_l_12class.pt
-    val_acc: 0.9778206364513018
+      status: trained
+      checkpoint: models/checkpoints/ds_cnn_l_12class.pt
+      val_acc: 0.9778206364513018
+  - 2_student:
+      status: distilled
+      checkpoint: models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+      val_acc: 0.7301832208293153
+      student_initialization: fresh
+      recipe_fingerprint: 6cfa4a082d48790f17a8e21ea3f1e5e03bae0489491009421ed0ffe6302ce0d7
 config:
   data_config: configs/data/speech_commands_v2.yaml
   report_path: reports/pipeline/pipeline.yaml
