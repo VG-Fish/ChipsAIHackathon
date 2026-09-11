@@ -1,7 +1,16 @@
 import torch
 import torch.nn as nn
+from typing import Protocol
 
-from kws.models.layers import DSConvBlock
+from kws.models.layers import DSConvBlock, DSConvBlockSequence
+
+
+class FeatureModel(Protocol):
+    """Interface shared by DS-CNN and wrappers that expose pooled features."""
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor: ...
+
+    def classify_features(self, features: torch.Tensor) -> torch.Tensor: ...
 
 
 class DSCNN(nn.Module):
@@ -14,6 +23,13 @@ class DSCNN(nn.Module):
     time from `input_shape`, so the graph has no dynamic shapes -- this keeps it
     friendly to both ONNX export and Perforated AI's dendrite-hook integration.
     """
+
+    input_shape: tuple[int, int]
+    stem: nn.Sequential
+    blocks: DSConvBlockSequence
+    pool: nn.AvgPool2d
+    dropout: nn.Dropout
+    fc: nn.Linear
 
     def __init__(
         self,
@@ -36,12 +52,12 @@ class DSCNN(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        blocks = []
+        blocks: list[DSConvBlock] = []
         in_ch = initial_channels
         for out_ch in block_channels:
             blocks.append(DSConvBlock(in_ch, out_ch))
             in_ch = out_ch
-        self.blocks = nn.Sequential(*blocks)
+        self.blocks = DSConvBlockSequence(*blocks)
 
         pool_h, pool_w = self._compute_feature_map_size(input_shape)
         self.pool = nn.AvgPool2d(kernel_size=(pool_h, pool_w))

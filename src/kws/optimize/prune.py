@@ -21,6 +21,7 @@ structured pruning because its search variable is channel width.
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -43,28 +44,34 @@ def _l1_topk_indices(weight: torch.Tensor, k: int) -> torch.Tensor:
 
 
 def _copy_bn_subset(old_bn: nn.BatchNorm2d, new_bn: nn.BatchNorm2d, indices: torch.Tensor) -> None:
-    new_bn.weight.data = old_bn.weight.data[indices].clone()
-    new_bn.bias.data = old_bn.bias.data[indices].clone()
-    new_bn.running_mean.data = old_bn.running_mean.data[indices].clone()
-    new_bn.running_var.data = old_bn.running_var.data[indices].clone()
+    old_mean, new_mean = old_bn.running_mean, new_bn.running_mean
+    old_var, new_var = old_bn.running_var, new_bn.running_var
+    if old_mean is None or new_mean is None or old_var is None or new_var is None:
+        raise ValueError("channel pruning requires BatchNorm running statistics")
+    with torch.no_grad():
+        new_bn.weight.copy_(old_bn.weight[indices])
+        new_bn.bias.copy_(old_bn.bias[indices])
+        new_mean.copy_(old_mean[indices])
+        new_var.copy_(old_var[indices])
 
 
 def prune_ds_cnn(model: DSCNN, keep_ratio: float) -> DSCNN:
     old_block_channels = [block.pointwise.out_channels for block in model.blocks]
     new_block_channels = [max(1, int(round(c * keep_ratio))) for c in old_block_channels]
+    stem_conv = cast(nn.Conv2d, model.stem[0])
 
     new_model = DSCNN(
         input_shape=model.input_shape,
         num_classes=model.fc.out_features,
-        initial_channels=model.stem[0].out_channels,
-        initial_kernel=model.stem[0].kernel_size[0],
-        initial_stride=model.stem[0].stride[0],
+        initial_channels=stem_conv.out_channels,
+        initial_kernel=stem_conv.kernel_size[0],
+        initial_stride=stem_conv.stride[0],
         block_channels=new_block_channels,
         dropout=model.dropout.p,
     )
     new_model.stem.load_state_dict(model.stem.state_dict())
 
-    keep_in = None  # surviving input-channel indices for the current block; None = keep all (from stem)
+    keep_in: torch.Tensor | None = None  # surviving input channels; None = all
     for old_block, new_block, n_keep in zip(model.blocks, new_model.blocks, new_block_channels):
         if keep_in is None:
             new_block.depthwise.weight.data = old_block.depthwise.weight.data.clone()
@@ -110,7 +117,7 @@ class SparsityMasks:
     def apply(self, model: nn.Module) -> None:
         with torch.no_grad():
             for name, mask in self.masks.items():
-                module = model.get_submodule(name)
+                module = cast(nn.Conv2d | nn.Linear, model.get_submodule(name))
                 module.weight.mul_(mask.to(module.weight.device, module.weight.dtype))
 
     def __call__(self, model: nn.Module) -> None:
@@ -120,7 +127,7 @@ class SparsityMasks:
         """Fraction of all prunable weights currently zeroed."""
         zeros = total = 0
         for name in self.masks:
-            weight = model.get_submodule(name).weight
+            weight = cast(nn.Conv2d | nn.Linear, model.get_submodule(name)).weight
             zeros += int((weight == 0).sum().item())
             total += weight.numel()
         return zeros / max(total, 1)
@@ -157,7 +164,11 @@ def nm_mask(weight: torch.Tensor, n: int, m: int) -> torch.Tensor:
 
 
 def apply_nm_sparsity(
-    model: nn.Module, n: int, m: int, *, module_types=(nn.Conv2d, nn.Linear),
+    model: nn.Module,
+    n: int,
+    m: int,
+    *,
+    module_types: tuple[type[nn.Module], ...] = (nn.Conv2d, nn.Linear),
 ) -> SparsityMasks:
     """Mask every eligible weight tensor in ``model`` to an N:M pattern.
 
@@ -172,7 +183,8 @@ def apply_nm_sparsity(
         if not isinstance(module, module_types) or not hasattr(module, "weight"):
             continue
         try:
-            masks[name] = nm_mask(module.weight, n, m)
+            typed_module = cast(nn.Conv2d | nn.Linear, module)
+            masks[name] = nm_mask(typed_module.weight, n, m)
         except ValueError:
             skipped.append(name)
     if not masks:
@@ -245,7 +257,11 @@ def apply_sparsity(model: DSCNN, spec: SparsitySpec) -> tuple[DSCNN, SparsityMas
     if spec.kind == "dense":
         return model, None
     if spec.kind == "structured":
+        if spec.keep_ratio is None:
+            raise ValueError("structured sparsity requires keep_ratio")
         return prune_ds_cnn(model, spec.keep_ratio), None
+    if spec.n is None or spec.m is None:
+        raise ValueError("N:M sparsity requires both n and m")
     return model, apply_nm_sparsity(model, spec.n, spec.m)
 
 

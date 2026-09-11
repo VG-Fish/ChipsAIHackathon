@@ -1,5 +1,6 @@
 import torch
 import yaml
+from typing import cast
 
 from kws.models.ds_cnn import build_ds_cnn
 from kws.optimize.dendritic import (
@@ -92,6 +93,9 @@ def test_optional_relative_drop_rule():
 
 def test_restore_single_dendrite_skip_weights():
     class CleanModule(torch.nn.Module):
+        layer_array: torch.nn.ModuleList
+        skip_weights: torch.nn.ParameterList
+
         def __init__(self):
             super().__init__()
             self.layer_array = torch.nn.ModuleList([torch.nn.Identity(), torch.nn.Identity()])
@@ -105,16 +109,20 @@ def test_restore_single_dendrite_skip_weights():
     weights = {"blocks.0": [torch.tensor([[0.25, -0.5]])]}
 
     restored = _restore_single_dendrite_skip_weights(model, weights)
+    clean_module = cast(CleanModule, model.blocks[0])
 
     assert restored == 1
-    assert torch.equal(model.blocks[0].skip_weights[0], weights["blocks.0"][0])
-    assert not model.blocks[0].skip_weights[0].requires_grad
+    assert torch.equal(clean_module.skip_weights[0], weights["blocks.0"][0])
+    assert not clean_module.skip_weights[0].requires_grad
 
 
 def test_clean_reload_recreates_optional_pai_skip_coefficients():
     from kws.optimize.dendritic import ensure_clean_dendrite_skip_weights
 
     class CleanModule(torch.nn.Module):
+        layer_array: torch.nn.ModuleList
+        skip_weights: torch.nn.ParameterList
+
         def __init__(self):
             super().__init__()
             self.layer_array = torch.nn.ModuleList([torch.nn.Identity(), torch.nn.Identity()])
@@ -129,9 +137,10 @@ def test_clean_reload_recreates_optional_pai_skip_coefficients():
     state = {"anchor": torch.ones(1), "blocks.0.skip_weights.0": torch.tensor([0.25])}
     ensure_clean_dendrite_skip_weights(model, state)
     model.load_state_dict(state, strict=True)
+    clean_module = cast(CleanModule, model.blocks[0])
 
-    assert torch.equal(model.blocks[0].skip_weights[0], torch.tensor([0.25]))
-    assert not model.blocks[0].skip_weights[0].requires_grad
+    assert torch.equal(clean_module.skip_weights[0], torch.tensor([0.25]))
+    assert not clean_module.skip_weights[0].requires_grad
 
 
 def _fake_perforated_model():

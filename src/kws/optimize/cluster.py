@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, cast
 
 import torch
 import torch.nn as nn
@@ -118,6 +119,9 @@ def cluster_weights(
 class CodebookParametrization(nn.Module):
     """Materializes ``weight = centroids[indices]`` inside the autograd graph."""
 
+    centroids: nn.Parameter
+    indices: torch.Tensor
+
     def __init__(self, centroids: torch.Tensor, indices: torch.Tensor):
         super().__init__()
         self.centroids = nn.Parameter(centroids.clone())
@@ -208,7 +212,8 @@ def apply_weight_clustering(model: nn.Module, spec: ClusterSpec) -> ClusteringRe
 
     total_weights = clusterable_weights
     clustered_weights = sum(
-        model.get_submodule(name).weight.numel() for name in clustered
+        cast(nn.Conv2d | nn.Linear, model.get_submodule(name)).weight.numel()
+        for name in clustered
     )
     report = ClusteringReport(
         spec=spec.as_dict(),
@@ -291,7 +296,7 @@ class CodebookProjector:
         with torch.no_grad():
             for name, indices in self.assignments.items():
                 try:
-                    module = model.get_submodule(name)
+                    module = cast(nn.Conv2d | nn.Linear, model.get_submodule(name))
                 except AttributeError:
                     continue
                 weight = module.weight
@@ -317,8 +322,14 @@ class CodebookProjector:
 
 def _module_weight(module: nn.Module) -> torch.Tensor:
     """Read a float or eager-quantized module's logical weight tensor."""
-    weight = module.weight() if callable(module.weight) else module.weight
-    return weight.dequantize() if getattr(weight, "is_quantized", False) else weight
+    weight_or_getter = cast(
+        torch.Tensor | Callable[[], torch.Tensor], getattr(module, "weight")
+    )
+    if isinstance(weight_or_getter, torch.Tensor):
+        weight: torch.Tensor = weight_or_getter
+    else:
+        weight = cast(Callable[[], torch.Tensor], weight_or_getter)()
+    return weight.dequantize() if weight.is_quantized else weight
 
 
 def _codebook_payload(

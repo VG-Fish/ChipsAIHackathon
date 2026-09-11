@@ -74,9 +74,12 @@ def count_macs(model: nn.Module, input_shape: tuple[int, int]) -> int:
         # Each learned skip edge performs one per-element multiply/add. The
         # branch convolutions/linears are counted by their own hooks.
         if hasattr(module, "pai_skip_connection_count"):
-            edges = int(module.pai_skip_connection_count)
+            edges = int(getattr(module, "pai_skip_connection_count"))
         else:
-            edges = sum(weight.shape[0] for weight in module.skip_weights)
+            skip_weights = getattr(module, "skip_weights", None)
+            if not isinstance(skip_weights, nn.ParameterList):
+                return
+            edges = sum(weight.shape[0] for weight in skip_weights)
         total += output.numel() * edges
 
     for module in model.modules():
@@ -139,7 +142,8 @@ def measure_peak_activation_bytes(
     # may reuse storage internally, but it is safe for arena sizing.
     branch_handles = []
     for parent in model.modules():
-        if not (hasattr(parent, "layer_array") and hasattr(parent, "skip_weights")):
+        layer_array = getattr(parent, "layer_array", None)
+        if not isinstance(layer_array, nn.ModuleList):
             continue
         branch_sizes: list[int] = []
 
@@ -147,7 +151,7 @@ def measure_peak_activation_bytes(
             if isinstance(output, torch.Tensor):
                 sizes.append(output.numel())
 
-        for branch in parent.layer_array:
+        for branch in layer_array:
             branch_handles.append(branch.register_forward_hook(branch_hook))
 
         branch_handles.append(

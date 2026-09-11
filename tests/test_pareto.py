@@ -96,7 +96,9 @@ def test_best_by_selects_the_cheapest_frontier_point():
     frontier = ParetoFrontier(cost_keys=KEYS, minimum_accuracy=0.0, patience=2)
     frontier.add(point("big", 0.95, 3000, 2.0))
     frontier.add(point("small", 0.91, 1500, 0.8))
-    assert frontier.best_by("deployed_params").label == "small"
+    best = frontier.best_by("deployed_params")
+    assert best is not None
+    assert best.label == "small"
 
 
 def test_patience_must_be_positive():

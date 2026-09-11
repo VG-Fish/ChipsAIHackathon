@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 from pathlib import Path
+from typing import Any, cast
 
 import torch
 import yaml
@@ -32,7 +34,7 @@ from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.export.benchmark import benchmark_module, benchmark_scripted_model
-from kws.models.ds_cnn import build_ds_cnn
+from kws.models.ds_cnn import FeatureModel, build_ds_cnn
 from kws.optimize.cluster import (
     ClusterSpec,
     CodebookProjector,
@@ -368,7 +370,7 @@ def load_candidate_model(candidate: dict, config: dict) -> tuple[torch.nn.Module
     run's recorded metadata, re-perforated to the same shape, and loaded from
     the run's own clean checkpoint.
     """
-    from perforatedai import utils_perforatedai as UPA
+    UPA: Any = importlib.import_module("perforatedai.utils_perforatedai")
 
     from kws.optimize.dendritic import (
         build_cycle_base,
@@ -485,6 +487,11 @@ def load_candidate_model(candidate: dict, config: dict) -> tuple[torch.nn.Module
             f"checkpoint is missing: {resumed_value!r}"
         )
     if resume_record.get("status") == "complete":
+        if resumed is None:
+            raise FileNotFoundError(
+                f"candidate {save_name!r} records a completed KD resume without "
+                "a checkpoint path"
+            )
         state = torch.load(resumed, map_location="cpu", weights_only=False)
         ensure_clean_dendrite_skip_weights(model, state["model_state_dict"])
         model.load_state_dict(state["model_state_dict"], strict=True)
@@ -500,7 +507,7 @@ def stage_cluster(
     device: torch.device,
     candidate_id: str,
     recipe_id: str,
-) -> tuple[dict, object]:
+) -> tuple[dict, CodebookProjector]:
     """Step 4: layer-wise weight clustering, then learn the codebook."""
     cluster_cfg = config["cluster"]
     spec = ClusterSpec.from_config(cluster_cfg)
@@ -556,7 +563,10 @@ def stage_cluster(
 def _feature_dim(model: torch.nn.Module, input_shape: tuple[int, int]) -> int:
     device = next(model.parameters()).device
     with torch.no_grad():
-        return model.forward_features(torch.zeros(1, 1, *input_shape, device=device)).shape[1]
+        feature_model = cast(FeatureModel, model)
+        return feature_model.forward_features(
+            torch.zeros(1, 1, *input_shape, device=device)
+        ).shape[1]
 
 
 def stage_quantize(

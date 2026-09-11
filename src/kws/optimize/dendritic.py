@@ -20,20 +20,27 @@ The test split is never loaded or consulted by this module.
 import argparse
 import csv
 import hashlib
+import importlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import monotonic
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
 import yaml
-from perforatedai import globals_perforatedai as GPA
-from perforatedai import utils_perforatedai as UPA
+
+# PerforatedAI is distributed as compiled extension modules without typing
+# stubs. Keep its dynamic API behind one narrow, explicit boundary.
+GPA: Any = importlib.import_module("perforatedai.globals_perforatedai")
+UPA: Any = importlib.import_module("perforatedai.utils_perforatedai")
 
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
+from kws.models.ds_cnn import FeatureModel
+from kws.models.ds_cnn import DSCNN
 from kws.models.layers import DSConvBlock
 from kws.optimize.kd import (
     DistillationCriterion,
@@ -140,7 +147,8 @@ def build_cycle_base(
     model_cfg["block_channels"] = generated_channels
 
     if target_model_cfg is not None:
-        if target_model_cfg["initial_channels"] != pruned.stem[0].out_channels:
+        stem_conv = cast(nn.Conv2d, pruned.stem[0])
+        if target_model_cfg["initial_channels"] != stem_conv.out_channels:
             raise ValueError("XXS initial_channels does not match the pruned model")
         if target_model_cfg["block_channels"] != generated_channels:
             raise ValueError(
@@ -151,7 +159,7 @@ def build_cycle_base(
     return pruned, checkpoint, model_cfg
 
 
-def estimate_one_dendrite_params(model: nn.Module) -> int:
+def estimate_one_dendrite_params(model: DSCNN) -> int:
     """Estimate deployed parameters after one dendrite on blocks and head.
 
     Each selected module is copied once. PAI folds its branch connections
@@ -232,7 +240,8 @@ def _restore_single_dendrite_skip_weights(
                 f"PAI cleanup removed expected module {name!r}; refusing to "
                 "write an unverifiable final checkpoint"
             ) from exc
-        if not hasattr(clean_module, "layer_array") or len(clean_module.layer_array) < 2:
+        layer_array = getattr(clean_module, "layer_array", None)
+        if not isinstance(layer_array, nn.ModuleList) or len(layer_array) < 2:
             raise RuntimeError(
                 f"PAI cleanup module {name!r} has no two-branch layer_array"
             )
@@ -319,9 +328,10 @@ def ensure_clean_dendrite_skip_weights(
             raise RuntimeError(
                 f"clean checkpoint references missing PAI module {module_name!r}"
             ) from exc
-        if not hasattr(module, "skip_weights"):
-            module.skip_weights = nn.ParameterList()
-        skip_weights = module.skip_weights
+        skip_weights = getattr(module, "skip_weights", None)
+        if not isinstance(skip_weights, nn.ParameterList):
+            skip_weights = nn.ParameterList()
+            module.skip_weights = skip_weights
         for index, tensor in sorted(entries):
             while len(skip_weights) <= index:
                 skip_weights.append(
@@ -363,7 +373,7 @@ def _is_dendrite_parameter(name: str, model: nn.Module | None = None) -> bool:
                         layer_array = model.get_submodule(array_name)
                     except AttributeError:
                         layer_array = None
-                    if layer_array is not None and hasattr(layer_array, "__len__"):
+                    if isinstance(layer_array, nn.ModuleList):
                         return branch_index < len(layer_array) - 1
                 # The only safe name-only assumption is the one-dendrite
                 # deployment used by this cycle: branch zero is residual.
@@ -608,7 +618,10 @@ def resume_kd_finetune(
 def _clean_feature_dim(model: nn.Module, input_shape: tuple[int, int]) -> int:
     device = next(model.parameters()).device
     with torch.no_grad():
-        return model.forward_features(torch.zeros(1, 1, *input_shape, device=device)).shape[1]
+        feature_model = cast(FeatureModel, model)
+        return feature_model.forward_features(
+            torch.zeros(1, 1, *input_shape, device=device)
+        ).shape[1]
 
 
 def configure_perforatedai(config: dict, device: torch.device) -> None:
@@ -874,7 +887,11 @@ def run_cycle(
 
         mode = current_pai_mode()
         if mode != last_mode or restructured:
-            phase = {"epoch": epoch + 1, "restructured": restructured, **describe_learning_phase(model)}
+            phase: dict[str, Any] = {
+                "epoch": epoch + 1,
+                "restructured": restructured,
+                **describe_learning_phase(model),
+            }
             phase_trail.append(phase)
             logger.info(
                 "PAI phase -> %s: base %d trainable / %d frozen, dendrite %d "

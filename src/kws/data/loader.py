@@ -14,18 +14,22 @@ def build_data_loader(dataset: Dataset, train_cfg: Mapping, *, shuffle: bool) ->
     if num_workers < 0:
         raise ValueError("num_workers must be non-negative")
 
-    kwargs = {
-        "dataset": dataset,
-        "batch_size": int(train_cfg["batch_size"]),
-        "shuffle": shuffle,
-        "num_workers": num_workers,
-    }
+    batch_size = int(train_cfg["batch_size"])
     if num_workers:
         prefetch_factor = int(train_cfg.get("prefetch_factor", 2))
         if prefetch_factor <= 0:
             raise ValueError("prefetch_factor must be positive")
-        kwargs.update(
+        return DataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
             persistent_workers=bool(train_cfg.get("persistent_workers", True)),
             prefetch_factor=prefetch_factor,
         )
-    return DataLoader(**kwargs)
+    return DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+    )

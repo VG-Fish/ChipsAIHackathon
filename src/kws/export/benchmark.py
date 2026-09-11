@@ -197,7 +197,10 @@ def export_and_benchmark(
         parity_max_abs_diff=measure_parity(session, input_name, torch_model, input_shape),
         f1_per_class=metrics["f1_per_class"],
         confusion_matrix=metrics["confusion_matrix"],
-        **latency,
+        latency_ms_mean=latency["latency_ms_mean"],
+        latency_ms_p50=latency["latency_ms_p50"],
+        latency_ms_p90=latency["latency_ms_p90"],
+        latency_ms_p99=latency["latency_ms_p99"],
     )
 
     logger.info(
@@ -434,7 +437,10 @@ def benchmark_module(
         parity_max_abs_diff=parity,
         f1_per_class=metrics["f1_per_class"],
         confusion_matrix=metrics["confusion_matrix"],
-        **latency,
+        latency_ms_mean=latency["latency_ms_mean"],
+        latency_ms_p50=latency["latency_ms_p50"],
+        latency_ms_p90=latency["latency_ms_p90"],
+        latency_ms_p99=latency["latency_ms_p99"],
     )
     logger.info(
         "Benchmark on %s: %s accuracy %.4f, %.3f ms p50, %d bytes on disk",

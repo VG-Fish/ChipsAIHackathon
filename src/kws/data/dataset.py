@@ -58,8 +58,8 @@ class SpeechCommandsKWSDataset(Dataset):
             waveform = waveform[:, :self.clip_len]
         return waveform
 
-    def __getitem__(self, idx: int):
-        entry = self.entries[idx]
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
+        entry = self.entries[index]
         waveform = self._load_waveform(entry)
         if self.waveform_augmenter is not None:
             waveform = self.waveform_augmenter(waveform)

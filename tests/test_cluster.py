@@ -1,6 +1,7 @@
 import pytest
 import torch
 import torch.nn as nn
+from typing import cast
 
 from kws.models.ds_cnn import DSCNN
 from kws.optimize.cluster import (
@@ -184,4 +185,4 @@ def test_quantization_target_payload_retains_codebooks(tmp_path):
     assert info["format"] == "kws-codebook-v1"
     assert payload["bits"] == 4
     assert payload["layers"]["0"]["index_bits"] == 4
-    assert info["storage_bytes"] < model[0].weight.numel() * 4
+    assert info["storage_bytes"] < cast(nn.Linear, model[0]).weight.numel() * 4

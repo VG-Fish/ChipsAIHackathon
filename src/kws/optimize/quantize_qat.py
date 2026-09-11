@@ -18,6 +18,7 @@ quietly break the codebook.
 """
 import argparse
 from pathlib import Path
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -27,6 +28,7 @@ from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
+from kws.models.ds_cnn import FeatureModel
 from kws.optimize.kd import (
     DistillationCriterion,
     FrozenTeacher,
@@ -66,10 +68,10 @@ class QATWrapper(nn.Module):
         self.dequant = DeQuantStub()
 
     def forward_features(self, x):
-        return self.model.forward_features(self.quant(x))
+        return cast(FeatureModel, self.model).forward_features(self.quant(x))
 
     def classify_features(self, features):
-        return self.dequant(self.model.classify_features(features))
+        return self.dequant(cast(FeatureModel, self.model).classify_features(features))
 
     def forward(self, x):
         return self.dequant(self.model(self.quant(x)))
@@ -92,7 +94,7 @@ class QuantizableDendriticResidual(nn.Module):
 
     def __init__(self, pai_module: nn.Module):
         super().__init__()
-        processors = list(pai_module.processor_array)
+        processors = list(cast(list[object], getattr(pai_module, "processor_array")))
         if any(processor is not None for processor in processors):
             raise ValueError(
                 "quantization-safe PAI conversion does not support pre/post "
@@ -103,13 +105,20 @@ class QuantizableDendriticResidual(nn.Module):
 
         # Preserve these names so clustered-layer assignments and clean PAI
         # checkpoints still address the same tensors after replacement.
-        self.layer_array = pai_module.layer_array
-        self.skip_weights = pai_module.skip_weights
-        self.view_shape = tuple(int(value) for value in pai_module.view_tuple.tolist())
-        self.branch_dequant = nn.ModuleList(
+        self.layer_array: nn.ModuleList = cast(
+            nn.ModuleList, getattr(pai_module, "layer_array")
+        )
+        self.skip_weights: nn.ParameterList = cast(
+            nn.ParameterList, getattr(pai_module, "skip_weights")
+        )
+        view_tuple = cast(torch.Tensor, getattr(pai_module, "view_tuple"))
+        self.view_shape: tuple[int, ...] = tuple(
+            int(value) for value in view_tuple.tolist()
+        )
+        self.branch_dequant: nn.ModuleList = nn.ModuleList(
             [DeQuantStub() for _ in self.layer_array]
         )
-        self.output_quant = QuantStub()
+        self.output_quant: nn.Module = QuantStub()
 
     @property
     def pai_skip_connection_count(self) -> int:
@@ -375,7 +384,10 @@ def quantize_aware_distill_model(
 
 def _prepared_feature_dim(model: nn.Module, input_shape: tuple[int, int]) -> int:
     with torch.no_grad():
-        return model.forward_features(torch.zeros(1, 1, *input_shape)).shape[1]
+        feature_model = cast(FeatureModel, model)
+        return feature_model.forward_features(
+            torch.zeros(1, 1, *input_shape)
+        ).shape[1]
 
 
 def quantize_aware_distill(

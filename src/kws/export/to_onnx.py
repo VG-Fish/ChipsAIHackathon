@@ -28,7 +28,7 @@ def export_module_to_onnx(
 
     Path(onnx_path).parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
-        model, dummy, onnx_path,
+        model, (dummy,), onnx_path,
         input_names=["features"], output_names=["logits"],
         opset_version=18,
     )

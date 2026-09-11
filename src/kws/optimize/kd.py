@@ -17,12 +17,13 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from kws.models.ds_cnn import build_ds_cnn
+from kws.models.ds_cnn import FeatureModel, build_ds_cnn
 from kws.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -304,7 +305,10 @@ def supports_pooled_features(model: nn.Module, input_shape: tuple[int, int]) -> 
     try:
         device = next(model.parameters()).device
         with torch.no_grad():
-            features = model.forward_features(torch.zeros(1, 1, *input_shape, device=device))
+            feature_model = cast(FeatureModel, model)
+            features = feature_model.forward_features(
+                torch.zeros(1, 1, *input_shape, device=device)
+            )
         return features.dim() == 2
     except Exception:  # noqa: BLE001 - any failure means "not usable", not a crash
         return False

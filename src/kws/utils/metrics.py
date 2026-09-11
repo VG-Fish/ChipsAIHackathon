@@ -18,11 +18,11 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, num_keywords: int, l
 
     non_keyword_mask = ~is_keyword_true
     false_accepts = np.sum(non_keyword_mask & is_keyword_pred)
-    far = false_accepts / max(non_keyword_mask.sum(), 1)
+    far = float(false_accepts) / max(int(non_keyword_mask.sum()), 1)
 
     keyword_mask = is_keyword_true
     false_rejects = np.sum(keyword_mask & (y_true != y_pred))
-    frr = false_rejects / max(keyword_mask.sum(), 1)
+    frr = float(false_rejects) / max(int(keyword_mask.sum()), 1)
 
     return {
         "accuracy": accuracy,

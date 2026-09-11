@@ -3,6 +3,7 @@ import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -11,7 +12,7 @@ import yaml
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
-from kws.models.ds_cnn import build_ds_cnn
+from kws.models.ds_cnn import FeatureModel, build_ds_cnn
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
 from kws.utils.seed import set_seed
@@ -156,11 +157,12 @@ def run_finetune(
                 logits = model(features)
                 losses = {"total": criterion(logits, labels)}
             else:
+                feature_model = cast(FeatureModel, model)
                 student_features = (
-                    model.forward_features(features) if kd.uses_features else None
+                    feature_model.forward_features(features) if kd.uses_features else None
                 )
                 logits = (
-                    model.classify_features(student_features)
+                    feature_model.classify_features(student_features)
                     if student_features is not None
                     else model(features)
                 )
