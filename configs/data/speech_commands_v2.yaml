@@ -6,20 +6,19 @@ dataset:
   sample_rate: 16000
   clip_seconds: 1.0
 
-# Target keywords are the "real" classes. Any subset of the 35-word vocabulary
-# works here -- everything else becomes the pooled "unknown" class.
-target_keywords: ["yes", "no", "on", "off"]
+# Target keywords are the "real" classes. Everything else becomes the pooled
+# "unknown" class.
+target_keywords: ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
 
 unknown:
   # Words pooled into "unknown" = all v2 words minus target_keywords.
-  # Capped per-epoch to ~this multiple of the average target-keyword sample
-  # count, since the leftover-word pool has far more raw samples.
-  max_ratio_to_avg_keyword_count: 2.5
+  # Draw this multiple of the average target-keyword class count per split.
+  target_ratio_to_avg_keyword_count: 2.0
 
 silence:
   background_noise_dir: "_background_noise_"
-  # Fraction of an epoch's samples that should be synthesized silence clips.
-  fraction_of_epoch: 0.1
+  # Synthesize this multiple of the average target-keyword class count per split.
+  target_ratio_to_avg_keyword_count: 2.0
   min_gain: 0.1
   max_gain: 1.0
 

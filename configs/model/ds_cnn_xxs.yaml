@@ -1,6 +1,6 @@
 # DS-CNN-XXS: first base architecture for size-constrained dendrite search.
 # It is initialized by structurally pruning the trained XS block widths from
-# 40 to 18. The unperforated six-class model has exactly 1,716 parameters for
+# 40 to 18. The unperforated 12-class model has exactly 1,830 parameters for
 # input (40, 98).
 name: ds_cnn_xxs
 initial_channels: 18
@@ -8,4 +8,3 @@ initial_kernel: 5
 initial_stride: 2
 block_channels: [18, 18]
 dropout: 0.2
-

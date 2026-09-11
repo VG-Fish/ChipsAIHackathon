@@ -144,7 +144,7 @@ measured against for the final, dendrite-compressed model.
   | DS-CNN-L | 467,942 | 97.27% | 1.45% | 3.76% |
 
   Both already approach/exceed the ~92% reference without augmentation —
-  expected, since this 6-way task is easier than the 35-word benchmark DS-CNN
+  expected, since this historical six-way task is easier than the 35-word benchmark DS-CNN
   was originally designed for. Confirms the data/model/training loop are
   correct.
 - **Augmentation (`src/kws/data/augment.py`)** — implemented and verified
@@ -181,12 +181,15 @@ measured against for the final, dendrite-compressed model.
 
 ## Task setup
 
-Target classes: a handful of keywords (`configs/data/speech_commands_v2.yaml
--> target_keywords`, default `["yes", "no", "on", "off"]`) plus two synthesized
+Target classes: ten keywords (`configs/data/speech_commands_v2.yaml
+-> target_keywords`: yes, no, up, down, left, right, on, off, stop, go) plus two
 classes:
-- `_unknown_` — pooled from the ~29 remaining Speech Commands v2 words (real,
+- `_unknown_` — pooled from the remaining Speech Commands v2 words (real,
   in-domain negative examples, not an external corpus)
 - `_silence_` — fresh random crops of background noise, resampled every epoch
+
+For each split, `_unknown_` and `_silence_` are each sampled at twice the mean
+number of examples in the ten keyword classes.
 
 ## Repo layout
 
@@ -286,27 +289,27 @@ uv run python -m kws.data.download
 uv run python -m kws.train \
   --model-config configs/model/ds_cnn_xs.yaml \
   --train-config configs/train/full.yaml \
-  --checkpoint models/checkpoints/ds_cnn_xs.pt
+  --checkpoint models/checkpoints/ds_cnn_xs_12class.pt
 
 # 3. Evaluate (accuracy, per-class F1, confusion matrix, FAR/FRR)
-uv run python -m kws.evaluate --checkpoint models/checkpoints/ds_cnn_xs.pt \
+uv run python -m kws.evaluate --checkpoint models/checkpoints/ds_cnn_xs_12class.pt \
   --report reports/ds_cnn_xs.json
 
 # 4. Export to ONNX (with a PyTorch-vs-ONNXRuntime parity check)
-uv run python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs.pt \
+uv run python -m kws.export.to_onnx --checkpoint models/checkpoints/ds_cnn_xs_12class.pt \
   --onnx-path models/exported/ds_cnn_xs.onnx
 
 # 5. Step 2: distill the fixed teacher into the deployment-shaped student
 uv run python -m kws.optimize.distill \
-  --teacher-checkpoint models/checkpoints/ds_cnn_l.pt \
+  --teacher-checkpoint models/checkpoints/ds_cnn_l_12class.pt \
   --student-model-config configs/model/ds_cnn_xs.yaml \
-  --student-checkpoint models/checkpoints/ds_cnn_xs.pt \
-  --out-checkpoint models/checkpoints/ds_cnn_xs_distilled_warm.pt
+  --student-checkpoint models/checkpoints/ds_cnn_xs_12class.pt \
+  --out-checkpoint models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
 
 # 6. Steps 3a-3b: sparsify + KD fine-tune (structured, or --kind nm --n 2 --m 4)
-uv run python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l.pt \
+uv run python -m kws.optimize.prune --checkpoint models/checkpoints/ds_cnn_l_12class.pt \
   --kind structured --keep-ratio 0.5 \
-  --teacher-checkpoint models/checkpoints/ds_cnn_l.pt \
+  --teacher-checkpoint models/checkpoints/ds_cnn_l_12class.pt \
   --out-checkpoint models/checkpoints/ds_cnn_l_pruned.pt
 
 # 7. Step 3: the full sparsity sweep with the Pareto stopping rule
@@ -326,11 +329,11 @@ worker. Speed/pitch augmentation snaps random factors to a fine rational rate
 grid and reuses prebuilt resampling kernels, avoiding the very large one-off
 sinc kernels produced by arbitrary integer sample-rate pairs.
 
-## Model sizes (6-way task: 4 keywords + unknown + silence)
+## Model sizes (12-way task: 10 keywords + unknown + silence)
 
 | Variant   | Params  | Role                                              |
 |-----------|---------|----------------------------------------------------|
-| DS-CNN-XS | ~3,850  | Primary Phase 3 dendrite-growth starting point     |
-| DS-CNN-S  | ~24K    | Secondary MCU-friendly reference point             |
-| DS-CNN-M  | ~147K   | Mid-size comparison                                |
-| DS-CNN-L  | ~468K   | Accuracy ceiling / pruning & KD teacher             |
+| DS-CNN-XS | 4,096   | Primary Phase 3 dendrite-growth starting point     |
+| DS-CNN-S  | 24,188  | Secondary MCU-friendly reference point             |
+| DS-CNN-M  | 147,940 | Mid-size comparison                                |
+| DS-CNN-L  | 469,604 | Accuracy ceiling / pruning & KD teacher             |

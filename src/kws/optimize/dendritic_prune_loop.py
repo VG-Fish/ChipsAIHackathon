@@ -615,7 +615,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--checkpoint",
-        default="models/checkpoints/ds_cnn_xs_distilled_warm.pt",
+        default="models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt",
     )
     parser.add_argument(
         "--teacher-checkpoint",

@@ -23,9 +23,10 @@ def unknown_words(target_keywords: list[str]) -> list[str]:
     return unknown
 
 
-def unknown_sample_cap(avg_keyword_count: float, max_ratio_to_avg_keyword_count: float) -> int:
-    """Cap on how many "unknown" samples to draw per epoch, relative to an average
-    target-keyword class's sample count (the leftover-word pool has far more raw
-    samples than any single keyword, so it must be subsampled or it will dominate).
+def unknown_sample_cap(avg_keyword_count: float, target_ratio_to_avg_keyword_count: float) -> int:
+    """Number of unknown samples to draw relative to the keyword-class mean.
+
+    The leftover-word pool has far more raw samples than any single keyword, so
+    it is deliberately subsampled to the configured target count.
     """
-    return int(round(avg_keyword_count * max_ratio_to_avg_keyword_count))
+    return int(round(avg_keyword_count * target_ratio_to_avg_keyword_count))

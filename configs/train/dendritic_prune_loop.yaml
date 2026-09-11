@@ -32,7 +32,7 @@ pareto_relative_cost_tolerance: 0.05
 maximum_accuracy_drop: null
 
 # The fixed teacher for every KD term inside the sweep (steps 3b and 3d).
-teacher_checkpoint: models/checkpoints/ds_cnn_l.pt
+teacher_checkpoint: models/checkpoints/ds_cnn_l_12class.pt
 
 reuse_completed_start_run: null
 reuse_completed_candidates: true

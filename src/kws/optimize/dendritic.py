@@ -1022,12 +1022,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--checkpoint",
-        default="models/checkpoints/ds_cnn_xs_distilled_warm.pt",
+        default="models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt",
     )
     parser.add_argument("--save-name", default="dendritic_xxs_cycle1")
     parser.add_argument(
         "--teacher-checkpoint",
-        default="models/checkpoints/ds_cnn_l.pt",
+        default="models/checkpoints/ds_cnn_l_12class.pt",
         help="Fixed teacher for the cycle's KD loss and the step-3d resume",
     )
     args = parser.parse_args()

@@ -71,8 +71,9 @@ class SpeechCommandsKWSDataset(Dataset):
 
 def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
                     label_map: dict[str, int], unknown_pool: Collection[str],
-                    max_ratio_to_avg_keyword_count: float,
-                    silence_fraction_of_epoch: float, rng: random.Random) -> list[Entry]:
+                    unknown_ratio_to_avg_keyword_count: float,
+                    silence_ratio_to_avg_keyword_count: float,
+                    rng: random.Random) -> list[Entry]:
     by_word: dict[str, list[str]] = {}
     for word, rel_path in split_index[split]:
         by_word.setdefault(word, []).append(rel_path)
@@ -87,18 +88,24 @@ def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
         entries.extend(Entry(label=label, rel_path=p) for p in paths)
 
     avg_keyword_count = sum(keyword_counts) / max(len(keyword_counts), 1)
-    cap = unknown_sample_cap(avg_keyword_count, max_ratio_to_avg_keyword_count)
+    unknown_count = unknown_sample_cap(
+        avg_keyword_count, unknown_ratio_to_avg_keyword_count,
+    )
     # Sets have process-dependent iteration order because of Python hash
     # randomization. Sort the pool before shuffling so a fixed ``rng`` seed
     # selects the same unknown examples in every process.
     unknown_paths = [p for w in sorted(unknown_pool) for p in by_word.get(w, [])]
     rng.shuffle(unknown_paths)
-    unknown_paths = unknown_paths[:cap]
+    if len(unknown_paths) < unknown_count:
+        raise ValueError(
+            f"split {split!r} has only {len(unknown_paths)} unknown samples, "
+            f"but needs {unknown_count} to satisfy the configured class balance"
+        )
+    unknown_paths = unknown_paths[:unknown_count]
     unknown_label = label_map[UNKNOWN_LABEL_NAME]
     entries.extend(Entry(label=unknown_label, rel_path=p) for p in unknown_paths)
 
-    non_silence_count = len(entries)
-    num_silence = int(round(non_silence_count * silence_fraction_of_epoch / (1 - silence_fraction_of_epoch)))
+    num_silence = int(round(avg_keyword_count * silence_ratio_to_avg_keyword_count))
     silence_label = label_map[SILENCE_LABEL_NAME]
     entries.extend(Entry(label=silence_label, rel_path=None) for _ in range(num_silence))
 
@@ -141,8 +148,8 @@ def build_datasets(data_cfg: dict, augment: bool, seed: int = 0):
     for split in (TRAIN, VAL, TEST):
         entries = _build_entries(
             split_index, split, label_map, unknown_pool,
-            unknown_cfg["max_ratio_to_avg_keyword_count"],
-            silence_cfg["fraction_of_epoch"], rng,
+            unknown_cfg["target_ratio_to_avg_keyword_count"],
+            silence_cfg["target_ratio_to_avg_keyword_count"], rng,
         )
         is_train = split == TRAIN and augment
         waveform_augmenter = WaveformAugmenter(noise_dir, sample_rate) if is_train else None

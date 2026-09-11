@@ -1,4 +1,4 @@
-# DS-CNN-M: ~147K params (measured via torchinfo/thop for 6-way task, input (40, 98)).
+# DS-CNN-M: 147,940 parameters for the 12-way task (input (40, 98)).
 name: ds_cnn_m
 initial_channels: 64
 initial_kernel: 10

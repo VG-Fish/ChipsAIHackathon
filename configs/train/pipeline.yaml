@@ -16,17 +16,17 @@ report_path: reports/pipeline/pipeline.yaml
 teacher:
   model_config: configs/model/ds_cnn_l.yaml
   train_config: configs/train/full.yaml
-  checkpoint: models/checkpoints/ds_cnn_l.pt
+  checkpoint: models/checkpoints/ds_cnn_l_12class.pt
 
 student:
-  # XS is the deployment-shaped architecture: ~3,850 parameters, sized against
+  # XS is the deployment-shaped architecture: 4,096 parameters, sized against
   # the ~3,800-parameter Edge Impulse reference point.
   model_config: configs/model/ds_cnn_xs.yaml
   train_config: configs/train/distill_imc.yaml
-  checkpoint: models/checkpoints/ds_cnn_xs_distilled_warm.pt
+  checkpoint: models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
   # Warm-starting from the independently trained XS beat distilling from
   # scratch by 6.3 points of test accuracy (79.3% -> 85.6%), so it stays on.
-  warm_start_checkpoint: models/checkpoints/ds_cnn_xs.pt
+  warm_start_checkpoint: models/checkpoints/ds_cnn_xs_12class.pt
 
 sparsity:
   train_config: configs/train/dendritic_cycle1.yaml
