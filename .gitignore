@@ -18,3 +18,4 @@ dendritic_*/
 .DS_Store
 :memory:.ses
 .env
+.ruff_cache/
