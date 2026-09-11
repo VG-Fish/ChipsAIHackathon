@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 
-class DSConvBlockSequence(nn.Module):
+class DSConvBlockSequence(nn.Sequential):
     """A sequential container whose items are known DS-CNN blocks.
 
     ``nn.Sequential`` exposes its children as the base ``nn.Module`` type in
@@ -15,9 +15,7 @@ class DSConvBlockSequence(nn.Module):
     """
 
     def __init__(self, *blocks: "DSConvBlock") -> None:
-        super().__init__()
-        for index, block in enumerate(blocks):
-            self.add_module(str(index), block)
+        super().__init__(*blocks)
 
     def __getitem__(self, index: int) -> "DSConvBlock":
         if index < 0:
