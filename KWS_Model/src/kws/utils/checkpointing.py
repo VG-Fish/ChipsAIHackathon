@@ -49,7 +49,14 @@ def restore_rng_state(state: dict[str, Any]) -> None:
     if state.get("numpy_rng_state") is not None:
         np.random.set_state(state["numpy_rng_state"])
     if state.get("torch_cpu_rng_state") is not None:
-        torch.set_rng_state(state["torch_cpu_rng_state"])
+        # Callers may have loaded the checkpoint with map_location=<accelerator>
+        # (train.py does), which drags this uint8 tensor onto MPS/CUDA.
+        # set_rng_state demands a CPU ByteTensor, so normalise rather than
+        # forcing every caller to remember where RNG state has to live.
+        cpu_rng_state = state["torch_cpu_rng_state"].to(
+            device="cpu", dtype=torch.uint8
+        )
+        torch.set_rng_state(cpu_rng_state)
     cuda_states = state.get("torch_cuda_rng_states") or []
     if cuda_states and torch.cuda.is_available():
         torch.cuda.set_rng_state_all(cuda_states)

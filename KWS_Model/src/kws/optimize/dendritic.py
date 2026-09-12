@@ -18,6 +18,7 @@ The test split is never loaded or consulted by this module.
 """
 
 import argparse
+import contextlib
 import csv
 import hashlib
 import importlib
@@ -188,7 +189,10 @@ def _load_pai_sidecar(
     expected_run_id: str | None = None,
 ) -> dict:
     """Load and validate one complete KWS/native PAI recovery pair."""
-    state = torch.load(sidecar_path, map_location=device, weights_only=False)
+    # CPU, not the accelerator: the sidecar carries RNG and DataLoader
+    # generator states that set_state() requires as CPU ByteTensors.  See the
+    # matching note in kws.train.run_finetune.
+    state = torch.load(sidecar_path, map_location="cpu", weights_only=False)
     if not isinstance(state, dict):
         raise ValueError(f"PAI sidecar {sidecar_path} is not a mapping")
 
@@ -278,8 +282,9 @@ def _load_pai_sidecar(
             f"PAI native latest state does not match sidecar {sidecar_path}; "
             "refusing to resume an unpaired candidate"
         )
-    native_state = torch.load(expected_native, map_location="cpu", weights_only=False)
-    validate_checkpoint_run_id(native_state, state["run_id"], source=expected_native)
+    # The digest check above already proves this native file is the exact one
+    # this sidecar attested.  It is a safetensors blob with no run_id of its
+    # own, so there is nothing further to validate by loading it here.
     return state
 
 
@@ -383,6 +388,26 @@ def _pai_epoch_record(
     }
 
 
+@contextlib.contextmanager
+def _pai_cwd(run_dir: Path):
+    """Scope the process cwd so PAI's relative ``save_name`` lands in the run.
+
+    PAI rejects a path separator in ``save_name`` (``utils_perforatedai.py:99``
+    exits the process), so it keeps the bare candidate leaf and resolves every
+    write -- native checkpoints, architecture CSVs, graphs -- against the
+    working directory.  Anything PAI writes outside this scope lands in the
+    repo root instead of the run.  The scope is kept narrow on purpose: the
+    data root in ``configs/data/*.yaml`` is itself relative, so holding the
+    chdir across training would break loading.
+    """
+    previous_cwd = Path.cwd()
+    try:
+        os.chdir(run_dir.parent)
+        yield
+    finally:
+        os.chdir(previous_cwd)
+
+
 def _save_pai_restart_pair(
     *,
     model: nn.Module,
@@ -411,25 +436,22 @@ def _save_pai_restart_pair(
     save_system = getattr(UPA, "save_system", None)
     if not callable(save_system):
         raise RuntimeError("installed PerforatedAI has no supported save_system API")
-    save_system(model, str(run_dir.parent), pai_run_name)
+    # save_system(net, folder, name) writes <folder>/<name>.pt, so the run
+    # directory is the folder and "latest" is the name.  Passing the candidate
+    # leaf as the name instead writes <parent>/<candidate>.pt and leaves the
+    # path asserted below missing.
+    save_system(model, str(run_dir), "latest")
 
     native_latest = (run_dir / "latest.pt").resolve()
     if not native_latest.is_file() or native_latest.is_symlink():
         raise RuntimeError(
             f"PerforatedAI did not create the required native checkpoint: {native_latest}"
         )
-    native_state = torch.load(native_latest, map_location="cpu", weights_only=False)
-    if not isinstance(native_state, dict):
-        raise RuntimeError(
-            f"PerforatedAI native checkpoint is not a mapping: {native_latest}"
-        )
-    if "run_id" in native_state and native_state["run_id"] != run_id:
-        raise ValueError(
-            f"native PAI checkpoint {native_latest} belongs to "
-            f"run_id={native_state.get('run_id')!r}, expected {run_id!r}"
-        )
-    native_state["run_id"] = run_id
-    atomic_torch_save(native_latest, native_state)
+    # The native file is safetensors (PAI's using_safe_tensors defaults on), so
+    # it cannot carry our run_id and must not be rewritten through torch.save --
+    # PAI's load_net reads it back with safetensors.load_file.  The sidecar's
+    # native_pai_latest_sha256 written below is what binds this file to this
+    # run, which is a stronger guarantee than an in-file field anyway.
     state = {
         "format_version": FRAMEWORK_CYCLE_VERSION,
         "kind": "kws_pai_training_state",
@@ -1376,9 +1398,7 @@ def run_cycle(
     # candidate leaf while its process-wide working directory is scoped to the
     # candidate parent and restored even on failure.
     pai_run_name = run_dir.name
-    previous_cwd = Path.cwd()
-    try:
-        os.chdir(run_dir.parent)
+    with _pai_cwd(run_dir):
         model = UPA.perforate_model(
             base,
             doing_pai=True,
@@ -1392,17 +1412,16 @@ def run_cycle(
                 raise RuntimeError(
                     "installed PerforatedAI has no supported load_system API"
                 )
+            # Mirror of the save contract: load_net reads <folder>/<name>.pt.
             restored = load_system(
                 model,
-                str(run_dir.parent),
-                pai_run_name,
+                str(run_dir),
+                "latest",
                 load_from_restart=True,
             )
             if restored is not None:
                 model = restored.to(device)
             logger.info("Loaded paired PAI restart state for %s", run_dir)
-    finally:
-        os.chdir(previous_cwd)
     logger.info("PAI-wrapped initial parameter count: %d", UPA.count_params(model))
 
     kd = None
@@ -1454,7 +1473,9 @@ def run_cycle(
             (train_loader, val_loader), pai_state.get("loader_generator_states", [])
         ):
             if getattr(loader, "generator", None) is not None and loader_state is not None:
-                loader.generator.set_state(loader_state)
+                loader.generator.set_state(
+                    loader_state.to(device="cpu", dtype=torch.uint8)
+                )
         if pai_recorder is not None:
             pai_recorder.reconcile(
                 int(pai_state.get("history_length", pai_recorder.count)),
@@ -1535,9 +1556,12 @@ def run_cycle(
             kd.eval()
         val_loss, val_acc = evaluate_loss_acc(model, val_loader, device, criterion)
         GPA.pai_tracker.add_extra_score(train_acc, "Train")
-        model, restructured, training_complete = (
-            GPA.pai_tracker.add_validation_score(val_acc, model)
-        )
+        # add_validation_score writes PAI's own latest.pt and the architecture
+        # CSVs through the relative save_name, so it has to run inside the scope.
+        with _pai_cwd(run_dir):
+            model, restructured, training_complete = (
+                GPA.pai_tracker.add_validation_score(val_acc, model)
+            )
         model = model.to(device)
         mode = current_pai_mode()
         phase_changed = mode != last_mode or restructured
@@ -1638,7 +1662,8 @@ def run_cycle(
             )
 
         if training_complete:
-            clean_model = export_final_pai_model(model, save_name)
+            with _pai_cwd(run_dir):
+                clean_model = export_final_pai_model(model, save_name)
             logger.info("PAI cycle complete; results saved under %s", save_name)
             break
 

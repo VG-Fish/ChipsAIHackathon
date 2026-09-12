@@ -276,7 +276,12 @@ def run_finetune(
             checkpoint_stage_state.get("loader_generator_states", []),
         ):
             if getattr(loader, "generator", None) is not None and loader_state is not None:
-                loader.generator.set_state(loader_state)
+                # set_state demands a CPU ByteTensor regardless of where the
+                # checkpoint was loaded; normalise so a caller's map_location
+                # cannot break resume.
+                loader.generator.set_state(
+                    loader_state.to(device="cpu", dtype=torch.uint8)
+                )
     else:
         start_epoch = 0
         global_step = 0
@@ -484,7 +489,13 @@ def train_model(model, datasets, label_map: dict, model_cfg: dict, train_cfg: di
     )
     best_path.parent.mkdir(parents=True, exist_ok=True)
     if resume_from is not None:
-        resume_state = torch.load(resume_from, map_location=device, weights_only=False)
+        # Load to CPU, not the accelerator: this payload carries RNG and
+        # DataLoader generator states that set_state() requires as CPU
+        # ByteTensors, and map_location=<accelerator> silently drags them onto
+        # MPS/CUDA and breaks every resume.  The tensors that do belong on the
+        # device get there via model.load_state_dict and
+        # move_optimizer_state_to_device below.  Matches the best/latest reads.
+        resume_state = torch.load(resume_from, map_location="cpu", weights_only=False)
         validate_checkpoint_run_id(resume_state, run_id, source=resume_from)
     run_id = run_id or (
         resume_state.get("run_id") if resume_state is not None else None

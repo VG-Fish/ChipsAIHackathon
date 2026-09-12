@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from safetensors.torch import save_file
 
 from kws.optimize import dendritic
 
@@ -77,7 +78,14 @@ def test_pai_pair_save_persists_kd_state_and_requires_matching_native_digest(
             return {"adapter_state_dict": adapter.state_dict(), "marker": "persisted"}
 
     def save_system(_model, folder, name):
-        torch.save({"native": name}, Path(folder) / name / "latest.pt")
+        # Mirror the real PerforatedAI contract: save_net writes
+        # <folder>/<name>.pt as safetensors (using_safe_tensors defaults on),
+        # NOT a torch pickle and NOT <folder>/<name>/latest.pt.  A fake that
+        # encodes our assumption instead of PAI's hid a crash that only
+        # surfaced on the first real dendrite save.
+        target = Path(folder) / f"{name}.pt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        save_file({"native": torch.zeros(1)}, target)
 
     monkeypatch.setattr(dendritic.UPA, "save_system", save_system)
     loaders = (
