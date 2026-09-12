@@ -63,6 +63,18 @@ epoch JSONL under `metrics/`, separate resumable `latest.pt` and deployable
 under `reports/`. The default in-checkout root `KWS_Model/outputs/` is ignored;
 an arbitrary directory inside the checkout cannot be ignored automatically.
 
+Adding `--graphs` to any of those commands turns each phase's JSONL into a
+watchable chart after every epoch: `graphs/<stage>/<phase>.csv` holds the same
+records one row per epoch, and `graphs/<stage>/<phase>.html` is a self-contained
+page that redraws the loss and accuracy curves and reloads itself every few
+seconds. Open `graphs/index.html` to see every phase in the run. Charts are
+derived data, so a failure to write one is logged and never ends a training run,
+and a run that was started without the flag can be charted after the fact:
+
+```bash
+uv run python -m kws.utils.graphs outputs/my-kws-run --watch
+```
+
 `manifest.yaml` is the run-identity authority. Every project-owned checkpoint
 records the manifest's `run_id`, including teacher/student training
 checkpoints, each sparsity candidate's prune/KD and resume-KD checkpoints, the

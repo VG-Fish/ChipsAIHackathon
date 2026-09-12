@@ -51,6 +51,7 @@ from kws.train import (
     run_finetune,
     validate_checkpoint_run_id,
 )
+from kws.utils import graphs
 from kws.utils.artifacts import ArtifactLayout
 from kws.utils.checkpointing import (
     CHECKPOINT_FORMAT_VERSION,
@@ -634,9 +635,14 @@ def main():
         default=None,
         help="Override the training-config seed (must be non-negative)",
     )
+    graphs.add_cli_flag(parser)
     args = parser.parse_args()
     if args.out_checkpoint is None and args.output_dir is None:
         parser.error("--out-checkpoint is required unless --output-dir is supplied")
+    if args.graphs:
+        if args.output_dir is None:
+            parser.error("--graphs requires --output-dir")
+        graphs.enable()
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)

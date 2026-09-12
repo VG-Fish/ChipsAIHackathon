@@ -35,6 +35,7 @@ from kws.optimize.dendritic import (
 from kws.optimize.kd import file_sha256
 from kws.optimize.pareto import ParetoFrontier, ParetoPoint
 from kws.train import resolve_manifest_run_id, validate_checkpoint_run_id
+from kws.utils import graphs
 from kws.utils.logging import get_logger
 from kws.utils.logging import run_session
 from kws.utils.artifacts import ArtifactLayout
@@ -666,7 +667,12 @@ def main() -> None:
         help="Override the training-config seed (must be non-negative)",
     )
     parser.add_argument("--output-dir", default=None)
+    graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    if args.graphs:
+        if args.output_dir is None:
+            parser.error("--graphs requires --output-dir")
+        graphs.enable()
 
     inputs = [
         (args.data_config, "data_config"),

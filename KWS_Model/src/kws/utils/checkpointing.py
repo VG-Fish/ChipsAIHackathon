@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import yaml
 
+from kws.utils import graphs
 from kws.utils.artifacts import ArtifactLayout, sha256_path
 
 
@@ -288,6 +289,9 @@ class MetricsRecorder:
         self.records.append(normalized)
         self._record_lines.append(line)
         self.digest = _digest_lines(self._record_lines)
+        # The durable record is committed above; the chart is derived from it
+        # and is refreshed only when --graphs asked for one.
+        graphs.update_from_recorder(self)
         return self.digest
 
     @property

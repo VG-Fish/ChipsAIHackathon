@@ -60,6 +60,7 @@ from kws.train import (
     train as train_from_scratch,
     validate_checkpoint_run_id,
 )
+from kws.utils import graphs
 from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout, sha256_path
 from kws.utils.checkpointing import record_input
@@ -1479,6 +1480,7 @@ def main() -> None:
         default=None,
         help="Exact run root for logs, metrics, checkpoints, PAI files, and reports",
     )
+    graphs.add_cli_flag(parser)
     args = parser.parse_args()
 
     stages = tuple(stage.strip() for stage in args.stages.split(",") if stage.strip())
@@ -1488,6 +1490,10 @@ def main() -> None:
 
     config = load_yaml(args.config)
     output_dir = args.output_dir if args.output_dir is not None else config.get("output_dir")
+    if args.graphs:
+        if output_dir is None:
+            parser.error("--graphs requires --output-dir (or output_dir in the config)")
+        graphs.enable()
     with run_session(output_dir, command="kws.pipeline", argv=__import__("sys").argv, seed=args.seed):
         run_pipeline(
             config,

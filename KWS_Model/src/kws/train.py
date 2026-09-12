@@ -16,6 +16,7 @@ from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import FeatureModel, build_ds_cnn
+from kws.utils import graphs
 from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout
 from kws.utils.checkpointing import (
@@ -663,10 +664,15 @@ def main():
         default=None,
         help="Override the training-config seed (must be non-negative)",
     )
+    graphs.add_cli_flag(parser)
     args = parser.parse_args()
 
     if args.checkpoint is None and args.output_dir is None:
         parser.error("--checkpoint is required unless --output-dir is supplied")
+    if args.graphs:
+        if args.output_dir is None:
+            parser.error("--graphs requires --output-dir")
+        graphs.enable()
 
     data_cfg = load_yaml(args.data_config)
     model_cfg = load_yaml(args.model_config)

@@ -62,6 +62,7 @@ from kws.train import (
     train_model,
     validate_checkpoint_run_id,
 )
+from kws.utils import graphs
 from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout, sha256_path
 from kws.utils.checkpointing import (
@@ -1796,7 +1797,12 @@ def main() -> None:
         default=None,
         help="Override the training-config seed (must be non-negative)",
     )
+    graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    if args.graphs:
+        if args.output_dir is None:
+            parser.error("--graphs requires --output-dir")
+        graphs.enable()
 
     inputs = [
         (args.data_config, "data_config"),
