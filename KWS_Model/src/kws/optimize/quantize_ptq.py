@@ -20,12 +20,21 @@ from kws.export.benchmark import run_split_through_graph
 from kws.export.to_onnx import export_to_onnx
 from kws.utils.logging import get_logger
 from kws.utils.metrics import compute_metrics
+from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
 
 
-def quantize_ptq(checkpoint_path: str, data_cfg: dict, onnx_fp32_path: Path, onnx_int8_path: Path) -> dict:
-    export_to_onnx(checkpoint_path, str(onnx_fp32_path))
+def quantize_ptq(
+    checkpoint_path: str,
+    data_cfg: dict,
+    onnx_fp32_path: Path,
+    onnx_int8_path: Path,
+    *,
+    seed: int = 0,
+) -> dict:
+    set_seed(seed)
+    export_to_onnx(checkpoint_path, str(onnx_fp32_path), seed=seed)
 
     quantize_dynamic(str(onnx_fp32_path), str(onnx_int8_path), weight_type=QuantType.QInt8)
 
@@ -34,7 +43,7 @@ def quantize_ptq(checkpoint_path: str, data_cfg: dict, onnx_fp32_path: Path, onn
     logger.info("FP32 ONNX size: %d bytes, int8 ONNX size: %d bytes (%.1f%% of fp32)",
                 fp32_size, int8_size, 100 * int8_size / fp32_size)
 
-    datasets, label_map = build_datasets(data_cfg, augment=False)
+    datasets, label_map = build_datasets(data_cfg, augment=False, seed=seed)
     label_names = [name for name, _ in sorted(label_map.items(), key=lambda kv: kv[1])]
     num_keywords = sum(1 for n in label_names if n not in ("_unknown_", "_silence_"))
     test_loader = DataLoader(datasets[TEST], batch_size=128, shuffle=False, num_workers=0)
@@ -56,12 +65,24 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--onnx-fp32-path", required=True)
     parser.add_argument("--onnx-int8-path", required=True)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed used for deterministic evaluation-set construction (default: 0)",
+    )
     args = parser.parse_args()
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)
 
-    quantize_ptq(args.checkpoint, data_cfg, Path(args.onnx_fp32_path), Path(args.onnx_int8_path))
+    quantize_ptq(
+        args.checkpoint,
+        data_cfg,
+        Path(args.onnx_fp32_path),
+        Path(args.onnx_int8_path),
+        seed=args.seed,
+    )
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import FeatureModel, build_ds_cnn
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
-from kws.utils.seed import set_seed
+from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
 
@@ -236,6 +236,7 @@ def train_model(model, datasets, label_map: dict, model_cfg: dict, train_cfg: di
             "label_map": label_map,
             "num_keywords": num_keywords,
             "val_acc": val_acc,
+            "seed": train_cfg["seed"],
         }
         if extra_checkpoint_fields:
             checkpoint.update(extra_checkpoint_fields)
@@ -257,7 +258,15 @@ def train_model(model, datasets, label_map: dict, model_cfg: dict, train_cfg: di
     return result.best_val_acc
 
 
-def train(data_cfg: dict, model_cfg: dict, train_cfg: dict, checkpoint_path: Path):
+def train(
+    data_cfg: dict,
+    model_cfg: dict,
+    train_cfg: dict,
+    checkpoint_path: Path,
+    *,
+    seed: int | None = None,
+):
+    train_cfg = with_seed(train_cfg, seed)
     set_seed(train_cfg["seed"])
     device = get_device()
 
@@ -282,13 +291,19 @@ def main():
     parser.add_argument("--model-config", required=True)
     parser.add_argument("--train-config", required=True)
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the training-config seed (must be non-negative)",
+    )
     args = parser.parse_args()
 
     data_cfg = load_yaml(args.data_config)
     model_cfg = load_yaml(args.model_config)
     train_cfg = load_yaml(args.train_config)
 
-    train(data_cfg, model_cfg, train_cfg, Path(args.checkpoint))
+    train(data_cfg, model_cfg, train_cfg, Path(args.checkpoint), seed=args.seed)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ from kws.optimize.kd import (
 from kws.train import run_finetune
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
-from kws.utils.seed import set_seed
+from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
 
@@ -106,8 +106,11 @@ def distill(
     train_cfg: dict,
     out_checkpoint: Path,
     student_checkpoint: str | None = None,
+    *,
+    seed: int | None = None,
 ) -> float:
     """Train the student against the fixed teacher; return the best val accuracy."""
+    train_cfg = with_seed(train_cfg, seed)
     set_seed(train_cfg["seed"])
     device = get_device()
 
@@ -193,6 +196,12 @@ def main():
         help="Optional warm-start checkpoint; omit to train the student from scratch",
     )
     parser.add_argument("--out-checkpoint", required=True)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the training-config seed (must be non-negative)",
+    )
     args = parser.parse_args()
 
     with open(args.data_config) as f:
@@ -209,6 +218,7 @@ def main():
         train_cfg,
         Path(args.out_checkpoint),
         student_checkpoint=args.student_checkpoint,
+        seed=args.seed,
     )
 
 

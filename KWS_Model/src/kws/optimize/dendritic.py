@@ -61,7 +61,7 @@ from kws.train import (
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
 from kws.utils.profile import profile_model
-from kws.utils.seed import set_seed
+from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
 
@@ -705,6 +705,7 @@ def run_cycle(
     save_name: str,
     *,
     teacher_checkpoint: str | None = None,
+    seed: int | None = None,
 ) -> DendriticCycleResult:
     """Run steps 3c-3e for one candidate: perforate, resume with KD, measure.
 
@@ -712,6 +713,7 @@ def run_cycle(
     it is omitted the cycle falls back to plain task loss, which is the older
     behaviour and still useful for isolating the dendrites' own contribution.
     """
+    train_cfg = with_seed(train_cfg, seed)
     started_at = monotonic()
     set_seed(train_cfg["seed"])
     pruning_kind = train_cfg.get("pruning", {}).get("kind", "structured")
@@ -1064,6 +1066,12 @@ def main() -> None:
         default="models/checkpoints/ds_cnn_l_12class.pt",
         help="Fixed teacher for the cycle's KD loss and the step-3d resume",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the training-config seed (must be non-negative)",
+    )
     args = parser.parse_args()
 
     run_cycle(
@@ -1073,6 +1081,7 @@ def main() -> None:
         load_yaml(args.train_config),
         args.save_name,
         teacher_checkpoint=args.teacher_checkpoint,
+        seed=args.seed,
     )
 
 

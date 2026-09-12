@@ -59,7 +59,7 @@ from kws.train import train as train_from_scratch
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
 from kws.utils.profile import profile_model
-from kws.utils.seed import set_seed
+from kws.utils.seed import resolve_seed, set_seed, with_seed
 
 logger = get_logger(__name__)
 
@@ -85,12 +85,13 @@ def _model_artifact_id(model: torch.nn.Module, label: str) -> str:
     return f"{label}:{digest.hexdigest()}"
 
 
-def _cluster_recipe_id(config: dict) -> str:
+def _cluster_recipe_id(config: dict, *, seed: int | None = None) -> str:
     cluster_cfg = config["cluster"]
+    train_cfg = with_seed(load_yaml(cluster_cfg["train_config"]), seed)
     return _fingerprint(
         {
             "cluster": cluster_cfg,
-            "train": load_yaml(cluster_cfg["train_config"]),
+            "train": train_cfg,
             "data": load_yaml(config["data_config"]),
             "teacher_checkpoint": config["teacher"]["checkpoint"],
             "teacher_sha256": file_sha256(config["teacher"]["checkpoint"]),
@@ -98,12 +99,13 @@ def _cluster_recipe_id(config: dict) -> str:
     )
 
 
-def _quantize_recipe_id(config: dict) -> str:
+def _quantize_recipe_id(config: dict, *, seed: int | None = None) -> str:
     quantize_cfg = config["quantize"]
+    train_cfg = with_seed(load_yaml(quantize_cfg["train_config"]), seed)
     return _fingerprint(
         {
             "quantize": quantize_cfg,
-            "train": load_yaml(quantize_cfg["train_config"]),
+            "train": train_cfg,
             "data": load_yaml(config["data_config"]),
             "teacher_checkpoint": config["teacher"]["checkpoint"],
             "teacher_sha256": file_sha256(config["teacher"]["checkpoint"]),
@@ -134,10 +136,11 @@ def _json_safe(value):
     return value
 
 
-def stage_teacher(config: dict, *, force: bool) -> dict:
+def stage_teacher(config: dict, *, force: bool, seed: int | None = None) -> dict:
     """Step 1: a strong full-precision teacher, trained or reused."""
     teacher_cfg = config["teacher"]
     checkpoint = Path(teacher_cfg["checkpoint"])
+    teacher_train_cfg = with_seed(load_yaml(teacher_cfg["train_config"]), seed)
     if checkpoint.exists() and not force:
         existing = torch.load(checkpoint, map_location="cpu", weights_only=False)
         expected_model = load_yaml(teacher_cfg["model_config"])
@@ -145,6 +148,12 @@ def stage_teacher(config: dict, *, force: bool) -> dict:
             raise ValueError(
                 f"teacher checkpoint {checkpoint} does not match "
                 f"{teacher_cfg['model_config']}"
+            )
+        if seed is not None and existing.get("seed") != teacher_train_cfg["seed"]:
+            raise ValueError(
+                f"teacher checkpoint {checkpoint} was trained with seed "
+                f"{existing.get('seed')!r}, not {teacher_train_cfg['seed']}; "
+                "retrain it with --force"
             )
         logger.info(
             "Stage 1: reusing teacher %s (val_acc=%s)",
@@ -168,8 +177,9 @@ def stage_teacher(config: dict, *, force: bool) -> dict:
     val_acc = train_from_scratch(
         load_yaml(config["data_config"]),
         load_yaml(teacher_cfg["model_config"]),
-        load_yaml(teacher_cfg["train_config"]),
+        teacher_train_cfg,
         checkpoint,
+        seed=seed,
     )
     return {"status": "trained", "checkpoint": str(checkpoint), "val_acc": val_acc}
 
@@ -188,7 +198,7 @@ def _resolve_optional_checkpoint(path: str | None) -> str | None:
     return None
 
 
-def stage_student(config: dict, *, force: bool) -> dict:
+def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict:
     """Step 2: distill the fixed teacher into the deployment student."""
     student_cfg = config["student"]
     checkpoint = Path(student_cfg["checkpoint"])
@@ -197,7 +207,7 @@ def stage_student(config: dict, *, force: bool) -> dict:
     )
     student_model_cfg = load_yaml(student_cfg["model_config"])
     student_data_cfg = load_yaml(config["data_config"])
-    student_train_cfg = load_yaml(student_cfg["train_config"])
+    student_train_cfg = with_seed(load_yaml(student_cfg["train_config"]), seed)
     expected_recipe = distillation_fingerprint(
         config["teacher"]["checkpoint"],
         student_model_cfg,
@@ -263,6 +273,7 @@ def stage_student(config: dict, *, force: bool) -> dict:
         student_train_cfg,
         checkpoint,
         student_checkpoint=warm_start_checkpoint,
+        seed=seed,
     )
     return {
         "status": "distilled",
@@ -272,7 +283,7 @@ def stage_student(config: dict, *, force: bool) -> dict:
     }
 
 
-def stage_sparsity(config: dict, *, force: bool) -> dict:
+def stage_sparsity(config: dict, *, force: bool, seed: int | None = None) -> dict:
     """Step 3: the sparsity sweep, stopping on the Pareto frontier."""
     search_cfg = load_yaml(config["sparsity"]["search_config"])
     if force:
@@ -284,7 +295,7 @@ def stage_sparsity(config: dict, *, force: bool) -> dict:
         search_cfg["reuse_completed_start_run"] = None
         search_cfg["reuse_completed_candidates"] = False
     data_cfg = load_yaml(config["data_config"])
-    train_cfg = load_yaml(config["sparsity"]["train_config"])
+    train_cfg = with_seed(load_yaml(config["sparsity"]["train_config"]), seed)
     teacher_checkpoint = config["teacher"]["checkpoint"]
     expected_fingerprint = search_fingerprint(
         config["student"]["checkpoint"],
@@ -313,10 +324,13 @@ def stage_sparsity(config: dict, *, force: bool) -> dict:
         train_cfg,
         search_cfg,
         teacher_checkpoint=teacher_checkpoint,
+        seed=seed,
     )
 
 
-def validate_sparsity_report(sweep: dict, config: dict) -> None:
+def validate_sparsity_report(
+    sweep: dict, config: dict, *, seed: int | None = None
+) -> None:
     """Reject a step-3 report whose inputs no longer match this pipeline.
 
     Downstream-only invocations are intentionally supported, but they must not
@@ -330,7 +344,7 @@ def validate_sparsity_report(sweep: dict, config: dict) -> None:
         config["student"]["checkpoint"],
         config["teacher"]["checkpoint"],
         load_yaml(config["data_config"]),
-        load_yaml(config["sparsity"]["train_config"]),
+        with_seed(load_yaml(config["sparsity"]["train_config"]), seed),
         search_cfg,
     )
     if sweep.get("fingerprint") != expected:
@@ -533,11 +547,13 @@ def stage_cluster(
     device: torch.device,
     candidate_id: str,
     recipe_id: str,
+    *,
+    seed: int | None = None,
 ) -> tuple[dict, CodebookProjector]:
     """Step 4: layer-wise weight clustering, then learn the codebook."""
     cluster_cfg = config["cluster"]
     spec = ClusterSpec.from_config(cluster_cfg)
-    train_cfg = load_yaml(cluster_cfg["train_config"])
+    train_cfg = with_seed(load_yaml(cluster_cfg["train_config"]), seed)
 
     set_seed(train_cfg["seed"])
     datasets, _ = build_datasets(
@@ -608,6 +624,8 @@ def stage_quantize(
     candidate_id: str,
     source_artifact_id: str,
     recipe_id: str,
+    *,
+    seed: int | None = None,
 ) -> dict:
     """Step 5: quantization-aware distillation over the fake-quantized graph."""
     quantize_cfg = config["quantize"]
@@ -615,7 +633,7 @@ def stage_quantize(
         model,
         input_shape,
         load_yaml(config["data_config"]),
-        load_yaml(quantize_cfg["train_config"]),
+        with_seed(load_yaml(quantize_cfg["train_config"]), seed),
         Path(quantize_cfg["checkpoint"]),
         teacher_checkpoint=config["teacher"]["checkpoint"],
         codebook_projector=projector,
@@ -623,6 +641,7 @@ def stage_quantize(
         candidate_id=candidate_id,
         source_artifact_id=source_artifact_id,
         recipe_id=recipe_id,
+        seed=seed,
     )
 
 
@@ -632,9 +651,12 @@ def stage_benchmark(
     num_keywords: int,
     config: dict,
     torch_cost: dict | None = None,
+    *,
+    seed: int | None = None,
 ) -> dict:
     """Step 6: export the exact inference graph and benchmark it."""
     benchmark_cfg = config["benchmark"]
+    benchmark_seed = int(benchmark_cfg.get("seed", 0) if seed is None else seed)
     if isinstance(model, torch.jit.ScriptModule):
         if torch_cost is None:
             raise ValueError(
@@ -651,6 +673,7 @@ def stage_benchmark(
             split=benchmark_cfg.get("split", "testing"),
             latency_iterations=int(benchmark_cfg.get("latency_iterations", 200)),
             report_path=benchmark_cfg.get("report_path"),
+            seed=benchmark_seed,
         )
         return {
             "inference_graph": result.as_dict(),
@@ -670,6 +693,7 @@ def stage_benchmark(
         split=benchmark_cfg.get("split", "testing"),
         latency_iterations=int(benchmark_cfg.get("latency_iterations", 200)),
         report_path=benchmark_cfg.get("report_path"),
+        seed=benchmark_seed,
     )
     cost = profile_model(
         model,
@@ -680,8 +704,16 @@ def stage_benchmark(
     return {"onnx": result.as_dict(), "torch_cost": cost.as_dict()}
 
 
-def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
+def run_pipeline(
+    config: dict,
+    stages: tuple[str, ...],
+    *,
+    force: bool,
+    seed: int | None = None,
+) -> dict:
     """Run the requested stages in order, threading artifacts between them."""
+    if seed is not None:
+        seed = resolve_seed({}, seed)
     report_path = Path(config["report_path"])
     report: dict = {"stages": {}, "config": config}
     if report_path.exists():
@@ -689,12 +721,14 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
             report = yaml.safe_load(file) or report
         report.setdefault("stages", {})
         report["config"] = config
+    if seed is not None:
+        report["seed"] = seed
 
     def checkpoint_report() -> None:
         _write(report_path, _json_safe(report))
 
     if "teacher" in stages:
-        teacher_report = stage_teacher(config, force=force)
+        teacher_report = stage_teacher(config, force=force, seed=seed)
         report["stages"]["1_teacher"] = teacher_report
         if force or teacher_report.get("status") != "reused":
             for stage in (
@@ -707,7 +741,7 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
                 report["stages"].pop(stage, None)
         checkpoint_report()
     if "student" in stages:
-        student_report = stage_student(config, force=force)
+        student_report = stage_student(config, force=force, seed=seed)
         report["stages"]["2_student"] = student_report
         if force or student_report.get("status") != "reused":
             for stage in ("3_sparsity", "4_cluster", "5_quantize", "6_benchmark"):
@@ -715,7 +749,7 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
         checkpoint_report()
     if "sparsity" in stages:
         old_sweep = report["stages"].get("3_sparsity")
-        new_sweep = stage_sparsity(config, force=force)
+        new_sweep = stage_sparsity(config, force=force, seed=seed)
         report["stages"]["3_sparsity"] = new_sweep
         if (
             force
@@ -737,7 +771,7 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
             "Stages 4-6 continue from the step-3 frontier; run the sparsity "
             "stage first (or keep its report)"
         )
-    validate_sparsity_report(sweep, config)
+    validate_sparsity_report(sweep, config, seed=seed)
     candidate = dict(select_deployment_candidate(sweep, config))
     report["selected_candidate"] = candidate
     checkpoint_report()
@@ -747,8 +781,8 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
     model, input_shape, num_keywords = load_candidate_model(candidate, config)
     candidate_id = _model_artifact_id(model, candidate["save_name"])
     candidate["artifact_id"] = candidate_id
-    cluster_recipe = _cluster_recipe_id(config)
-    quantize_recipe = _quantize_recipe_id(config)
+    cluster_recipe = _cluster_recipe_id(config, seed=seed)
+    quantize_recipe = _quantize_recipe_id(config, seed=seed)
     checkpoint_report()
 
     projector: CodebookProjector | None = None
@@ -778,6 +812,7 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
                 device,
                 candidate_id,
                 cluster_recipe,
+                seed=seed,
             )
         report["stages"]["4_cluster"] = cluster_report
         if cluster_changed:
@@ -907,6 +942,7 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
                 candidate_id,
                 source_artifact_id,
                 quantize_recipe,
+                seed=seed,
             )
             # Benchmark the converted inference graph produced by QAT. The
             # fake-quantized wrapper is training-only and is deliberately not
@@ -952,6 +988,7 @@ def run_pipeline(config: dict, stages: tuple[str, ...], *, force: bool) -> dict:
             num_keywords,
             config,
             torch_cost=(report["stages"].get("5_quantize") or {}).get("torch_cost"),
+            seed=seed,
         )
         checkpoint_report()
 
@@ -972,6 +1009,12 @@ def main() -> None:
         action="store_true",
         help="Re-run a stage even when its output already exists",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the seed in every stochastic stage (must be non-negative)",
+    )
     args = parser.parse_args()
 
     stages = tuple(stage.strip() for stage in args.stages.split(",") if stage.strip())
@@ -979,7 +1022,7 @@ def main() -> None:
     if unknown:
         parser.error(f"unknown stage(s) {unknown}; choose from {list(STAGES)}")
 
-    run_pipeline(load_yaml(args.config), stages, force=args.force)
+    run_pipeline(load_yaml(args.config), stages, force=args.force, seed=args.seed)
 
 
 if __name__ == "__main__":

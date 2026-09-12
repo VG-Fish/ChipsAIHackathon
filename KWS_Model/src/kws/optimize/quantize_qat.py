@@ -47,7 +47,7 @@ from kws.optimize.quantization_compat import (
 from kws.train import run_finetune
 from kws.utils.logging import get_logger
 from kws.utils.profile import profile_model
-from kws.utils.seed import set_seed
+from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
 
@@ -205,6 +205,7 @@ def quantize_aware_distill_model(
     candidate_id: str | None = None,
     source_artifact_id: str | None = None,
     recipe_id: str | None = None,
+    seed: int | None = None,
 ) -> dict:
     """Fine-tune a live module under fake quantization with task + KD loss.
 
@@ -212,6 +213,7 @@ def quantize_aware_distill_model(
     the dendritic deployment graph, whose architecture cannot be rebuilt from a
     model config.
     """
+    train_cfg = with_seed(train_cfg, seed)
     device = torch.device("cpu")  # QAT fake-quant and the int8 convert target CPU
     model = model.to(device)
 
@@ -401,6 +403,7 @@ def quantize_aware_distill(
     candidate_id: str | None = None,
     source_artifact_id: str | None = None,
     recipe_id: str | None = None,
+    seed: int | None = None,
 ) -> dict:
     """Checkpoint-driven step 5, for a student whose architecture is a config."""
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -420,15 +423,19 @@ def quantize_aware_distill(
         source_artifact_id=source_artifact_id,
         recipe_id=recipe_id,
         num_keywords=checkpoint["num_keywords"],
+        seed=seed,
     )
 
 
 def quantize_aware_train(
     checkpoint_path: str, data_cfg: dict, train_cfg: dict, out_checkpoint: Path,
+    *,
+    seed: int | None = None,
 ) -> float:
     """Plain QAT with no teacher -- the ablation against step 5's full objective."""
     return quantize_aware_distill(
         checkpoint_path, data_cfg, train_cfg, out_checkpoint,
+        seed=seed,
     )["best_val_acc"]
 
 
@@ -443,6 +450,12 @@ def main():
         help="Fixed teacher for the KD term; omit to run plain QAT",
     )
     parser.add_argument("--out-checkpoint", required=True)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the training-config seed (must be non-negative)",
+    )
     args = parser.parse_args()
 
     with open(args.data_config) as f:
@@ -456,6 +469,7 @@ def main():
         train_cfg,
         Path(args.out_checkpoint),
         teacher_checkpoint=args.teacher_checkpoint,
+        seed=args.seed,
     )
 
 

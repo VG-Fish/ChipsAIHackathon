@@ -35,6 +35,7 @@ from kws.optimize.dendritic import (
 from kws.optimize.kd import file_sha256
 from kws.optimize.pareto import ParetoFrontier, ParetoPoint
 from kws.utils.logging import get_logger
+from kws.utils.seed import with_seed
 
 logger = get_logger(__name__)
 
@@ -411,8 +412,10 @@ def run_pruning_search(
     search_cfg: dict,
     *,
     teacher_checkpoint: str | None = None,
+    seed: int | None = None,
 ) -> dict:
     """Run steps 3a-3f over descending base widths until the frontier stalls."""
+    train_cfg = with_seed(train_cfg, seed)
     source_width = _source_block_width(checkpoint_path)
     start_width = search_cfg["start_channels"]
     widths = candidate_widths(
@@ -622,6 +625,12 @@ def main() -> None:
         default=None,
         help="Fixed teacher for KD; defaults to the search config's value",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the training-config seed (must be non-negative)",
+    )
     args = parser.parse_args()
 
     run_pruning_search(
@@ -630,6 +639,7 @@ def main() -> None:
         load_yaml(args.train_config),
         load_yaml(args.search_config),
         teacher_checkpoint=args.teacher_checkpoint,
+        seed=args.seed,
     )
 
 

@@ -164,7 +164,7 @@ def export_and_benchmark(
             f"target runtime {target!r} has no registered benchmark adapter; "
             "ESP32/MRAM measurements must be supplied by a device harness"
         )
-    export_to_onnx(checkpoint_path, onnx_path)
+    export_to_onnx(checkpoint_path, onnx_path, seed=seed)
 
     set_seed(seed)
     device = torch.device("cpu")
@@ -408,7 +408,7 @@ def benchmark_module(
     from kws.export.to_onnx import export_module_to_onnx
 
     model = model.to("cpu").eval()
-    parity = export_module_to_onnx(model, input_shape, onnx_path)
+    parity = export_module_to_onnx(model, input_shape, onnx_path, seed=seed)
 
     set_seed(seed)
     session = ort.InferenceSession(onnx_path)

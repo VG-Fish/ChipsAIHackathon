@@ -322,6 +322,13 @@ uv run --env-file .env python -m kws.pipeline \
 
 Run tests with `uv run pytest tests/`.
 
+Training, optimization, and ONNX-export entry points accept an optional
+`--seed` flag to override the seed in their YAML config or parity check. The
+pipeline-level form,
+`uv run python -m kws.pipeline --seed 0`, applies one seed consistently to every
+stochastic stage it runs; evaluation and benchmarking also accept `--seed` for
+deterministic dataset construction.
+
 Training configs expose `num_workers`, `persistent_workers`, and
 `prefetch_factor` for overlapping audio preparation with accelerator work. The
 default configs use four persistent workers with two batches prefetched per

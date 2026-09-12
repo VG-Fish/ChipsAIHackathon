@@ -7,6 +7,7 @@ import torch
 
 from kws.evaluate import load_model_from_checkpoint
 from kws.utils.logging import get_logger
+from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
 
@@ -16,6 +17,8 @@ def export_module_to_onnx(
     input_shape: tuple[int, int],
     onnx_path: str,
     atol: float = 1e-4,
+    *,
+    seed: int | None = None,
 ) -> float:
     """Export any live module and verify parity; returns the max abs difference.
 
@@ -24,6 +27,8 @@ def export_module_to_onnx(
     PerforatedAI clean graph, or one carrying codebook parametrizations.
     """
     model = model.to("cpu").eval()
+    if seed is not None:
+        set_seed(seed)
     dummy = torch.randn(1, 1, *input_shape)
 
     Path(onnx_path).parent.mkdir(parents=True, exist_ok=True)
@@ -48,17 +53,31 @@ def export_module_to_onnx(
     return max_diff
 
 
-def export_to_onnx(checkpoint_path: str, onnx_path: str, atol: float = 1e-4) -> None:
+def export_to_onnx(
+    checkpoint_path: str,
+    onnx_path: str,
+    atol: float = 1e-4,
+    *,
+    seed: int | None = None,
+) -> None:
     model, ckpt = load_model_from_checkpoint(checkpoint_path, torch.device("cpu"))
-    export_module_to_onnx(model, tuple(ckpt["input_shape"]), onnx_path, atol)
+    export_module_to_onnx(
+        model, tuple(ckpt["input_shape"]), onnx_path, atol, seed=seed
+    )
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--onnx-path", required=True)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Seed used for deterministic parity-check input (default: 0)",
+    )
     args = parser.parse_args()
-    export_to_onnx(args.checkpoint, args.onnx_path)
+    export_to_onnx(args.checkpoint, args.onnx_path, seed=args.seed)
 
 
 if __name__ == "__main__":
