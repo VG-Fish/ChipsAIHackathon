@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 import torch
 import torch.nn.functional as F
 
+import kws.optimize.distill as distill_module
 from kws.optimize.distill import imc_distillation_losses
 
 
@@ -66,3 +69,62 @@ def test_imc_distillation_rejects_invalid_settings(temperature, weights):
             classification_weight=weights[2],
             label_smoothing=0.0,
         )
+
+
+def test_distill_best_checkpoint_callback_uses_atomic_save_contract(
+    tmp_path, monkeypatch,
+):
+    teacher_checkpoint = tmp_path / "teacher.pt"
+    teacher_checkpoint.write_bytes(b"teacher")
+    out_checkpoint = tmp_path / "student-best.pt"
+
+    class FakeTeacher:
+        input_shape = (2, 2)
+        num_classes = 2
+        num_keywords = 1
+        feature_dim = 2
+        model_cfg = {"name": "teacher"}
+        val_acc = 0.75
+
+        def __init__(self, checkpoint_path, device):
+            self.checkpoint_path = str(checkpoint_path)
+            self.checkpoint_sha256 = "teacher-digest"
+
+    class FakeStudent(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(2, 2)
+
+    def fake_run_finetune(model, *args, on_best, **kwargs):
+        on_best(model, 0.5)
+        return SimpleNamespace(best_val_acc=0.5)
+
+    monkeypatch.setattr(distill_module, "FrozenTeacher", FakeTeacher)
+    monkeypatch.setattr(distill_module, "build_ds_cnn", lambda *args: FakeStudent())
+    monkeypatch.setattr(
+        distill_module,
+        "build_datasets",
+        lambda *args, **kwargs: (
+            {"training": object(), "validation": object()},
+            {"a": 0, "b": 1},
+        ),
+    )
+    monkeypatch.setattr(distill_module, "build_data_loader", lambda *args, **kwargs: object())
+    monkeypatch.setattr(distill_module, "run_finetune", fake_run_finetune)
+
+    distill_module.distill(
+        str(teacher_checkpoint),
+        {"name": "student"},
+        {"dataset": "tiny"},
+        {
+            "seed": 1,
+            "augment": False,
+            "label_smoothing": 0.0,
+            "distillation": {},
+        },
+        out_checkpoint,
+    )
+
+    checkpoint = torch.load(out_checkpoint, map_location="cpu", weights_only=False)
+    assert checkpoint["val_acc"] == 0.5
+    assert checkpoint["distillation"]["recipe_fingerprint"]

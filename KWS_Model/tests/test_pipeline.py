@@ -3,8 +3,11 @@ import yaml
 
 from kws.optimize.dendritic_prune_loop import search_fingerprint
 from kws.optimize.distill import distillation_fingerprint
+from kws.utils.artifacts import ArtifactLayout
 from kws.pipeline import (
     STAGES,
+    _configure_unified_outputs,
+    run_pipeline,
     _resolve_optional_checkpoint,
     select_deployment_candidate,
     validate_sparsity_report,
@@ -148,3 +151,107 @@ def test_downstream_stages_reject_stale_sparsity_fingerprint(tmp_path):
     train_path.write_text(yaml.safe_dump({"seed": 1}))
     with pytest.raises(ValueError, match="fingerprint"):
         validate_sparsity_report(sweep, config)
+
+
+def test_unified_pipeline_snapshots_every_effective_config(tmp_path):
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    def config_file(name, payload=None):
+        path = configs / name
+        path.write_text(yaml.safe_dump(payload or {"name": name}))
+        return str(path)
+
+    source_path = config_file("pipeline-source.yaml", {"pipeline": "source"})
+    warm_start = tmp_path / "warm-start.pt"
+    warm_start.write_bytes(b"warm-start")
+    config = {
+        "data_config": config_file("data.yaml"),
+        "report_path": "reports/pipeline/pipeline.yaml",
+        "teacher": {
+            "model_config": config_file("teacher-model.yaml"),
+            "train_config": config_file("teacher-train.yaml"),
+            "checkpoint": "models/checkpoints/teacher.pt",
+        },
+        "student": {
+            "model_config": config_file("student-model.yaml"),
+            "train_config": config_file("student-train.yaml"),
+            "checkpoint": "models/checkpoints/student.pt",
+            "warm_start_checkpoint": str(warm_start),
+        },
+        "sparsity": {
+            "train_config": config_file("sparsity-train.yaml"),
+            "search_config": config_file("sparsity-search.yaml"),
+        },
+        "cluster": {
+            "train_config": config_file("cluster-train.yaml"),
+            "checkpoint": "models/exported/clustered.pt",
+        },
+        "quantize": {
+            "train_config": config_file("quantize-train.yaml"),
+            "checkpoint": "models/exported/int8.pt",
+        },
+        "benchmark": {
+            "onnx_path": "models/exported/model.onnx",
+            "report_path": "reports/pipeline/benchmark.json",
+        },
+    }
+    output_root = tmp_path / "run"
+
+    run_pipeline(
+        config,
+        (),
+        force=False,
+        output_dir=output_root,
+        pipeline_config_path=source_path,
+    )
+
+    metadata = output_root / "metadata" / "configs"
+    assert {
+        "pipeline.yaml",
+        "data.yaml",
+        "teacher_model.yaml",
+        "teacher_train.yaml",
+        "student_model.yaml",
+        "student_train.yaml",
+        "sparsity_train.yaml",
+        "sparsity_search.yaml",
+        "cluster_train.yaml",
+        "quantize_train.yaml",
+        "benchmark.yaml",
+    }.issubset({path.name for path in metadata.iterdir()})
+
+    manifest = yaml.safe_load((output_root / "manifest.yaml").read_text())
+    assert manifest["effective_config"]["path"] == "metadata/configs/pipeline.yaml"
+    assert len(manifest["effective_config"]["sha256"]) == 64
+    assert {item["role"] for item in manifest["inputs"]}.issuperset(
+        {"pipeline_config", "student_warm_start", "cluster_train_config", "quantize_train_config"}
+    )
+    assert len(manifest["config_snapshots"]) == 10
+
+
+def test_unified_pipeline_rejects_output_traversal_before_basename(tmp_path):
+    layout = ArtifactLayout(tmp_path / "run")
+    config = {
+        "data_config": str(tmp_path / "data.yaml"),
+        "report_path": "../outside.yaml",
+        "teacher": {
+            "model_config": str(tmp_path / "teacher-model.yaml"),
+            "train_config": str(tmp_path / "teacher-train.yaml"),
+            "checkpoint": "teacher.pt",
+        },
+        "student": {
+            "model_config": str(tmp_path / "student-model.yaml"),
+            "train_config": str(tmp_path / "student-train.yaml"),
+            "checkpoint": "student.pt",
+        },
+        "sparsity": {
+            "train_config": str(tmp_path / "sparsity-train.yaml"),
+            "search_config": str(tmp_path / "sparsity-search.yaml"),
+        },
+        "cluster": {"train_config": str(tmp_path / "cluster-train.yaml"), "checkpoint": "cluster.pt"},
+        "quantize": {"train_config": str(tmp_path / "qat.yaml"), "checkpoint": "qat.pt"},
+        "benchmark": {"onnx_path": "model.onnx", "report_path": "benchmark.json"},
+    }
+    with pytest.raises(ValueError, match="may not contain '..'"):
+        _configure_unified_outputs(config, layout)

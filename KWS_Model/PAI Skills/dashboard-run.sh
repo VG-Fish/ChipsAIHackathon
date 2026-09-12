@@ -5,5 +5,11 @@
 # byte-for-byte untouched. We only append the container's stderr to a log file
 # next to this script — that log is the one readable trace of failures that
 # otherwise vanish into Claude Code's invisible MCP subprocess stderr.
-LOG="$(dirname "$0")/dashboard.log"
+ARTIFACT_ROOT="${PAI_ARTIFACT_ROOT:-$(dirname "$0")}";
+case "$ARTIFACT_ROOT" in
+  /*) ;;
+  *) ARTIFACT_ROOT="$(pwd)/$ARTIFACT_ROOT" ;;
+esac
+mkdir -p "$ARTIFACT_ROOT"
+LOG="$ARTIFACT_ROOT/dashboard.log"
 exec docker "$@" 2>>"$LOG"

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from kws.utils.logging import run_session
+
 CHUNK_SIZE = 1 << 20
 
 
@@ -45,12 +47,19 @@ def download_and_extract(url: str, expected_md5: str, dest_root: Path) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/data/speech_commands_v2.yaml")
+    parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)["dataset"]
 
-    download_and_extract(cfg["url"], cfg["md5"], Path(cfg["root"]))
+    with run_session(
+        args.output_dir,
+        command="kws.data.download",
+        argv=__import__("sys").argv,
+        inputs=[(args.config, "data_config")],
+    ):
+        download_and_extract(cfg["url"], cfg["md5"], Path(cfg["root"]))
 
 
 if __name__ == "__main__":

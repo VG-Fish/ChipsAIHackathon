@@ -3,6 +3,7 @@
 import sys
 from collections.abc import Mapping
 
+import torch
 from torch.utils.data import DataLoader, Dataset
 
 from kws.utils.logging import get_logger
@@ -11,7 +12,11 @@ logger = get_logger(__name__)
 
 
 def build_data_loader(
-    dataset: Dataset, train_cfg: Mapping, *, shuffle: bool
+    dataset: Dataset,
+    train_cfg: Mapping,
+    *,
+    shuffle: bool,
+    generator: torch.Generator | None = None,
 ) -> DataLoader:
     """Build a loader whose workers survive and prefetch across epochs.
 
@@ -44,10 +49,12 @@ def build_data_loader(
             num_workers=num_workers,
             persistent_workers=bool(train_cfg.get("persistent_workers", True)),
             prefetch_factor=prefetch_factor,
+            generator=generator,
         )
     return DataLoader(
         dataset=dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
+        generator=generator,
     )

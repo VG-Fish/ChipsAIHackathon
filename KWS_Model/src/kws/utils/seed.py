@@ -30,3 +30,17 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def capture_rng_state() -> dict:
+    """Capture process RNGs for a resumable epoch-boundary checkpoint."""
+    from kws.utils.checkpointing import capture_rng_state as _capture
+
+    return _capture()
+
+
+def restore_rng_state(state: dict) -> None:
+    """Restore a state returned by :func:`capture_rng_state`."""
+    from kws.utils.checkpointing import restore_rng_state as _restore
+
+    _restore(state)

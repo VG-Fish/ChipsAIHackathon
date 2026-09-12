@@ -44,11 +44,51 @@ uv run --env-file .env python -m kws.pipeline --stages sparsity
 uv run --env-file .env python -m kws.pipeline --stages cluster,quantize,benchmark
 ```
 
+Every output-producing command also accepts `--output-dir PATH`. `PATH` is the
+exact run root (it is not wrapped in a timestamp), so invoking the command
+again with the same path is how a compatible phase resumes. The pipeline may
+set the same value with the top-level `output_dir` config key; the CLI flag wins.
+For example:
+
+```bash
+uv run --env-file .env python -m kws.pipeline \
+  --output-dir outputs/my-kws-run
+```
+
+The run root contains `manifest.yaml`, append-only invocation logs under
+`logs/`, effective config snapshots under `metadata/configs/`, canonical
+epoch JSONL under `metrics/`, separate resumable `latest.pt` and deployable
+`best.pt` checkpoints under `models/checkpoints/`, PAI-native files under
+`pai/candidates/`, exported graphs under `models/exported/`, and stage reports
+under `reports/`. The default in-checkout root `KWS_Model/outputs/` is ignored;
+an arbitrary directory inside the checkout cannot be ignored automatically.
+
+`manifest.yaml` is the run-identity authority. Every project-owned checkpoint
+records the manifest's `run_id`, including teacher/student training
+checkpoints, each sparsity candidate's prune/KD and resume-KD checkpoints, the
+PAI sidecar and its paired native PAI checkpoint, cluster and quantize
+checkpoints, and the exported/packed-codebook deployment artifacts. Resume and
+stage reuse reject a checkpoint whose `run_id` does not match the active
+manifest. External input checkpoints (an explicit `--checkpoint`,
+`--teacher-checkpoint`, or a `--resume-from` path outside the active root)
+remain inputs and are recorded with their own path and digest instead.
+
+Stage reuse means a completed artifact is validated and consumed again. Epoch
+resume is different: `latest.pt` contains the optimizer, scheduler, KD/QAT
+state, metric commit, and process RNG state, and continues from the next
+completed epoch with `--resume` or `--resume-from PATH`. Recipe, upstream
+digest, seed, and schedule changes are rejected instead of silently starting
+over. A legacy best-only checkpoint remains valid for inference or an explicit
+warm start, but is not a resumable training state. Multi-worker augmentation
+has functional continuation guarantees; exact batch-for-batch replay is
+supported by tests with `num_workers: 0` and is not promised for persistent
+multi-worker loaders.
+
 Stages reuse whatever earlier stages already produced (`--force` overrides),
 because step 3 alone takes hours and re-running it to reach step 5 would make
 the pipeline unusable. Everything is configured from
 `configs/train/pipeline.yaml`, and the run's decision trail lands in
-`reports/pipeline/pipeline.yaml`.
+`reports/pipeline.yaml`.
 
 ### Where each step lives
 

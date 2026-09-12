@@ -255,6 +255,51 @@ t15_uninstall_removes_wrapper_keeps_data() {
 }
 
 # ---------------------------------------------------------------------------
+# Test 16 — custom artifact root is mounted and used by the launcher
+# ---------------------------------------------------------------------------
+t16_install_custom_artifact_root() {
+  _setup
+  cd "$TMP"
+  mkdir -p "$TMP/outputs/pai"
+  "$INSTALL" --artifact-root "$TMP/outputs/pai" >/dev/null 2>&1
+  MCP=$(cat "$TMP/.mcp.json")
+  assert_contains "$MCP" "$TMP/outputs/pai/dashboard-run.sh" "t16: custom launcher path"
+  assert_contains "$MCP" "$TMP/outputs/pai:/perforated_tools:rw" "t16: custom runtime mount"
+  assert_file_exists "$TMP/outputs/pai/dashboard-run.sh" "t16: custom wrapper created"
+  _teardown
+}
+
+# ---------------------------------------------------------------------------
+# Test 17 — environment fallback selects the custom artifact root
+# ---------------------------------------------------------------------------
+t17_install_env_artifact_root() {
+  _setup
+  cd "$TMP"
+  mkdir -p "$TMP/env-root"
+  PAI_ARTIFACT_ROOT="$TMP/env-root" "$INSTALL" >/dev/null 2>&1
+  MCP=$(cat "$TMP/.mcp.json")
+  assert_contains "$MCP" "$TMP/env-root:/perforated_tools:rw" "t17: environment runtime mount"
+  _teardown
+}
+
+# ---------------------------------------------------------------------------
+# Test 18 — custom uninstall preserves user artifacts
+# ---------------------------------------------------------------------------
+t18_uninstall_custom_preserves_artifacts() {
+  _setup
+  cd "$TMP"
+  mkdir -p "$TMP/outputs/pai/exports"
+  printf 'user-data\n' > "$TMP/outputs/pai/exports/model.onnx"
+  printf '#!/bin/sh\n' > "$TMP/outputs/pai/dashboard-run.sh"
+  printf 'log\n' > "$TMP/outputs/pai/dashboard.log"
+  printf '{"mcpServers":{"dashboard":{}}}\n' > "$TMP/.mcp.json"
+  "$UNINSTALL" --artifact-root "$TMP/outputs/pai" >/dev/null 2>&1
+  assert_file_exists "$TMP/outputs/pai/exports/model.onnx" "t18: custom user artifact preserved"
+  assert_not_exists "$TMP/outputs/pai/dashboard-run.sh" "t18: custom wrapper removed"
+  _teardown
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 t1_install_writes_port
@@ -272,6 +317,9 @@ t12_mcp_command_is_wrapper
 t13_pull_failure_aborts
 t14_smoke_failure_aborts
 t15_uninstall_removes_wrapper_keeps_data
+t16_install_custom_artifact_root
+t17_install_env_artifact_root
+t18_uninstall_custom_preserves_artifacts
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

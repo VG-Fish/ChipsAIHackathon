@@ -2,11 +2,16 @@
 set -e
 
 PORT=3002
+ARTIFACT_ROOT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --port)
       PORT="$2"
+      shift 2
+      ;;
+    --artifact-root)
+      ARTIFACT_ROOT="$2"
       shift 2
       ;;
     *)
@@ -21,6 +26,13 @@ MCP_FILE=".mcp.json"
 SKILLS_DIR=".claude/skills"
 PWD_ABS="$(pwd)"
 IMAGE="rorrybrenner/perforated_dashboard_mcp:v0.1.0"
+if [ -z "$ARTIFACT_ROOT" ]; then
+  ARTIFACT_ROOT="${PAI_ARTIFACT_ROOT:-$PWD_ABS/.perforated_tools}"
+fi
+case "$ARTIFACT_ROOT" in
+  /*) ;;
+  *) ARTIFACT_ROOT="$PWD_ABS/$ARTIFACT_ROOT" ;;
+esac
 
 # --- pull the published multi-arch image from Docker Hub. Docker selects the
 # manifest matching this host's architecture, so an exec-format mismatch can't
@@ -41,30 +53,31 @@ if ! docker run --rm --entrypoint python "$IMAGE" -c "import mcp_server.server" 
 fi
 
 # --- install the runtime launcher that logs container stderr to a readable file.
-mkdir -p "$PWD_ABS/.perforated_tools"
-cp "$SELF_DIR/dashboard-run.sh" "$PWD_ABS/.perforated_tools/dashboard-run.sh"
-chmod +x "$PWD_ABS/.perforated_tools/dashboard-run.sh"
+mkdir -p "$ARTIFACT_ROOT"
+cp "$SELF_DIR/dashboard-run.sh" "$ARTIFACT_ROOT/dashboard-run.sh"
+chmod +x "$ARTIFACT_ROOT/dashboard-run.sh"
 
 if [ ! -f "$MCP_FILE" ]; then
   echo '{}' > "$MCP_FILE"
 fi
 
 # Write or overwrite the dashboard mcpServers entry, preserving other keys.
-python3 - "$MCP_FILE" "$PORT" "$PWD_ABS" "$IMAGE" <<'EOF'
+python3 - "$MCP_FILE" "$PORT" "$PWD_ABS" "$IMAGE" "$ARTIFACT_ROOT" <<'EOF'
 import json
 import sys
 
-file, port, cwd, image = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+file, port, cwd, image, artifact_root = sys.argv[1:6]
 with open(file) as f:
     config = json.load(f)
 config.setdefault("mcpServers", {})
 config["mcpServers"]["dashboard"] = {
-    "command": f"{cwd}/.perforated_tools/dashboard-run.sh",
+    "command": f"{artifact_root}/dashboard-run.sh",
     "args": [
         "run", "--rm", "-i",
         "-p", f"{port}:{port}",
         "-v", f"{cwd}:/workspace:ro",
-        "-v", f"{cwd}/.perforated_tools:/perforated_tools:rw",
+        "-v", f"{artifact_root}:/perforated_tools:rw",
+        "-e", "PAI_ARTIFACT_ROOT=/perforated_tools",
         image,
     ],
 }
@@ -83,3 +96,4 @@ done
 echo "Installed dashboard MCP server on port $PORT"
 echo "MCP config written to $MCP_FILE"
 echo "Installed skills to $SKILLS_DIR"
+echo "Runtime artifacts written to $ARTIFACT_ROOT"

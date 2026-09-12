@@ -29,10 +29,21 @@ import yaml
 
 from kws.data.dataset import build_datasets
 from kws.models.ds_cnn import DSCNN
-from kws.optimize.kd import DistillationCriterion, FrozenTeacher, KDWeights
-from kws.train import train_model
+from kws.optimize.kd import DistillationCriterion, FrozenTeacher, KDWeights, file_sha256
+from kws.train import (
+    resolve_manifest_run_id,
+    train_model,
+    validate_checkpoint_run_id,
+)
 from kws.utils.device import get_device
+from kws.utils.artifacts import ArtifactLayout
+from kws.utils.checkpointing import (
+    recipe_fingerprint,
+    require_training_state,
+    validate_resume_recipe,
+)
 from kws.utils.logging import get_logger
+from kws.utils.logging import run_session
 from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
@@ -265,6 +276,68 @@ def apply_sparsity(model: DSCNN, spec: SparsitySpec) -> tuple[DSCNN, SparsityMas
     return model, apply_nm_sparsity(model, spec.n, spec.m)
 
 
+def _resolve_prune_resume_from(
+    *,
+    resume: bool,
+    resume_from: str | Path | None,
+    output_dir: str | Path | None,
+    out_checkpoint: str | Path,
+    spec: SparsitySpec,
+) -> Path | None:
+    """Resolve pruning's explicit or phase-standard training-state input."""
+    if resume_from is not None:
+        return Path(resume_from)
+    if not resume:
+        return None
+
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    if layout is not None:
+        latest_path = layout.checkpoint_path(
+            "sparsity", "prune_kd", "latest", candidate=spec.label
+        )
+        metrics_path = layout.metrics_path(
+            "sparsity", "prune_kd", candidate=spec.label
+        )
+    else:
+        latest_path = Path(out_checkpoint).with_name("latest.pt")
+        metrics_path = None
+
+    if latest_path.exists():
+        return latest_path
+    if (
+        metrics_path is not None
+        and metrics_path.exists()
+        and metrics_path.stat().st_size
+    ):
+        raise FileNotFoundError(
+            f"--resume requested for sparsity/{spec.label}/prune_kd, but the "
+            f"phase checkpoint does not exist at {latest_path} while metrics exist "
+            f"at {metrics_path}; refusing to restart at epoch 1 and append duplicate metrics"
+        )
+    return None
+
+
+def _load_prune_resume_state(
+    path: str | Path, device, *, expected_run_id: str | None = None
+) -> dict:
+    state = require_training_state(
+        torch.load(path, map_location=device, weights_only=False), source=path
+    )
+    validate_checkpoint_run_id(state, expected_run_id, source=path)
+    if state.get("stage") != "sparsity" or state.get("phase") != "prune_kd":
+        raise ValueError(
+            f"resume checkpoint belongs to {state.get('stage')}/{state.get('phase')}, "
+            "not sparsity/prune_kd"
+        )
+    return state
+
+
+def _validate_prune_resume_state(
+    state: dict, *, source: str | Path, recipe: dict
+) -> None:
+    validate_resume_recipe(state, recipe_fingerprint(recipe), source=source)
+
+
 def prune_and_fine_tune(
     checkpoint_path: str,
     data_cfg: dict,
@@ -274,6 +347,10 @@ def prune_and_fine_tune(
     *,
     teacher_checkpoint: str | None = None,
     seed: int | None = None,
+    output_dir: str | Path | None = None,
+    resume: bool = False,
+    resume_from: str | Path | None = None,
+    run_id: str | None = None,
 ) -> dict:
     """Framework steps 3a-3b: sparsify the student, then fine-tune it with KD.
 
@@ -284,7 +361,31 @@ def prune_and_fine_tune(
     """
     train_cfg = with_seed(train_cfg, seed)
     device = get_device()
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    run_id = resolve_manifest_run_id(layout, run_id)
+    if layout is not None:
+        layout.ensure_tree()
+        out_checkpoint = layout.checkpoint_path(
+            "sparsity", "prune_kd", "best", candidate=spec.label
+        )
+    resume_path = _resolve_prune_resume_from(
+        resume=resume,
+        resume_from=resume_from,
+        output_dir=output_dir,
+        out_checkpoint=out_checkpoint,
+        spec=spec,
+    )
+    resume_state = (
+        _load_prune_resume_state(resume_path, device, expected_run_id=run_id)
+        if resume_path is not None else None
+    )
+
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if run_id is not None and (
+        layout is None
+        or Path(checkpoint_path).expanduser().resolve().is_relative_to(layout.root)
+    ):
+        validate_checkpoint_run_id(checkpoint, run_id, source=checkpoint_path)
 
     from kws.models.ds_cnn import build_ds_cnn
     model = build_ds_cnn(checkpoint["model_cfg"], tuple(checkpoint["input_shape"]), checkpoint["num_classes"])
@@ -307,6 +408,14 @@ def prune_and_fine_tune(
 
     kd = None
     if teacher_checkpoint is not None:
+        if run_id is not None and (
+            layout is None
+            or Path(teacher_checkpoint).expanduser().resolve().is_relative_to(layout.root)
+        ):
+            teacher_state = torch.load(
+                teacher_checkpoint, map_location="cpu", weights_only=False
+            )
+            validate_checkpoint_run_id(teacher_state, run_id, source=teacher_checkpoint)
         teacher = FrozenTeacher(teacher_checkpoint, device)
         kd = DistillationCriterion(
             teacher,
@@ -323,7 +432,49 @@ def prune_and_fine_tune(
         block.pointwise.out_channels for block in sparsified.blocks
     ]
 
-    best_val_acc = train_model(
+    recipe = {
+        "source_sha256": file_sha256(checkpoint_path),
+        "teacher_sha256": (
+            file_sha256(teacher_checkpoint) if teacher_checkpoint is not None else None
+        ),
+        "data": data_cfg,
+        "model": pruned_model_cfg,
+        "spec": spec.as_dict(),
+        "train": train_cfg,
+        "distillation": kd.describe() if kd else None,
+    }
+    if resume_state is not None and resume_path is not None:
+        _validate_prune_resume_state(
+            resume_state, source=resume_path, recipe=recipe
+        )
+        saved_masks = (resume_state.get("stage_specific_state") or {}).get(
+            "sparsity_masks"
+        )
+        if masks is not None:
+            if (
+                not isinstance(saved_masks, dict)
+                or set(saved_masks) != set(masks.masks)
+            ):
+                raise ValueError(
+                    "resume checkpoint is missing the required N:M sparsity masks "
+                    "or contains masks for a different model"
+                )
+            for name, expected_mask in masks.masks.items():
+                saved_mask = saved_masks[name]
+                if (
+                    not isinstance(saved_mask, torch.Tensor)
+                    or saved_mask.shape != expected_mask.shape
+                ):
+                    raise ValueError(
+                        f"resume checkpoint has an incompatible N:M mask for {name}"
+                    )
+            masks = SparsityMasks(saved_masks, masks.n, masks.m)
+        elif saved_masks is not None:
+            raise ValueError(
+                "resume checkpoint contains N:M sparsity masks for a non-N:M pruning recipe"
+            )
+
+    finetune_result = train_model(
         sparsified,
         datasets,
         label_map,
@@ -339,15 +490,28 @@ def prune_and_fine_tune(
             "sparsity_masks": masks.describe() if masks else None,
             "distillation": kd.describe() if kd else None,
         },
+        output_dir=output_dir,
+        stage="sparsity",
+        phase="prune_kd",
+        resume_state=resume_state,
+        recipe=recipe,
+        stage_specific_state={
+            "sparsity_masks": masks.masks if masks is not None else None,
+        },
+        artifact_candidate=spec.label,
+        run_id=run_id,
     )
     return {
         "spec": spec.as_dict(),
         "base_params": old_params,
         "pruned_params": new_params,
-        "best_val_acc": best_val_acc,
+        "best_val_acc": finetune_result.best_val_acc,
+        "final_val_acc": finetune_result.final_val_acc,
+        "history": finetune_result.history,
         "checkpoint": str(out_checkpoint),
         "masks": masks.describe() if masks else None,
         "distillation": kd.describe() if kd else None,
+        "run_id": finetune_result.run_id,
     }
 
 
@@ -365,7 +529,10 @@ def main():
         default=None,
         help="Fixed teacher for KD fine-tuning; omit to fine-tune on task loss only",
     )
-    parser.add_argument("--out-checkpoint", required=True)
+    parser.add_argument("--out-checkpoint", required=False)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--resume-from", default=None)
     parser.add_argument(
         "--seed",
         type=int,
@@ -373,6 +540,8 @@ def main():
         help="Override the training-config seed (must be non-negative)",
     )
     args = parser.parse_args()
+    if args.out_checkpoint is None and args.output_dir is None:
+        parser.error("--out-checkpoint is required unless --output-dir is supplied")
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)
@@ -385,15 +554,46 @@ def main():
         n=args.n,
         m=args.m,
     )
-    prune_and_fine_tune(
-        args.checkpoint,
-        data_cfg,
-        train_cfg,
-        spec,
-        Path(args.out_checkpoint),
-        teacher_checkpoint=args.teacher_checkpoint,
-        seed=args.seed,
+    layout = ArtifactLayout(args.output_dir) if args.output_dir else None
+    destination = (
+        layout.checkpoint_path("sparsity", "prune_kd", "best", candidate=spec.label)
+        if layout is not None else Path(args.out_checkpoint)
     )
+    resume_from = _resolve_prune_resume_from(
+        resume=args.resume,
+        resume_from=args.resume_from,
+        output_dir=args.output_dir,
+        out_checkpoint=destination,
+        spec=spec,
+    )
+    inputs = [
+        (args.data_config, "data_config"),
+        (args.train_config, "train_config"),
+        (args.checkpoint, "source_checkpoint"),
+    ]
+    if args.teacher_checkpoint:
+        inputs.append((args.teacher_checkpoint, "teacher_checkpoint"))
+    with run_session(
+        args.output_dir,
+        command="kws.optimize.prune",
+        argv=__import__("sys").argv,
+        seed=args.seed,
+        inputs=inputs,
+    ):
+        result = prune_and_fine_tune(
+            args.checkpoint,
+            data_cfg,
+            train_cfg,
+            spec,
+            destination,
+            teacher_checkpoint=args.teacher_checkpoint,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            resume=args.resume,
+            resume_from=resume_from,
+        )
+        if layout is not None:
+            layout.atomic_yaml(layout.report_path("prune.yaml"), result)
 
 
 if __name__ == "__main__":

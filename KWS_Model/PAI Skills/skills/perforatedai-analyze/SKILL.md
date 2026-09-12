@@ -24,13 +24,18 @@ When the user says **"Analyze my perforated results"**, perform a comprehensive 
 
 ### Step 1: Locate Result Files
 
-Find the `save_name` from their training script by searching for the `UPA.perforate_model()` call. The `save_name` parameter shows where results are stored.
+Find the `save_name` from their training script by searching for the
+`UPA.perforate_model()` call. If the run uses a KWS `--output-dir`, search
+`<output-dir>/pai/candidates/` for that leaf first; otherwise use the legacy
+path. The `save_name` parameter remains the native PAI leaf and is not renamed.
 
 **Only ask "What was your save_name?" if:**
 - The script has a variable or argument for save_name that could change
 - You cannot find the perforate_model call in their script
 
-The results are stored in: `{save_name}/{save_name}_*.csv`
+The results are stored in: `<candidate-dir>/{save_name}_*.csv`, where
+`<candidate-dir>` is `<output-dir>/pai/candidates/<save_name>` for unified runs
+or the legacy `{save_name}` directory otherwise.
 
 Look for these files:
 - `{save_name}/{save_name}_scores.csv` - Validation scores over epochs

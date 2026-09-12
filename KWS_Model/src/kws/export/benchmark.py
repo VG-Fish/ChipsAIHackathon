@@ -30,11 +30,23 @@ from kws.data.dataset import build_datasets
 from kws.data.splits import TEST, VAL
 from kws.evaluate import load_model_from_checkpoint
 from kws.export.to_onnx import export_to_onnx
+from kws.utils.artifacts import ArtifactLayout
 from kws.utils.logging import get_logger
+from kws.utils.logging import run_session
 from kws.utils.metrics import compute_metrics
 from kws.utils.seed import set_seed
 
 logger = get_logger(__name__)
+
+
+def _atomic_json_report(path: str | Path, payload: dict) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(payload, stream, indent=2)
+        stream.flush()
+    temporary.replace(destination)
 
 
 @dataclass(frozen=True)
@@ -216,9 +228,7 @@ def export_and_benchmark(
     )
 
     if report_path:
-        Path(report_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(report_path, "w") as f:
-            json.dump(result.as_dict(), f, indent=2)
+        _atomic_json_report(report_path, result.as_dict())
         logger.info("Wrote benchmark report to %s", report_path)
     return result
 
@@ -343,9 +353,7 @@ def benchmark_scripted_model(
         result.onnx_bytes,
     )
     if report_path:
-        Path(report_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(report_path, "w") as f:
-            json.dump(result.as_dict(), f, indent=2)
+        _atomic_json_report(report_path, result.as_dict())
         logger.info("Wrote benchmark report to %s", report_path)
     return result
 
@@ -354,27 +362,54 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-config", default="configs/data/speech_commands_v2.yaml")
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--onnx-path", required=True)
+    parser.add_argument("--onnx-path", required=False)
     parser.add_argument("--report", default=None)
+    parser.add_argument("--output-dir", default=None)
     parser.add_argument("--target", default="onnxruntime-cpu")
     parser.add_argument("--split", default=TEST, choices=[TEST, VAL])
     parser.add_argument("--latency-iterations", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
+    if args.onnx_path is None and args.output_dir is None:
+        parser.error("--onnx-path is required unless --output-dir is supplied")
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)
 
-    export_and_benchmark(
-        args.checkpoint,
-        args.onnx_path,
-        data_cfg,
-        target=args.target,
-        split=args.split,
-        seed=args.seed,
-        latency_iterations=args.latency_iterations,
-        report_path=args.report,
+    layout = ArtifactLayout(args.output_dir) if args.output_dir else None
+    onnx_path = (
+        layout.output_path(
+            args.onnx_path,
+            category="models/exported",
+            default="kws.onnx",
+        )
+        if layout is not None else Path(args.onnx_path)
     )
+    report_path = (
+        layout.output_path(
+            args.report,
+            category="reports",
+            default="benchmark.json",
+        )
+        if layout is not None else args.report
+    )
+    with run_session(
+        args.output_dir,
+        command="kws.export.benchmark",
+        argv=__import__("sys").argv,
+        seed=args.seed,
+        inputs=[(args.data_config, "data_config"), (args.checkpoint, "checkpoint")],
+    ):
+        export_and_benchmark(
+            args.checkpoint,
+            str(onnx_path),
+            data_cfg,
+            target=args.target,
+            split=args.split,
+            seed=args.seed,
+            latency_iterations=args.latency_iterations,
+            report_path=str(report_path) if report_path else None,
+        )
 
 
 if __name__ == "__main__":
@@ -447,8 +482,6 @@ def benchmark_module(
         target, split, result.accuracy, result.latency_ms_p50, result.onnx_bytes,
     )
     if report_path:
-        Path(report_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(report_path, "w") as f:
-            json.dump(result.as_dict(), f, indent=2)
+        _atomic_json_report(report_path, result.as_dict())
         logger.info("Wrote benchmark report to %s", report_path)
     return result

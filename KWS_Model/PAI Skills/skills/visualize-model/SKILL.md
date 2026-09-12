@@ -72,7 +72,10 @@ The tool calls `next(iter(dataloader))` and takes the **first element** as the s
 
 ## Outputs
 
-Both files are written to `.perforated_tools/exports/` in the Codebase:
+Both files are written to `${PAI_ARTIFACT_ROOT:-.perforated_tools}/exports/` in
+the Codebase. When a KWS run root is active, use its `pai/` runtime directory
+or pass the selected artifact root to the dashboard installer; the PAI-native
+candidate filenames remain unchanged.
 
 | File | Contents |
 |---|---|

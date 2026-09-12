@@ -11,6 +11,7 @@
 # Run all of it with `python -m kws.pipeline`, or one stage at a time with
 # `--stages sparsity`. Stages reuse existing artifacts unless `--force`.
 data_config: configs/data/speech_commands_v2.yaml
+output_dir: null
 report_path: reports/pipeline/pipeline.yaml
 
 teacher:

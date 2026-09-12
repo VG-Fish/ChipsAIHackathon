@@ -19,6 +19,8 @@ from kws.data.splits import TEST
 from kws.export.benchmark import run_split_through_graph
 from kws.export.to_onnx import export_to_onnx
 from kws.utils.logging import get_logger
+from kws.utils.logging import run_session
+from kws.utils.artifacts import ArtifactLayout
 from kws.utils.metrics import compute_metrics
 from kws.utils.seed import set_seed
 
@@ -36,7 +38,10 @@ def quantize_ptq(
     set_seed(seed)
     export_to_onnx(checkpoint_path, str(onnx_fp32_path), seed=seed)
 
-    quantize_dynamic(str(onnx_fp32_path), str(onnx_int8_path), weight_type=QuantType.QInt8)
+    onnx_int8_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_int8 = onnx_int8_path.with_name(f".{onnx_int8_path.name}.tmp")
+    quantize_dynamic(str(onnx_fp32_path), str(temporary_int8), weight_type=QuantType.QInt8)
+    temporary_int8.replace(onnx_int8_path)
 
     fp32_size = os.path.getsize(onnx_fp32_path)
     int8_size = os.path.getsize(onnx_int8_path)
@@ -63,8 +68,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-config", default="configs/data/speech_commands_v2.yaml")
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--onnx-fp32-path", required=True)
-    parser.add_argument("--onnx-int8-path", required=True)
+    parser.add_argument("--onnx-fp32-path", required=False)
+    parser.add_argument("--onnx-int8-path", required=False)
+    parser.add_argument("--report", default=None)
+    parser.add_argument("--output-dir", default=None)
     parser.add_argument(
         "--seed",
         type=int,
@@ -72,17 +79,52 @@ def main():
         help="Seed used for deterministic evaluation-set construction (default: 0)",
     )
     args = parser.parse_args()
+    if (args.onnx_fp32_path is None or args.onnx_int8_path is None) and args.output_dir is None:
+        parser.error("ONNX output paths are required unless --output-dir is supplied")
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)
 
-    quantize_ptq(
-        args.checkpoint,
-        data_cfg,
-        Path(args.onnx_fp32_path),
-        Path(args.onnx_int8_path),
-        seed=args.seed,
+    layout = ArtifactLayout(args.output_dir) if args.output_dir else None
+    fp32_path = (
+        layout.output_path(
+            args.onnx_fp32_path,
+            category="models/exported",
+            default="kws_fp32.onnx",
+        )
+        if layout is not None else Path(args.onnx_fp32_path)
     )
+    int8_path = (
+        layout.output_path(
+            args.onnx_int8_path,
+            category="models/exported",
+            default="kws_int8.onnx",
+        )
+        if layout is not None else Path(args.onnx_int8_path)
+    )
+    with run_session(
+        args.output_dir,
+        command="kws.optimize.quantize_ptq",
+        argv=__import__("sys").argv,
+        seed=args.seed,
+        inputs=[(args.data_config, "data_config"), (args.checkpoint, "checkpoint")],
+    ):
+        metrics = quantize_ptq(
+            args.checkpoint,
+            data_cfg,
+            fp32_path,
+            int8_path,
+            seed=args.seed,
+        )
+        if args.output_dir is not None:
+            layout.atomic_json(
+                layout.output_path(
+                    args.report,
+                    category="reports",
+                    default="ptq.json",
+                ),
+                metrics,
+            )
 
 
 if __name__ == "__main__":

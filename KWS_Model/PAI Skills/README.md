@@ -26,10 +26,11 @@ This will:
 3. Register a `dashboard` entry in the project's `.mcp.json`, pointing at the launcher and mounting the Codebase read-only plus a read-write `.perforated_tools/` directory.
 4. Copy every skill in `skills/` into `.claude/skills/` in the project.
 
-By default the MCP Server listens on port `3002`. Use `--port` to change it:
+By default the MCP Server listens on port `3002`. Use `--port` to change it. Use `--artifact-root PATH` (or `PAI_ARTIFACT_ROOT=PATH`) to route runtime logs and visualizer/training exports into a selected run directory:
 
 ```sh
 /path/to/package/install.sh --port 4000
+/path/to/package/install.sh --artifact-root "$PWD/outputs/pai"
 ```
 
 Restart Claude Code (or start a new session) after installing so it picks up the updated `.mcp.json`.
@@ -49,10 +50,10 @@ Once installed, invoke any of the skills from Claude Code:
 ## Uninstall
 
 ```sh
-/path/to/package/uninstall.sh
+/path/to/package/uninstall.sh --artifact-root "$PWD/outputs/pai"
 ```
 
-This removes the `dashboard` entry from `.mcp.json`, deletes the installed skills from `.claude/skills/`, removes the runtime launcher and log from `.perforated_tools/` (preserving other data there), and removes the `rorrybrenner/perforated_dashboard_mcp:v0.1.0` Docker image.
+This removes the `dashboard` entry from `.mcp.json`, deletes the installed skills from `.claude/skills/`, removes only the runtime launcher and log from the selected artifact root (preserving other user artifacts), and removes the `rorrybrenner/perforated_dashboard_mcp:v0.1.0` Docker image.
 
 ## MCP Server
 

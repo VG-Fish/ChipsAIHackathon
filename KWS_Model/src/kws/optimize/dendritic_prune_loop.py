@@ -34,7 +34,10 @@ from kws.optimize.dendritic import (
 )
 from kws.optimize.kd import file_sha256
 from kws.optimize.pareto import ParetoFrontier, ParetoPoint
+from kws.train import resolve_manifest_run_id, validate_checkpoint_run_id
 from kws.utils.logging import get_logger
+from kws.utils.logging import run_session
+from kws.utils.artifacts import ArtifactLayout
 from kws.utils.seed import with_seed
 
 logger = get_logger(__name__)
@@ -290,6 +293,7 @@ def _load_completed_result(
     teacher_checkpoint: str,
     data_cfg: dict,
     train_cfg: dict,
+    expected_run_id: str | None = None,
 ) -> DendriticCycleResult:
     """Read a completed run only when it contains every framework substage."""
     run_dir = Path(save_name)
@@ -315,6 +319,11 @@ def _load_completed_result(
         )
     with metadata_path.open() as f:
         metadata = yaml.safe_load(f) or {}
+    if expected_run_id is not None and metadata.get("run_id") != expected_run_id:
+        raise ValueError(
+            f"completed run {save_name!r} belongs to run_id={metadata.get('run_id')!r}, "
+            f"expected {expected_run_id!r}"
+        )
     if metadata.get("framework_cycle_version") != FRAMEWORK_CYCLE_VERSION:
         raise ValueError(
             f"Cannot reuse legacy run {save_name!r}: framework cycle version "
@@ -394,6 +403,7 @@ def _load_completed_result(
         resume=recorded.get("resume"),
         prune_finetune=recorded.get("prune_finetune"),
         phase_trail=recorded.get("phase_trail") or [],
+        run_id=expected_run_id,
     )
 
 
@@ -413,9 +423,18 @@ def run_pruning_search(
     *,
     teacher_checkpoint: str | None = None,
     seed: int | None = None,
+    output_dir: str | Path | None = None,
+    run_id: str | None = None,
 ) -> dict:
     """Run steps 3a-3f over descending base widths until the frontier stalls."""
     train_cfg = with_seed(train_cfg, seed)
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    run_id = resolve_manifest_run_id(layout, run_id)
+    if layout is not None:
+        layout.ensure_tree()
+        search_cfg = dict(search_cfg)
+        search_cfg["summary_path"] = str(layout.report_path("sparsity.yaml"))
+        search_cfg["save_prefix"] = str(layout.root / "pai" / "candidates" / "candidate")
     source_width = _source_block_width(checkpoint_path)
     start_width = search_cfg["start_channels"]
     widths = candidate_widths(
@@ -452,6 +471,11 @@ def run_pruning_search(
     source_checkpoint = torch.load(
         checkpoint_path, map_location="cpu", weights_only=False
     )
+    if run_id is not None and (
+        layout is None
+        or Path(checkpoint_path).expanduser().resolve().is_relative_to(layout.root)
+    ):
+        validate_checkpoint_run_id(source_checkpoint, run_id, source=checkpoint_path)
     source_distillation = source_checkpoint.get("distillation") or {}
     expected_teacher_sha = file_sha256(teacher_checkpoint)
     if (
@@ -475,6 +499,7 @@ def run_pruning_search(
     summary = {
         "status": "running",
         "framework_cycle_version": FRAMEWORK_CYCLE_VERSION,
+        "run_id": run_id,
         "fingerprint": fingerprint,
         "selection_split": "validation",
         "test_split_used": False,
@@ -512,6 +537,7 @@ def run_pruning_search(
                 teacher_checkpoint,
                 data_cfg,
                 train_cfg,
+                expected_run_id=run_id,
             )
             logger.info(
                 "Reusing completed width-%d run from %s", width, completed_run
@@ -519,10 +545,16 @@ def run_pruning_search(
         else:
             run_dir = Path(save_name)
             if run_dir.exists() and any(run_dir.iterdir()):
-                raise ValueError(
-                    f"Refusing to overwrite partial run {save_name!r}. Resume it "
-                    "with PerforatedAI or choose a different save_prefix."
+                sidecar = (
+                    layout.checkpoint_path("sparsity", "pai", "latest", candidate=Path(save_name).name)
+                    if layout is not None else run_dir / "kws_latest.pt"
                 )
+                if not sidecar.exists():
+                    raise ValueError(
+                        f"Refusing to overwrite partial run {save_name!r}: paired PAI/KWS "
+                        "latest state is missing or incompatible; choose a new output root"
+                    )
+                logger.info("Resuming compatible partial candidate %s", save_name)
             candidate_train_cfg = dict(train_cfg)
             candidate_train_cfg["pruning"] = {
                 "kind": "structured",
@@ -535,6 +567,8 @@ def run_pruning_search(
                 candidate_train_cfg,
                 save_name,
                 teacher_checkpoint=teacher_checkpoint,
+                output_dir=output_dir,
+                run_id=run_id,
             )
 
         decision = judge_candidate(
@@ -631,16 +665,33 @@ def main() -> None:
         default=None,
         help="Override the training-config seed (must be non-negative)",
     )
+    parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
 
-    run_pruning_search(
-        args.checkpoint,
-        load_yaml(args.data_config),
-        load_yaml(args.train_config),
-        load_yaml(args.search_config),
-        teacher_checkpoint=args.teacher_checkpoint,
+    inputs = [
+        (args.data_config, "data_config"),
+        (args.train_config, "train_config"),
+        (args.search_config, "search_config"),
+        (args.checkpoint, "source_checkpoint"),
+    ]
+    if args.teacher_checkpoint:
+        inputs.append((args.teacher_checkpoint, "teacher_checkpoint"))
+    with run_session(
+        args.output_dir,
+        command="kws.optimize.dendritic_prune_loop",
+        argv=__import__("sys").argv,
         seed=args.seed,
-    )
+        inputs=inputs,
+    ):
+        run_pruning_search(
+            args.checkpoint,
+            load_yaml(args.data_config),
+            load_yaml(args.train_config),
+            load_yaml(args.search_config),
+            teacher_checkpoint=args.teacher_checkpoint,
+            seed=args.seed,
+            output_dir=args.output_dir,
+        )
 
 
 if __name__ == "__main__":

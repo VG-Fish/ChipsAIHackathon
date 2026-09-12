@@ -22,6 +22,7 @@ stages 2, 3b, 3d, 4, and 5.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib
 from pathlib import Path
@@ -55,15 +56,76 @@ from kws.optimize.kd import (
     supports_pooled_features,
 )
 from kws.optimize.quantize_qat import quantize_aware_distill_model
-from kws.train import train as train_from_scratch
+from kws.train import (
+    train as train_from_scratch,
+    validate_checkpoint_run_id,
+)
 from kws.utils.device import get_device
+from kws.utils.artifacts import ArtifactLayout, sha256_path
+from kws.utils.checkpointing import record_input
+from kws.utils.checkpointing import write_phase_summary
 from kws.utils.logging import get_logger
+from kws.utils.logging import run_session
 from kws.utils.profile import profile_model
 from kws.utils.seed import resolve_seed, set_seed, with_seed
 
 logger = get_logger(__name__)
 
 STAGES = ("teacher", "student", "sparsity", "cluster", "quantize", "benchmark")
+_RUN_OUTPUT_ROOTS = {"metadata", "metrics", "models", "pai", "reports"}
+
+
+def _portable_run_paths(value: Any, layout: ArtifactLayout) -> Any:
+    """Replace run-owned absolute paths with paths relative to the run root."""
+    if isinstance(value, dict):
+        return {key: _portable_run_paths(item, layout) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_portable_run_paths(item, layout) for item in value]
+    if isinstance(value, tuple):
+        return [_portable_run_paths(item, layout) for item in value]
+    if isinstance(value, str) and Path(value).is_absolute():
+        try:
+            return layout.relative(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _resolve_persisted_run_paths(value: Any, layout: ArtifactLayout) -> Any:
+    """Resolve relative run-owned paths read back from a portable report."""
+    if isinstance(value, dict):
+        return {
+            key: _resolve_persisted_run_paths(item, layout)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_resolve_persisted_run_paths(item, layout) for item in value]
+    if isinstance(value, str) and not Path(value).is_absolute():
+        path = Path(value)
+        if path.parts and path.parts[0] in _RUN_OUTPUT_ROOTS:
+            return str(layout._descendant(layout.root / path))
+    return value
+
+
+def _phase_needs_resume(
+    layout: ArtifactLayout | None, stage: str, phase: str, target_epochs: int
+) -> bool:
+    """Return whether a run-root phase has a compatible-looking partial latest state."""
+    if layout is None:
+        return False
+    latest = layout.checkpoint_path(stage, phase, "latest")
+    if not latest.exists():
+        return False
+    try:
+        state = torch.load(latest, map_location="cpu", weights_only=False)
+    except Exception:
+        # Let the training stage produce its actionable checkpoint error instead
+        # of silently treating a corrupt latest file as a completed stage.
+        return True
+    return (
+        state.get("kind") == "kws_training_state"
+        and int(state.get("completed_epoch", 0)) < int(target_epochs)
+    )
 
 
 def _fingerprint(payload: dict) -> str:
@@ -83,6 +145,28 @@ def _model_artifact_id(model: torch.nn.Module, label: str) -> str:
         digest.update(str(tuple(value.shape)).encode())
         digest.update(value.numpy().tobytes())
     return f"{label}:{digest.hexdigest()}"
+
+
+def _load_scripted_checkpoint(
+    path: str | Path,
+    *,
+    expected_run_id: str | None,
+) -> torch.jit.ScriptModule:
+    """Load a QAT graph and verify the run ID embedded in its TorchScript file."""
+    extra_files = {"run_id": ""}
+    model = torch.jit.load(
+        str(path), map_location="cpu", _extra_files=extra_files
+    ).eval()
+    if expected_run_id is not None:
+        recorded = extra_files["run_id"]
+        if isinstance(recorded, bytes):
+            recorded = recorded.decode("utf-8")
+        if recorded != expected_run_id:
+            raise ValueError(
+                f"scripted checkpoint {path} belongs to run_id={recorded!r}, "
+                f"expected {expected_run_id!r}"
+            )
+    return model
 
 
 def _cluster_recipe_id(config: dict, *, seed: int | None = None) -> str:
@@ -141,8 +225,19 @@ def stage_teacher(config: dict, *, force: bool, seed: int | None = None) -> dict
     teacher_cfg = config["teacher"]
     checkpoint = Path(teacher_cfg["checkpoint"])
     teacher_train_cfg = with_seed(load_yaml(teacher_cfg["train_config"]), seed)
-    if checkpoint.exists() and not force:
+    layout = ArtifactLayout(config["output_dir"]) if config.get("output_dir") else None
+    resume_incomplete = _phase_needs_resume(
+        layout,
+        "teacher",
+        load_yaml(teacher_cfg["model_config"]).get("name", "train"),
+        teacher_train_cfg["epochs"],
+    )
+    if checkpoint.exists() and not force and not resume_incomplete:
         existing = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        if layout is not None:
+            validate_checkpoint_run_id(
+                existing, layout.manifest_run_id, source=checkpoint
+            )
         expected_model = load_yaml(teacher_cfg["model_config"])
         if existing.get("model_cfg") != expected_model:
             raise ValueError(
@@ -174,14 +269,29 @@ def stage_teacher(config: dict, *, force: bool, seed: int | None = None) -> dict
         }
 
     logger.info("Stage 1: training teacher %s", teacher_cfg["model_config"])
-    val_acc = train_from_scratch(
+    teacher_latest = layout.checkpoint_path("teacher", "train", "latest") if layout else None
+    train_result = train_from_scratch(
         load_yaml(config["data_config"]),
         load_yaml(teacher_cfg["model_config"]),
         teacher_train_cfg,
         checkpoint,
         seed=seed,
+        output_dir=config.get("output_dir"),
+        resume=bool(
+            not force
+            and (
+                resume_incomplete
+                or (teacher_latest and teacher_latest.exists() and not checkpoint.exists())
+            )
+        ),
+        reset_metrics=force,
     )
-    return {"status": "trained", "checkpoint": str(checkpoint), "val_acc": val_acc}
+    return {
+        "status": "trained",
+        "checkpoint": str(checkpoint),
+        "val_acc": train_result.best_val_acc,
+        "history": train_result.history,
+    }
 
 
 def _resolve_optional_checkpoint(path: str | None) -> str | None:
@@ -208,6 +318,13 @@ def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict
     student_model_cfg = load_yaml(student_cfg["model_config"])
     student_data_cfg = load_yaml(config["data_config"])
     student_train_cfg = with_seed(load_yaml(student_cfg["train_config"]), seed)
+    layout = ArtifactLayout(config["output_dir"]) if config.get("output_dir") else None
+    resume_incomplete = _phase_needs_resume(
+        layout,
+        "student",
+        "distill",
+        student_train_cfg["epochs"],
+    )
     expected_recipe = distillation_fingerprint(
         config["teacher"]["checkpoint"],
         student_model_cfg,
@@ -215,8 +332,12 @@ def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict
         student_train_cfg,
         warm_start_checkpoint,
     )
-    if checkpoint.exists() and not force:
+    if checkpoint.exists() and not force and not resume_incomplete:
         existing = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        if layout is not None:
+            validate_checkpoint_run_id(
+                existing, layout.manifest_run_id, source=checkpoint
+            )
         if existing.get("model_cfg") != student_model_cfg:
             raise ValueError(
                 f"student checkpoint {checkpoint} does not match "
@@ -266,7 +387,8 @@ def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict
         config["teacher"]["checkpoint"],
         student_cfg["model_config"],
     )
-    val_acc = distill(
+    student_latest = layout.checkpoint_path("student", "distill", "latest") if layout else None
+    distill_result = distill(
         config["teacher"]["checkpoint"],
         student_model_cfg,
         student_data_cfg,
@@ -274,11 +396,21 @@ def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict
         checkpoint,
         student_checkpoint=warm_start_checkpoint,
         seed=seed,
+        output_dir=config.get("output_dir"),
+        resume=bool(
+            not force
+            and (
+                resume_incomplete
+                or (student_latest and student_latest.exists() and not checkpoint.exists())
+            )
+        ),
+        reset_metrics=force,
     )
     return {
         "status": "distilled",
         "checkpoint": str(checkpoint),
-        "val_acc": val_acc,
+        "val_acc": distill_result.best_val_acc,
+        "history": distill_result.history,
         "recipe_fingerprint": expected_recipe,
     }
 
@@ -286,6 +418,13 @@ def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict
 def stage_sparsity(config: dict, *, force: bool, seed: int | None = None) -> dict:
     """Step 3: the sparsity sweep, stopping on the Pareto frontier."""
     search_cfg = load_yaml(config["sparsity"]["search_config"])
+    if config.get("output_dir"):
+        output_layout = ArtifactLayout(config["output_dir"])
+        search_cfg = dict(search_cfg)
+        search_cfg["summary_path"] = str(output_layout.report_path("sparsity.yaml"))
+        search_cfg["save_prefix"] = str(
+            output_layout.root / "pai" / "candidates" / "candidate"
+        )
     if force:
         # PAI run directories contain many interdependent checkpoints. Never
         # partially overwrite one under the broad --force flag; disabling
@@ -314,6 +453,11 @@ def stage_sparsity(config: dict, *, force: bool, seed: int | None = None) -> dic
             in {"pareto_frontier_stalled", "minimum_channels_reached"}
             and summary.get("pareto")
             and summary.get("fingerprint") == expected_fingerprint
+            and (
+                not config.get("output_dir")
+                or summary.get("run_id")
+                == ArtifactLayout(config["output_dir"]).manifest_run_id
+            )
         ):
             logger.info("Stage 3: reusing completed sweep from %s", summary_path)
             return summary
@@ -325,6 +469,7 @@ def stage_sparsity(config: dict, *, force: bool, seed: int | None = None) -> dic
         search_cfg,
         teacher_checkpoint=teacher_checkpoint,
         seed=seed,
+        output_dir=config.get("output_dir"),
     )
 
 
@@ -339,6 +484,13 @@ def validate_sparsity_report(
     """
     if not isinstance(sweep, dict):
         raise ValueError("stage 3 report is not a mapping")
+    if config.get("output_dir"):
+        expected_run_id = ArtifactLayout(config["output_dir"]).manifest_run_id
+        if sweep.get("run_id") != expected_run_id:
+            raise ValueError(
+                f"stage 3 report belongs to run_id={sweep.get('run_id')!r}, "
+                f"expected {expected_run_id!r}"
+            )
     search_cfg = load_yaml(config["sparsity"]["search_config"])
     expected = search_fingerprint(
         config["student"]["checkpoint"],
@@ -415,7 +567,10 @@ def load_candidate_model(
         ensure_clean_dendrite_skip_weights,
     )
 
+    layout = ArtifactLayout(config["output_dir"]) if config.get("output_dir") else None
     save_name = candidate["save_name"]
+    if layout is not None:
+        save_name = str(layout._descendant(save_name))
     metadata_path = Path(save_name) / "cycle_metadata.yaml"
     if not metadata_path.exists():
         raise FileNotFoundError(
@@ -423,6 +578,11 @@ def load_candidate_model(
         )
     with metadata_path.open() as file:
         metadata = yaml.safe_load(file)
+    if layout is not None and metadata.get("run_id") != layout.manifest_run_id:
+        raise ValueError(
+            f"candidate {save_name!r} belongs to run_id={metadata.get('run_id')!r}, "
+            f"expected {layout.manifest_run_id!r}"
+        )
     if metadata.get("framework_cycle_version") != FRAMEWORK_CYCLE_VERSION:
         raise ValueError(
             f"candidate {save_name!r} predates framework cycle version "
@@ -430,6 +590,8 @@ def load_candidate_model(
         )
 
     source_checkpoint = metadata["source_checkpoint"]
+    if layout is not None:
+        source_checkpoint = str(_resolve_persisted_run_paths(source_checkpoint, layout))
     if source_checkpoint != config["student"]["checkpoint"]:
         raise ValueError(
             f"candidate {save_name!r} was built from {source_checkpoint!r}, "
@@ -460,6 +622,10 @@ def load_candidate_model(
         )
     candidate_width = candidate.get("width")
     source = torch.load(source_checkpoint, map_location="cpu", weights_only=False)
+    if layout is not None:
+        validate_checkpoint_run_id(
+            source, layout.manifest_run_id, source=source_checkpoint
+        )
     source_width = source["model_cfg"]["block_channels"][0]
     width = metadata["base_model_cfg"]["block_channels"][0]
     if candidate_width is not None and int(candidate_width) != int(width):
@@ -469,15 +635,34 @@ def load_candidate_model(
         )
 
     device = get_device()
-    base, checkpoint, _ = build_cycle_base(source_checkpoint, width / source_width)
+    base, checkpoint, _ = build_cycle_base(
+        source_checkpoint,
+        width / source_width,
+        expected_run_id=(layout.manifest_run_id if layout is not None else None),
+    )
     configure_perforatedai(metadata["perforatedai"], device)
-    model = UPA.perforate_model(
-        base,
-        doing_pai=False,
-        save_name=f"{save_name}_reload",
-        making_graphs=False,
-        maximizing_score=True,
-    ).to(device)
+    reload_root = (
+        layout.root / "pai" / "reload" / Path(save_name).name
+        if config.get("output_dir")
+        else Path(f"{save_name}_reload")
+    )
+    reload_root.mkdir(parents=True, exist_ok=True)
+    reload_name = reload_root.name
+    previous_cwd = Path.cwd()
+    try:
+        reload_root.parent.mkdir(parents=True, exist_ok=True)
+        import os
+
+        os.chdir(reload_root.parent)
+        model = UPA.perforate_model(
+            base,
+            doing_pai=False,
+            save_name=reload_name,
+            making_graphs=False,
+            maximizing_score=True,
+        ).to(device)
+    finally:
+        os.chdir(previous_cwd)
 
     # ``final_clean_pai.pt`` is a safetensors-style state file, not a PyTorch
     # state_dict that can create the missing dendrite branches by itself. Use
@@ -518,6 +703,8 @@ def load_candidate_model(
         )
     resume_record = (metadata.get("result") or {}).get("resume") or {}
     resumed_value = resume_record.get("checkpoint")
+    if layout is not None and resumed_value:
+        resumed_value = _resolve_persisted_run_paths(resumed_value, layout)
     resumed = Path(resumed_value) if resumed_value else None
     if resume_record.get("status") == "complete" and (
         resumed is None or not resumed.exists()
@@ -549,9 +736,13 @@ def stage_cluster(
     recipe_id: str,
     *,
     seed: int | None = None,
+    resume_from: str | Path | None = None,
+    reset_metrics: bool = False,
 ) -> tuple[dict, CodebookProjector]:
     """Step 4: layer-wise weight clustering, then learn the codebook."""
     cluster_cfg = config["cluster"]
+    layout = ArtifactLayout(config["output_dir"]) if config.get("output_dir") else None
+    run_id = layout.manifest_run_id if layout is not None else None
     spec = ClusterSpec.from_config(cluster_cfg)
     train_cfg = with_seed(load_yaml(cluster_cfg["train_config"]), seed)
 
@@ -561,8 +752,14 @@ def stage_cluster(
         augment=train_cfg["augment"],
         seed=train_cfg["seed"],
     )
-    train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
-    val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
+    train_generator = torch.Generator().manual_seed(int(train_cfg["seed"]))
+    val_generator = torch.Generator().manual_seed(int(train_cfg["seed"]) + 1)
+    train_loader = build_data_loader(
+        datasets[TRAIN], train_cfg, shuffle=True, generator=train_generator
+    )
+    val_loader = build_data_loader(
+        datasets[VAL], train_cfg, shuffle=False, generator=val_generator
+    )
 
     model = model.to(device)
     report = apply_weight_clustering(model, spec)
@@ -579,7 +776,25 @@ def stage_cluster(
         ),
     )
     learned = codebook_finetune(
-        model, train_loader, val_loader, device, train_cfg, kd=kd
+        model,
+        train_loader,
+        val_loader,
+        device,
+        train_cfg,
+        kd=kd,
+        output_dir=config.get("output_dir"),
+        run_id=run_id,
+        resume_from=resume_from,
+        recipe={
+            "cluster": cluster_cfg,
+            "data": load_yaml(config["data_config"]),
+            "candidate_id": candidate_id,
+            "source_artifact_id": candidate_id,
+            "teacher_checkpoint": teacher.checkpoint_path,
+            "teacher_sha256": teacher.checkpoint_sha256,
+            "recipe_id": recipe_id,
+        },
+        reset_metrics=reset_metrics,
     )
     projector = bake_codebooks(model, bits=spec.bits)
     artifact_path = Path(
@@ -592,7 +807,16 @@ def stage_cluster(
         input_shape=input_shape,
         candidate_id=candidate_id,
         recipe_id=recipe_id,
+        run_id=run_id,
     )
+    if config.get("output_dir"):
+        write_phase_summary(
+            ArtifactLayout(config["output_dir"]),
+            stage="cluster",
+            phase="codebook",
+            result=learned,
+            artifacts={"best_checkpoint": artifact_path},
+        )
     return (
         {
             "clustering": report.as_dict(),
@@ -626,9 +850,17 @@ def stage_quantize(
     recipe_id: str,
     *,
     seed: int | None = None,
+    reset_metrics: bool = False,
 ) -> dict:
     """Step 5: quantization-aware distillation over the fake-quantized graph."""
     quantize_cfg = config["quantize"]
+    resume_from = None
+    if config.get("output_dir"):
+        layout = ArtifactLayout(config["output_dir"])
+        latest = layout.checkpoint_path("quantize", "qat", "latest")
+        final = layout.exported_path(Path(quantize_cfg["checkpoint"]).name)
+        if latest.exists() and not final.exists():
+            resume_from = latest
     return quantize_aware_distill_model(
         model,
         input_shape,
@@ -642,6 +874,9 @@ def stage_quantize(
         source_artifact_id=source_artifact_id,
         recipe_id=recipe_id,
         seed=seed,
+        output_dir=config.get("output_dir"),
+        resume_from=resume_from,
+        reset_metrics=reset_metrics,
     )
 
 
@@ -710,22 +945,107 @@ def run_pipeline(
     *,
     force: bool,
     seed: int | None = None,
+    output_dir: str | Path | None = None,
+    pipeline_config_path: str | Path | None = None,
 ) -> dict:
     """Run the requested stages in order, threading artifacts between them."""
+    if output_dir is None:
+        output_dir = config.get("output_dir")
     if seed is not None:
         seed = resolve_seed({}, seed)
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    manifest_run_id = None
+    if layout is not None:
+        layout.ensure_tree()
+        config = _configure_unified_outputs(config, layout)
+        manifest_path = layout.root / "manifest.yaml"
+        manifest = layout.load_manifest(
+            command="kws.pipeline", argv=__import__("sys").argv, seed=seed,
+            device=str(get_device()),
+        )
+        manifest_run_id = manifest["run_id"]
+        config_inputs = [
+            ("data_config", config["data_config"]),
+            ("teacher_model_config", config["teacher"]["model_config"]),
+            ("teacher_train_config", config["teacher"]["train_config"]),
+            ("student_model_config", config["student"]["model_config"]),
+            ("student_train_config", config["student"]["train_config"]),
+            ("sparsity_train_config", config["sparsity"]["train_config"]),
+            ("sparsity_search_config", config["sparsity"]["search_config"]),
+            ("cluster_train_config", config["cluster"]["train_config"]),
+            ("quantize_train_config", config["quantize"]["train_config"]),
+        ]
+        if pipeline_config_path is not None:
+            config_inputs.insert(0, ("pipeline_config", pipeline_config_path))
+        warm_start = config["student"].get("warm_start_checkpoint")
+        if warm_start:
+            config_inputs.append(("student_warm_start", warm_start))
+        for role, path in config_inputs:
+            record_input(manifest, path, role=role)
+
+        effective_config_path = layout.atomic_yaml(
+            layout.metadata_config_path("pipeline.yaml"), config
+        )
+        manifest["effective_config"] = {
+            "path": layout.relative(effective_config_path),
+            "sha256": sha256_path(effective_config_path),
+        }
+        config_snapshots = [
+            ("data.yaml", config["data_config"]),
+            ("teacher_model.yaml", config["teacher"]["model_config"]),
+            ("teacher_train.yaml", config["teacher"]["train_config"]),
+            ("student_model.yaml", config["student"]["model_config"]),
+            ("student_train.yaml", config["student"]["train_config"]),
+            ("sparsity_train.yaml", config["sparsity"]["train_config"]),
+            ("sparsity_search.yaml", config["sparsity"]["search_config"]),
+            ("cluster_train.yaml", config["cluster"]["train_config"]),
+            ("quantize_train.yaml", config["quantize"]["train_config"]),
+        ]
+        snapshot_records = []
+        for name, path in config_snapshots:
+            with Path(path).open(encoding="utf-8") as stream:
+                snapshot = layout.atomic_yaml(
+                    layout.metadata_config_path(name), yaml.safe_load(stream) or {}
+                )
+            snapshot_records.append(
+                {"path": layout.relative(snapshot), "sha256": sha256_path(snapshot)}
+            )
+        benchmark_snapshot = layout.atomic_yaml(
+            layout.metadata_config_path("benchmark.yaml"), config["benchmark"]
+        )
+        snapshot_records.append(
+            {
+                "path": layout.relative(benchmark_snapshot),
+                "sha256": sha256_path(benchmark_snapshot),
+            }
+        )
+        manifest["config_snapshots"] = snapshot_records
+        layout.atomic_yaml(manifest_path, manifest)
     report_path = Path(config["report_path"])
     report: dict = {"stages": {}, "config": config}
+    if manifest_run_id is not None:
+        report["run_id"] = manifest_run_id
     if report_path.exists():
         with report_path.open() as file:
             report = yaml.safe_load(file) or report
         report.setdefault("stages", {})
         report["config"] = config
+        if manifest_run_id is not None and report.get("run_id") != manifest_run_id:
+            raise ValueError(
+                f"pipeline report {report_path} belongs to run_id={report.get('run_id')!r}, "
+                f"expected {manifest_run_id!r}"
+            )
     if seed is not None:
         report["seed"] = seed
 
     def checkpoint_report() -> None:
-        _write(report_path, _json_safe(report))
+        if layout is not None:
+            layout.atomic_yaml(
+                report_path,
+                _portable_run_paths(_json_safe(report), layout),
+            )
+        else:
+            _write(report_path, _json_safe(report))
 
     if "teacher" in stages:
         teacher_report = stage_teacher(config, force=force, seed=seed)
@@ -777,6 +1097,19 @@ def run_pipeline(
     checkpoint_report()
 
     device = get_device()
+    if layout is not None:
+        teacher_path = Path(config["teacher"]["checkpoint"]).expanduser().resolve()
+        try:
+            teacher_path.relative_to(layout.root)
+        except ValueError:
+            pass
+        else:
+            teacher_state = torch.load(
+                teacher_path, map_location="cpu", weights_only=False
+            )
+            validate_checkpoint_run_id(
+                teacher_state, layout.manifest_run_id, source=teacher_path
+            )
     teacher = FrozenTeacher(config["teacher"]["checkpoint"], device)
     model, input_shape, num_keywords = load_candidate_model(candidate, config)
     candidate_id = _model_artifact_id(model, candidate["save_name"])
@@ -799,11 +1132,22 @@ def run_pipeline(
                 cluster_checkpoint,
                 expected_candidate=candidate_id,
                 expected_recipe=cluster_recipe,
+                expected_run_id=(
+                    ArtifactLayout(config["output_dir"]).manifest_run_id
+                    if config.get("output_dir")
+                    else None
+                ),
             )
             cluster_report = dict(existing_cluster)
             cluster_report["status"] = "reused"
         else:
             cluster_changed = True
+            cluster_resume = None
+            if config.get("output_dir"):
+                cluster_layout = ArtifactLayout(config["output_dir"])
+                cluster_latest = cluster_layout.checkpoint_path("cluster", "codebook", "latest")
+                if cluster_latest.exists() and not force:
+                    cluster_resume = cluster_latest
             cluster_report, projector = stage_cluster(
                 model,
                 input_shape,
@@ -813,6 +1157,8 @@ def run_pipeline(
                 candidate_id,
                 cluster_recipe,
                 seed=seed,
+                resume_from=cluster_resume,
+                reset_metrics=force,
             )
         report["stages"]["4_cluster"] = cluster_report
         if cluster_changed:
@@ -839,6 +1185,11 @@ def run_pipeline(
                     cluster_checkpoint,
                     expected_candidate=candidate_id,
                     expected_recipe=cluster_recipe,
+                    expected_run_id=(
+                        ArtifactLayout(config["output_dir"]).manifest_run_id
+                        if config.get("output_dir")
+                        else None
+                    ),
                 )
             elif cluster_report:
                 raise FileNotFoundError(
@@ -862,6 +1213,11 @@ def run_pipeline(
             "source_artifact_id": source_artifact_id,
             "recipe_id": quantize_recipe,
             "teacher_checkpoint": config["teacher"]["checkpoint"],
+            "run_id": (
+                ArtifactLayout(config["output_dir"]).manifest_run_id
+                if config.get("output_dir")
+                else None
+            ),
         }
         mismatches = {
             key: (metadata.get(key), value)
@@ -889,6 +1245,11 @@ def run_pipeline(
             if codebook.get("format") != "kws-codebook-v1":
                 raise ValueError(
                     f"unsupported packed codebook artifact format at {codebook_path}"
+                )
+            if codebook.get("run_id") != expected["run_id"]:
+                raise ValueError(
+                    f"packed codebook artifact {codebook_path} belongs to "
+                    f"run_id={codebook.get('run_id')!r}, expected {expected['run_id']!r}"
                 )
             if codebook.get("graph_path") != str(checkpoint):
                 raise ValueError(
@@ -927,7 +1288,14 @@ def run_pipeline(
             # Stage 6 must consume the converted inference graph, not the
             # fake-quantized training wrapper. It is saved as TorchScript so it
             # can be reloaded in a later process without rebuilding QAT state.
-            model = torch.jit.load(str(quantize_checkpoint), map_location="cpu").eval()
+            model = _load_scripted_checkpoint(
+                quantize_checkpoint,
+                expected_run_id=(
+                    ArtifactLayout(config["output_dir"]).manifest_run_id
+                    if config.get("output_dir")
+                    else None
+                ),
+            )
             quantize_report = dict(existing_quantize)
             quantize_report["torch_cost"] = artifact_meta.get("torch_cost")
             quantize_report["status"] = "reused"
@@ -943,6 +1311,7 @@ def run_pipeline(
                 source_artifact_id,
                 quantize_recipe,
                 seed=seed,
+                reset_metrics=force,
             )
             # Benchmark the converted inference graph produced by QAT. The
             # fake-quantized wrapper is training-only and is deliberately not
@@ -976,7 +1345,14 @@ def run_pipeline(
         with quantize_metadata.open() as file:
             artifact_meta = yaml.safe_load(file) or {}
         validate_quantized_artifact(artifact_meta, quantize_checkpoint)
-        model = torch.jit.load(str(quantize_checkpoint), map_location="cpu").eval()
+        model = _load_scripted_checkpoint(
+            quantize_checkpoint,
+            expected_run_id=(
+                ArtifactLayout(config["output_dir"]).manifest_run_id
+                if config.get("output_dir")
+                else None
+            ),
+        )
         existing_quantize["torch_cost"] = artifact_meta.get("torch_cost")
 
     if "benchmark" in stages:
@@ -993,7 +1369,90 @@ def run_pipeline(
         checkpoint_report()
 
     logger.info("Pipeline report written to %s", report_path)
+    if layout is not None:
+        for artifact in layout.root.rglob("*"):
+            if (
+                not artifact.is_file()
+                or artifact.name in {"manifest.yaml", ".run.lock"}
+                or "logs" in artifact.relative_to(layout.root).parts
+                or artifact.name.endswith(".tmp")
+            ):
+                continue
+            layout.register_file(manifest, artifact, role="runtime_artifact")
+        layout.atomic_yaml(layout.root / "manifest.yaml", manifest)
     return report
+
+
+def _configure_unified_outputs(config: dict, layout: ArtifactLayout) -> dict:
+    """Map all pipeline output roles below one exact run root."""
+    def output_path(value: str | Path | None, *, category: str, default: str) -> str:
+        """Validate legacy pipeline output fields before selecting their leaf."""
+        chosen = default if value is None else value
+        raw = Path(chosen).expanduser()
+        if ".." in raw.parts:
+            raise ValueError(
+                f"pipeline output path may not contain '..': {chosen!s}"
+            )
+        if raw.is_absolute():
+            resolved = layout._descendant(raw)
+            category_root = layout.root / category
+            try:
+                resolved.relative_to(category_root)
+            except ValueError as exc:
+                raise ValueError(
+                    f"pipeline output path must be below {category_root}: {chosen!s}"
+                ) from exc
+            return str(resolved)
+        # Existing YAML uses paths such as models/exported/foo.pt. Preserve
+        # that legacy spelling while still rejecting traversal before taking
+        # the basename; output ownership remains with the category below root.
+        return str(layout.output_path(raw.name, category=category, default=default))
+
+    configured = copy.deepcopy(config)
+    configured["output_dir"] = str(layout.root)
+    configured["data_config"] = str(Path(configured["data_config"]).expanduser().resolve())
+    configured["report_path"] = output_path(
+        configured.get("report_path"), category="reports", default="pipeline.yaml"
+    )
+
+    teacher = configured["teacher"]
+    teacher["model_config"] = str(Path(teacher["model_config"]).expanduser().resolve())
+    teacher["train_config"] = str(Path(teacher["train_config"]).expanduser().resolve())
+    teacher["checkpoint"] = output_path(
+        teacher["checkpoint"], category="models/checkpoints/teacher", default="best.pt"
+    )
+    student = configured["student"]
+    student["model_config"] = str(Path(student["model_config"]).expanduser().resolve())
+    student["train_config"] = str(Path(student["train_config"]).expanduser().resolve())
+    student["checkpoint"] = output_path(
+        student["checkpoint"], category="models/checkpoints/student", default="best.pt"
+    )
+    if student.get("warm_start_checkpoint"):
+        student["warm_start_checkpoint"] = str(Path(student["warm_start_checkpoint"]).expanduser().resolve())
+
+    sparsity = configured["sparsity"]
+    sparsity["train_config"] = str(Path(sparsity["train_config"]).expanduser().resolve())
+    sparsity["search_config"] = str(Path(sparsity["search_config"]).expanduser().resolve())
+    sparsity["output_dir"] = str(layout.root)
+    cluster = configured["cluster"]
+    cluster["train_config"] = str(Path(cluster["train_config"]).expanduser().resolve())
+    cluster["checkpoint"] = output_path(
+        cluster["checkpoint"], category="models/exported", default="kws_clustered.pt"
+    )
+    quantize = configured["quantize"]
+    quantize["train_config"] = str(Path(quantize["train_config"]).expanduser().resolve())
+    quantize["checkpoint"] = output_path(
+        quantize["checkpoint"], category="models/exported", default="kws_int8_qad.pt"
+    )
+    benchmark = configured["benchmark"]
+    benchmark["onnx_path"] = output_path(
+        benchmark["onnx_path"], category="models/exported", default="kws_deployed.onnx"
+    )
+    benchmark["report_path"] = output_path(
+        benchmark["report_path"], category="reports", default="benchmark.json"
+    )
+    configured["_unified_output_root"] = str(layout.root)
+    return configured
 
 
 def main() -> None:
@@ -1015,6 +1474,11 @@ def main() -> None:
         default=None,
         help="Override the seed in every stochastic stage (must be non-negative)",
     )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Exact run root for logs, metrics, checkpoints, PAI files, and reports",
+    )
     args = parser.parse_args()
 
     stages = tuple(stage.strip() for stage in args.stages.split(",") if stage.strip())
@@ -1022,7 +1486,17 @@ def main() -> None:
     if unknown:
         parser.error(f"unknown stage(s) {unknown}; choose from {list(STAGES)}")
 
-    run_pipeline(load_yaml(args.config), stages, force=args.force, seed=args.seed)
+    config = load_yaml(args.config)
+    output_dir = args.output_dir if args.output_dir is not None else config.get("output_dir")
+    with run_session(output_dir, command="kws.pipeline", argv=__import__("sys").argv, seed=args.seed):
+        run_pipeline(
+            config,
+            stages,
+            force=args.force,
+            seed=args.seed,
+            output_dir=output_dir,
+            pipeline_config_path=args.config,
+        )
 
 
 if __name__ == "__main__":

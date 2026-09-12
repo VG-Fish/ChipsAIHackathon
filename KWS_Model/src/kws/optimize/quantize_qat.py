@@ -17,6 +17,7 @@ re-imposed after each step; ``prepare_qat`` swaps modules and would otherwise
 quietly break the codebook.
 """
 import argparse
+import uuid
 from pathlib import Path
 from typing import cast
 
@@ -33,6 +34,7 @@ from kws.optimize.kd import (
     DistillationCriterion,
     FrozenTeacher,
     KDWeights,
+    file_sha256,
     supports_pooled_features,
 )
 from kws.optimize.cluster import save_codebook_artifact
@@ -44,12 +46,25 @@ from kws.optimize.quantization_compat import (
     get_default_qat_qconfig,
     prepare_qat,
 )
-from kws.train import run_finetune
-from kws.utils.logging import get_logger
+from kws.train import (
+    resolve_manifest_run_id,
+    run_finetune,
+    validate_checkpoint_run_id,
+)
+from kws.utils.artifacts import ArtifactLayout
+from kws.utils.checkpointing import (
+    CHECKPOINT_FORMAT_VERSION,
+    MetricsRecorder,
+    atomic_torch_save,
+    write_phase_summary,
+)
+from kws.utils.logging import get_logger, run_session
 from kws.utils.profile import profile_model
 from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
+
+BEST_CHECKPOINT_KIND = "kws_best_model"
 
 
 class QATWrapper(nn.Module):
@@ -206,6 +221,10 @@ def quantize_aware_distill_model(
     source_artifact_id: str | None = None,
     recipe_id: str | None = None,
     seed: int | None = None,
+    output_dir: str | Path | None = None,
+    resume_from: str | Path | None = None,
+    reset_metrics: bool = False,
+    run_id: str | None = None,
 ) -> dict:
     """Fine-tune a live module under fake quantization with task + KD loss.
 
@@ -214,6 +233,38 @@ def quantize_aware_distill_model(
     model config.
     """
     train_cfg = with_seed(train_cfg, seed)
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    run_id = resolve_manifest_run_id(layout, run_id)
+    recorder = None
+    latest_path = None
+    best_path = None
+    if layout is not None:
+        layout.ensure_tree()
+        out_checkpoint = layout.output_path(
+            out_checkpoint,
+            category="models/exported",
+            default="kws_int8_qad.pt",
+        )
+        latest_path = layout.checkpoint_path("quantize", "qat", "latest")
+        best_path = layout.checkpoint_path("quantize", "qat", "best")
+        recorder = MetricsRecorder(
+            layout.metrics_path("quantize", "qat"),
+            layout=layout,
+            stage="quantize",
+            phase="qat",
+        )
+    else:
+        latest_path = out_checkpoint.with_name("latest.pt")
+        best_path = out_checkpoint.with_name("best.pt")
+    resume_state = (
+        torch.load(resume_from, map_location="cpu", weights_only=False)
+        if resume_from is not None else None
+    )
+    if resume_state is not None:
+        validate_checkpoint_run_id(resume_state, run_id, source=resume_from)
+    run_id = run_id or (
+        resume_state.get("run_id") if resume_state is not None else None
+    ) or uuid.uuid4().hex
     device = torch.device("cpu")  # QAT fake-quant and the int8 convert target CPU
     model = model.to(device)
 
@@ -239,11 +290,25 @@ def quantize_aware_distill_model(
     datasets, label_map = build_datasets(
         data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"],
     )
-    train_loader = build_data_loader(datasets[TRAIN], train_cfg, shuffle=True)
-    val_loader = build_data_loader(datasets[VAL], train_cfg, shuffle=False)
+    train_generator = torch.Generator().manual_seed(int(train_cfg["seed"]))
+    val_generator = torch.Generator().manual_seed(int(train_cfg["seed"]) + 1)
+    train_loader = build_data_loader(
+        datasets[TRAIN], train_cfg, shuffle=True, generator=train_generator
+    )
+    val_loader = build_data_loader(
+        datasets[VAL], train_cfg, shuffle=False, generator=val_generator
+    )
 
     kd = None
     if teacher_checkpoint is not None:
+        if run_id is not None and (
+            layout is None
+            or Path(teacher_checkpoint).expanduser().resolve().is_relative_to(layout.root)
+        ):
+            teacher_state = torch.load(
+                teacher_checkpoint, map_location="cpu", weights_only=False
+            )
+            validate_checkpoint_run_id(teacher_state, run_id, source=teacher_checkpoint)
         teacher = FrozenTeacher(teacher_checkpoint, device)
         kd = DistillationCriterion(
             teacher,
@@ -279,6 +344,31 @@ def quantize_aware_distill_model(
 
     best_state: dict[str, torch.Tensor] = {}
 
+    def save_best_checkpoint(
+        state_dict: dict[str, torch.Tensor], val_acc: float, epoch: int
+    ) -> None:
+        atomic_torch_save(
+            best_path,
+            {
+                "format_version": CHECKPOINT_FORMAT_VERSION,
+                "kind": BEST_CHECKPOINT_KIND,
+                "stage": "quantize",
+                "phase": "qat",
+                "run_id": run_id,
+                "model_format": "prepared-qat-state-dict",
+                "model_state_dict": {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in state_dict.items()
+                },
+                "best_metric_name": "validation_accuracy",
+                "best_metric_value": float(val_acc),
+                "best_epoch": int(epoch),
+                # Retain the conventional alias used by inference checkpoints.
+                "val_acc": float(val_acc),
+                "stage_specific_state": {"qat_backend": backend},
+            },
+        )
+
     def keep_best(module: nn.Module, _val_acc: float) -> None:
         best_state.clear()
         best_state.update(
@@ -287,6 +377,12 @@ def quantize_aware_distill_model(
                 for name, tensor in module.state_dict().items()
             }
         )
+        epoch = (
+            int(recorder.records[-1]["epoch"])
+            if recorder is not None and recorder.records
+            else 0
+        )
+        save_best_checkpoint(best_state, _val_acc, epoch)
 
     result = run_finetune(
         wrapped,
@@ -297,8 +393,41 @@ def quantize_aware_distill_model(
         kd=kd,
         post_step=post_step,
         on_best=keep_best,
+        recorder=recorder,
+        resume_state=resume_state,
+        latest_path=latest_path,
+        stage="quantize",
+        phase="qat",
+        run_id=run_id,
+        recipe={
+            "train": train_cfg,
+            "data": data_cfg,
+            "backend": backend,
+            "teacher_checkpoint": teacher_checkpoint,
+            "teacher_sha256": (
+                file_sha256(teacher_checkpoint) if teacher_checkpoint else None
+            ),
+            "candidate_id": candidate_id,
+            "source_artifact_id": source_artifact_id,
+            "recipe_id": recipe_id,
+        },
+        stage_specific_state={"qat_backend": backend},
+        reset_metrics=reset_metrics,
         label="qad",
     )
+    if not best_state and resume_state is not None:
+        best_state.update(resume_state.get("best_model_state_dict") or {})
+    if latest_path.exists():
+        latest_state = torch.load(latest_path, map_location="cpu", weights_only=False)
+        durable_best_state = latest_state.get("best_model_state_dict") or best_state
+        if durable_best_state:
+            best_state.clear()
+            best_state.update(durable_best_state)
+            save_best_checkpoint(
+                best_state,
+                float(latest_state.get("best_metric_value", result.best_val_acc)),
+                int(latest_state.get("best_epoch", 0)),
+            )
     if best_state:
         wrapped.load_state_dict(best_state, strict=True)
 
@@ -320,7 +449,9 @@ def quantize_aware_distill_model(
     scripted = torch.jit.trace(quantized, example_input, check_trace=True)
 
     out_checkpoint.parent.mkdir(parents=True, exist_ok=True)
-    torch.jit.save(scripted, str(out_checkpoint))
+    temporary = out_checkpoint.with_name(f".{out_checkpoint.name}.tmp")
+    torch.jit.save(scripted, str(temporary), _extra_files={"run_id": run_id})
+    temporary.replace(out_checkpoint)
     codebook_artifact = None
     if codebook_projector is not None and len(codebook_projector):
         codebook_path = out_checkpoint.with_suffix(
@@ -331,15 +462,15 @@ def quantize_aware_distill_model(
             codebook_projector,
             codebook_path,
             graph_path=out_checkpoint,
+            run_id=run_id,
         )
     metadata_path = out_checkpoint.with_suffix(out_checkpoint.suffix + ".yaml")
-    metadata_path.write_text(
-        yaml.safe_dump(
-            {
+    metadata = {
                 "stage": "quantize",
                 "candidate_id": candidate_id,
                 "source_artifact_id": source_artifact_id,
                 "recipe_id": recipe_id,
+                "run_id": run_id,
                 "teacher_checkpoint": teacher_checkpoint,
                 "backend": backend,
                 "input_shape": list(input_shape),
@@ -349,15 +480,30 @@ def quantize_aware_distill_model(
                 "fused_conv_bn_pairs": fused_pairs,
                 "quantizable_pai_modules": replaced_pai_modules,
                 "codebook_artifact": codebook_artifact,
-            },
-            sort_keys=False,
-        )
-    )
+            }
+    if layout is not None:
+        layout.atomic_yaml(metadata_path, metadata)
+    else:
+        temporary_metadata = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
+        temporary_metadata.write_text(yaml.safe_dump(metadata, sort_keys=False))
+        temporary_metadata.replace(metadata_path)
     logger.info(
         "Saved int8 TorchScript model -> %s (best fake-quant val_acc=%.4f)",
         out_checkpoint,
         result.best_val_acc,
     )
+    if layout is not None:
+        write_phase_summary(
+            layout,
+            stage="quantize",
+            phase="qat",
+            result=result,
+            artifacts={
+                "best_checkpoint": best_path,
+                "latest_checkpoint": latest_path,
+                "exported_model": out_checkpoint,
+            },
+        )
     return {
         "best_val_acc": result.best_val_acc,
         "final_val_acc": result.final_val_acc,
@@ -367,10 +513,13 @@ def quantize_aware_distill_model(
         "label_map": label_map,
         "num_keywords": num_keywords,
         "checkpoint": str(out_checkpoint),
+        "best_checkpoint": str(best_path),
+        "latest_checkpoint": str(latest_path),
         "artifact_metadata": str(metadata_path),
         "candidate_id": candidate_id,
         "source_artifact_id": source_artifact_id,
         "recipe_id": recipe_id,
+        "run_id": result.run_id,
         "fused_conv_bn_pairs": fused_pairs,
         "quantizable_pai_modules": replaced_pai_modules,
         "torch_cost": torch_cost,
@@ -404,13 +553,33 @@ def quantize_aware_distill(
     source_artifact_id: str | None = None,
     recipe_id: str | None = None,
     seed: int | None = None,
+    output_dir: str | Path | None = None,
+    resume: bool = False,
+    resume_from: str | Path | None = None,
+    reset_metrics: bool = False,
+    run_id: str | None = None,
 ) -> dict:
     """Checkpoint-driven step 5, for a student whose architecture is a config."""
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    run_id = resolve_manifest_run_id(layout, run_id)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if run_id is not None and (
+        layout is None
+        or Path(checkpoint_path).expanduser().resolve().is_relative_to(layout.root)
+    ):
+        validate_checkpoint_run_id(checkpoint, run_id, source=checkpoint_path)
     model = build_ds_cnn(
         checkpoint["model_cfg"], tuple(checkpoint["input_shape"]), checkpoint["num_classes"],
     )
     model.load_state_dict(checkpoint["model_state_dict"])
+    if resume_from is None and resume:
+        if output_dir is not None:
+            layout = ArtifactLayout(output_dir)
+            candidate = layout.checkpoint_path("quantize", "qat", "latest")
+        else:
+            candidate = out_checkpoint.with_name("latest.pt")
+        if candidate.exists():
+            resume_from = candidate
     return quantize_aware_distill_model(
         model,
         tuple(checkpoint["input_shape"]),
@@ -420,10 +589,14 @@ def quantize_aware_distill(
         teacher_checkpoint=teacher_checkpoint,
         codebook_projector=codebook_projector,
         candidate_id=candidate_id,
-        source_artifact_id=source_artifact_id,
+        source_artifact_id=(source_artifact_id or file_sha256(checkpoint_path)),
         recipe_id=recipe_id,
         num_keywords=checkpoint["num_keywords"],
         seed=seed,
+        output_dir=output_dir,
+        resume_from=resume_from,
+        reset_metrics=reset_metrics,
+        run_id=run_id,
     )
 
 
@@ -431,11 +604,13 @@ def quantize_aware_train(
     checkpoint_path: str, data_cfg: dict, train_cfg: dict, out_checkpoint: Path,
     *,
     seed: int | None = None,
+    run_id: str | None = None,
 ) -> float:
     """Plain QAT with no teacher -- the ablation against step 5's full objective."""
     return quantize_aware_distill(
         checkpoint_path, data_cfg, train_cfg, out_checkpoint,
         seed=seed,
+        run_id=run_id,
     )["best_val_acc"]
 
 
@@ -449,7 +624,10 @@ def main():
         default=None,
         help="Fixed teacher for the KD term; omit to run plain QAT",
     )
-    parser.add_argument("--out-checkpoint", required=True)
+    parser.add_argument("--out-checkpoint", required=False)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--resume-from", default=None)
     parser.add_argument(
         "--seed",
         type=int,
@@ -457,20 +635,53 @@ def main():
         help="Override the training-config seed (must be non-negative)",
     )
     args = parser.parse_args()
+    if args.out_checkpoint is None and args.output_dir is None:
+        parser.error("--out-checkpoint is required unless --output-dir is supplied")
 
     with open(args.data_config) as f:
         data_cfg = yaml.safe_load(f)
     with open(args.train_config) as f:
         train_cfg = yaml.safe_load(f)
 
-    quantize_aware_distill(
-        args.checkpoint,
-        data_cfg,
-        train_cfg,
-        Path(args.out_checkpoint),
-        teacher_checkpoint=args.teacher_checkpoint,
-        seed=args.seed,
+    layout = ArtifactLayout(args.output_dir) if args.output_dir else None
+    destination = (
+        layout.output_path(
+            args.out_checkpoint,
+            category="models/exported",
+            default="kws_int8_qad.pt",
+        )
+        if layout is not None else Path(args.out_checkpoint)
     )
+    resume_from = args.resume_from
+    if resume_from is None and args.resume and layout is not None:
+        candidate = layout.checkpoint_path("quantize", "qat", "latest")
+        if candidate.exists():
+            resume_from = str(candidate)
+    inputs = [
+        (args.data_config, "data_config"),
+        (args.train_config, "train_config"),
+        (args.checkpoint, "source_checkpoint"),
+    ]
+    if args.teacher_checkpoint:
+        inputs.append((args.teacher_checkpoint, "teacher_checkpoint"))
+    with run_session(
+        args.output_dir,
+        command="kws.optimize.quantize_qat",
+        argv=__import__("sys").argv,
+        seed=args.seed,
+        inputs=inputs,
+    ):
+        quantize_aware_distill(
+            args.checkpoint,
+            data_cfg,
+            train_cfg,
+            destination,
+            teacher_checkpoint=args.teacher_checkpoint,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            resume=args.resume,
+            resume_from=resume_from,
+        )
 
 
 if __name__ == "__main__":

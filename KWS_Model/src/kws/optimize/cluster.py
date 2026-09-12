@@ -23,6 +23,7 @@ range.
 from __future__ import annotations
 
 import math
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, cast
@@ -31,11 +32,28 @@ import torch
 import torch.nn as nn
 from torch.nn.utils import parametrize
 
+from kws.utils.artifacts import ArtifactLayout
+from kws.utils.checkpointing import (
+    CHECKPOINT_FORMAT_VERSION,
+    MetricsRecorder,
+    atomic_torch_save,
+)
+from kws.train import resolve_manifest_run_id, validate_checkpoint_run_id
 from kws.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 CLUSTERABLE_TYPES = (nn.Conv2d, nn.Linear)
+BEST_CHECKPOINT_KIND = "kws_best_model"
+
+
+def _infer_manifest_run_id(path: str | Path) -> str | None:
+    """Find an existing run manifest for a direct artifact-writer call."""
+    resolved = Path(path).expanduser().resolve()
+    for parent in (resolved.parent, *resolved.parents):
+        if (parent / "manifest.yaml").is_file():
+            return ArtifactLayout(parent).manifest_run_id
+    return None
 
 
 @dataclass(frozen=True)
@@ -433,6 +451,7 @@ def save_codebook_artifact(
     *,
     graph_path: str | Path,
     bits: int | None = None,
+    run_id: str | None = None,
 ) -> dict:
     """Persist packed indices and centroids alongside the compatibility graph.
 
@@ -440,11 +459,13 @@ def save_codebook_artifact(
     payload is the representation a target runtime can consume instead of
     storing the clustered layers as dense weights.
     """
+    run_id = run_id or _infer_manifest_run_id(path)
     payload = _codebook_payload(model, projector, bits=bits)
+    payload["run_id"] = run_id
     payload["graph_path"] = str(graph_path)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(payload, path)
+    atomic_torch_save(path, payload)
     storage_bytes = sum(
         len(layer["indices"]) + layer["centroids"].numel() * 4
         for layer in payload["layers"].values()
@@ -453,6 +474,7 @@ def save_codebook_artifact(
     return {
         "path": str(path),
         "format": payload["format"],
+        "run_id": run_id,
         "bits": payload["bits"],
         "layers": sorted(payload["layers"]),
         "storage_bytes": storage_bytes,
@@ -487,6 +509,7 @@ def save_clustered_model(
     input_shape: tuple[int, int],
     candidate_id: str | None = None,
     recipe_id: str | None = None,
+    run_id: str | None = None,
 ) -> None:
     """Persist the baked graph and assignments needed by the next stage.
 
@@ -498,13 +521,14 @@ def save_clustered_model(
     weights after its module swaps.
     """
     path = Path(path)
+    run_id = run_id or _infer_manifest_run_id(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     codebook_payload = _codebook_payload(model, projector)
-    torch.save(
-        {
+    atomic_torch_save(path, {
             "stage": "clustered",
             "candidate_id": candidate_id,
             "recipe_id": recipe_id,
+            "run_id": run_id,
             "input_shape": list(input_shape),
             "model_state_dict": {
                 name: tensor.detach().cpu().clone()
@@ -516,9 +540,7 @@ def save_clustered_model(
             },
             "cluster_bits": projector.bits,
             "cluster_codebooks": codebook_payload["layers"],
-        },
-        path,
-    )
+        })
     logger.info("Saved clustered deployment graph -> %s", path)
 
 
@@ -528,11 +550,13 @@ def load_clustered_model(
     *,
     expected_candidate: str | None = None,
     expected_recipe: str | None = None,
+    expected_run_id: str | None = None,
 ) -> CodebookProjector:
     """Load a clustered graph onto a freshly reconstructed PAI clean model."""
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     if checkpoint.get("stage") != "clustered":
         raise ValueError(f"{path} is not a clustered deployment artifact")
+    validate_checkpoint_run_id(checkpoint, expected_run_id, source=path)
     if (
         expected_candidate is not None
         and checkpoint.get("candidate_id") != expected_candidate
@@ -565,6 +589,12 @@ def codebook_finetune(
     *,
     kd=None,
     epochs: int | None = None,
+    output_dir: str | Path | None = None,
+    resume: bool = False,
+    resume_from: str | Path | None = None,
+    recipe: dict | None = None,
+    reset_metrics: bool = False,
+    run_id: str | None = None,
 ) -> dict:
     """Learn the codebook: train the centroids only, with the rest frozen.
 
@@ -591,6 +621,65 @@ def codebook_finetune(
         sum(centroid.numel() for centroid in centroids),
     )
     best_state: dict[str, torch.Tensor] = {}
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    run_id = resolve_manifest_run_id(layout, run_id)
+    recorder = (
+        MetricsRecorder(
+            layout.metrics_path("cluster", "codebook"),
+            layout=layout,
+            stage="cluster",
+            phase="codebook",
+        )
+        if layout is not None else None
+    )
+    latest_path = (
+        layout.checkpoint_path("cluster", "codebook", "latest") if layout else None
+    )
+    best_path = (
+        layout.checkpoint_path("cluster", "codebook", "best") if layout else None
+    )
+    if resume_from is None and resume and latest_path is not None and latest_path.exists():
+        resume_from = latest_path
+    resume_state = (
+        torch.load(resume_from, map_location=device, weights_only=False)
+        if resume_from is not None else None
+    )
+    if resume_state is not None:
+        validate_checkpoint_run_id(resume_state, run_id, source=resume_from)
+    run_id = run_id or (
+        resume_state.get("run_id") if resume_state is not None else None
+    ) or uuid.uuid4().hex
+
+    def save_best_checkpoint(
+        state_dict: dict[str, torch.Tensor], val_acc: float, epoch: int
+    ) -> None:
+        if best_path is None:
+            return
+        atomic_torch_save(
+            best_path,
+            {
+                "format_version": CHECKPOINT_FORMAT_VERSION,
+                "kind": BEST_CHECKPOINT_KIND,
+                "stage": "cluster",
+                "phase": "codebook",
+                "run_id": run_id,
+                "model_format": "cluster-parametrized-state-dict",
+                "model_state_dict": {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in state_dict.items()
+                },
+                "best_metric_name": "validation_accuracy",
+                "best_metric_value": float(val_acc),
+                "best_epoch": int(epoch),
+                # Retain the conventional alias used by inference checkpoints.
+                "val_acc": float(val_acc),
+                "stage_specific_state": {
+                    "trainable_centroids": sum(
+                        centroid.numel() for centroid in centroids
+                    ),
+                },
+            },
+        )
 
     def keep_best(module: nn.Module, _val_acc: float) -> None:
         best_state.clear()
@@ -600,6 +689,12 @@ def codebook_finetune(
                 for name, tensor in module.state_dict().items()
             }
         )
+        epoch = (
+            int(recorder.records[-1]["epoch"])
+            if recorder is not None and recorder.records
+            else 0
+        )
+        save_best_checkpoint(best_state, _val_acc, epoch)
 
     result = run_finetune(
         model,
@@ -610,11 +705,36 @@ def codebook_finetune(
         kd=kd,
         parameters=centroids,
         on_best=keep_best,
+        recorder=recorder,
+        latest_path=latest_path,
+        resume_state=resume_state,
+        best_path=None,
+        stage="cluster",
+        phase="codebook",
+        run_id=run_id,
+        recipe={
+            **(recipe or {}),
+            "train": train_cfg,
+            "centroid_count": sum(p.numel() for p in centroids),
+        },
+        reset_metrics=reset_metrics,
         epochs=epochs if epochs is not None else train_cfg.get("cluster_epochs"),
         label="codebook",
     )
     if best_state:
         model.load_state_dict(best_state, strict=True)
+    elif resume_state is not None and resume_state.get("best_model_state_dict"):
+        model.load_state_dict(resume_state["best_model_state_dict"], strict=True)
+    if layout is not None and latest_path is not None and latest_path.exists():
+        latest_state = torch.load(latest_path, map_location="cpu", weights_only=False)
+        validate_checkpoint_run_id(latest_state, run_id, source=latest_path)
+        durable_best_state = latest_state.get("best_model_state_dict") or best_state
+        if durable_best_state:
+            save_best_checkpoint(
+                durable_best_state,
+                float(latest_state.get("best_metric_value", result.best_val_acc)),
+                int(latest_state.get("best_epoch", 0)),
+            )
     # Do not leak centroid-only freezing into QAT when this function is used as
     # part of the end-to-end pipeline.
     for parameter in model.parameters():
@@ -626,4 +746,5 @@ def codebook_finetune(
         "epochs": result.epochs,
         "trainable_centroids": sum(centroid.numel() for centroid in centroids),
         "history": result.history,
+        "run_id": run_id,
     }

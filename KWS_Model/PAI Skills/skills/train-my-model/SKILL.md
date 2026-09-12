@@ -9,6 +9,9 @@ description: Guide the Operator through launching a training run with live dashb
 
 1. **Collect inputs** — ask the Operator for the following if not already known:
    - `save_name` — the PAI save name (e.g. `PAI`)
+   - `output_dir` — optional exact KWS run root; when supplied, use
+     `<output_dir>/pai/candidates/<save_name>` for the run directory while
+     passing only the leaf `save_name` to PerforatedAI
    - `training_script` — path to the training script relative to the Codebase root (e.g. `train.py`)
    - `training_args` — any arguments to pass to the script (e.g. `--epochs 50`); default is none
    - `model_file` — path to the model file (e.g. `model.py`)
@@ -24,7 +27,9 @@ description: Guide the Operator through launching a training run with live dashb
      model_class=...,
    )
    ```
-   This writes `events_url` into the Perforation Config (`{save_name}/{save_name}_config.json`) — the URL PerforatedAI posts Training Events to.
+   This writes `events_url` into the Perforation Config. With an output root,
+   the native config remains at `<output_dir>/pai/candidates/<save_name>/`;
+   do not rename PAI's native files.
 
 3. **Enable dashboard events in the training script (required)** — the training script must call `GPA.pc.set_dashboard_events_enabled(True)` for PerforatedAI to actually post Training Events to `events_url`; without it the Training View stays empty even though the runner is configured. Check whether the script's PAI configuration block already has this call (it's typically set alongside `GPA.pc.set_testing_dendrite_capacity(...)`). If missing, add it there:
    ```python

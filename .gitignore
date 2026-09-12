@@ -21,3 +21,4 @@ dendritic_*/
 :memory:.ses
 .env
 .ruff_cache/
+KWS_Model/outputs/

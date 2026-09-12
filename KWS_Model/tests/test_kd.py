@@ -3,7 +3,12 @@ import torch
 import torch.nn.functional as F
 
 from kws.models.ds_cnn import DSCNN
-from kws.optimize.kd import KDWeights, distillation_losses, supports_pooled_features
+from kws.optimize.kd import (
+    DistillationCriterion,
+    KDWeights,
+    distillation_losses,
+    supports_pooled_features,
+)
 
 
 def test_weights_must_form_a_convex_mix():
@@ -101,3 +106,37 @@ def test_probing_leaves_training_mode_untouched():
     model.train()
     supports_pooled_features(model, (40, 98))
     assert model.training
+
+
+class _TeacherDescription:
+    feature_dim = 5
+
+
+def test_distillation_criterion_state_round_trips_feature_adapter():
+    weights = KDWeights()
+    source = DistillationCriterion(
+        _TeacherDescription(), weights, 0.0, torch.device("cpu"),
+        student_feature_dim=3,
+    )
+    with torch.no_grad():
+        source.adapter.weight.copy_(torch.arange(15, dtype=torch.float32).reshape(5, 3))
+
+    restored = DistillationCriterion(
+        _TeacherDescription(), weights, 0.0, torch.device("cpu"),
+        student_feature_dim=3,
+    )
+    restored.load_state_dict(source.state_dict(), strict=True)
+
+    assert torch.equal(restored.adapter.weight, source.adapter.weight)
+
+
+def test_distillation_criterion_rejects_missing_required_adapter_state():
+    criterion = DistillationCriterion(
+        _TeacherDescription(), KDWeights(), 0.0, torch.device("cpu"),
+        student_feature_dim=3,
+    )
+    state = criterion.state_dict()
+    state["adapter_state_dict"] = None
+
+    with pytest.raises(RuntimeError, match="missing the feature adapter"):
+        criterion.load_state_dict(state, strict=True)

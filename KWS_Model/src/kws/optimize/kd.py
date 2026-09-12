@@ -15,6 +15,7 @@ response and classification weights instead of silently dropping a term.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -202,6 +203,8 @@ class DistillationCriterion:
     deployed model; ``extra_parameters`` hands it to the caller's optimizer.
     """
 
+    state_format_version = 1
+
     def __init__(
         self,
         teacher: FrozenTeacher,
@@ -248,6 +251,60 @@ class DistillationCriterion:
     def eval(self) -> None:
         self.train(False)
 
+    def state_dict(self) -> dict:
+        """Return the training-only KD state required for exact resume.
+
+        ``DistillationCriterion`` intentionally is not an ``nn.Module`` because
+        registering the frozen teacher would duplicate the complete teacher in
+        every student checkpoint.  The only trainable criterion state is the
+        optional feature adapter, so keep a small explicit schema for it.
+        """
+        return {
+            "format_version": self.state_format_version,
+            "weights": self.weights.as_dict(),
+            "adapter_state_dict": (
+                self.adapter.state_dict() if self.adapter is not None else None
+            ),
+        }
+
+    def load_state_dict(self, state: Mapping, *, strict: bool = True):
+        """Restore and validate the training-only KD state."""
+        if not isinstance(state, Mapping):
+            raise TypeError("KD state must be a mapping")
+
+        required = {"format_version", "weights", "adapter_state_dict"}
+        missing = required.difference(state)
+        unexpected = set(state).difference(required)
+        if strict and (missing or unexpected):
+            details = []
+            if missing:
+                details.append(f"missing keys: {sorted(missing)}")
+            if unexpected:
+                details.append(f"unexpected keys: {sorted(unexpected)}")
+            raise RuntimeError("invalid KD state (" + "; ".join(details) + ")")
+
+        version = state.get("format_version")
+        if version != self.state_format_version:
+            raise RuntimeError(
+                f"unsupported KD state format {version!r}; "
+                f"expected {self.state_format_version}"
+            )
+        if state.get("weights") != self.weights.as_dict():
+            raise RuntimeError("KD state weights do not match the requested recipe")
+
+        adapter_state = state.get("adapter_state_dict")
+        if self.adapter is None:
+            if adapter_state not in (None, {}):
+                raise RuntimeError(
+                    "checkpoint contains a feature adapter but this KD recipe does not"
+                )
+            return None
+        if adapter_state is None:
+            raise RuntimeError(
+                "checkpoint is missing the feature adapter required by this KD recipe"
+            )
+        return self.adapter.load_state_dict(adapter_state, strict=strict)
+
     def __call__(
         self,
         inputs: torch.Tensor,
@@ -285,7 +342,9 @@ class DistillationCriterion:
             "teacher_val_acc": self.teacher.val_acc,
             "weights": self.weights.as_dict(),
             "feature_adapter": (
-                "training_only_linear_not_saved" if self.adapter is not None else None
+                "training_only_linear_checkpointed_not_deployed"
+                if self.adapter is not None
+                else None
             ),
         }
 

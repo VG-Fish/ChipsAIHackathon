@@ -4,6 +4,29 @@ set -e
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 MCP_FILE=".mcp.json"
 SKILLS_DIR=".claude/skills"
+ARTIFACT_ROOT=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --artifact-root)
+      ARTIFACT_ROOT="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+PWD_ABS="$(pwd)"
+if [ -z "$ARTIFACT_ROOT" ]; then
+  ARTIFACT_ROOT="${PAI_ARTIFACT_ROOT:-$PWD_ABS/.perforated_tools}"
+fi
+case "$ARTIFACT_ROOT" in
+  /*) ;;
+  *) ARTIFACT_ROOT="$PWD_ABS/$ARTIFACT_ROOT" ;;
+esac
 
 if [ -f "$MCP_FILE" ]; then
   python3 - "$MCP_FILE" <<'EOF'
@@ -32,6 +55,6 @@ done
 
 # Remove the runtime launcher + its log, but preserve .perforated_tools and any
 # user data (exports, training runs) it holds.
-rm -f .perforated_tools/dashboard-run.sh .perforated_tools/dashboard.log
+rm -f "$ARTIFACT_ROOT/dashboard-run.sh" "$ARTIFACT_ROOT/dashboard.log"
 
 docker rmi rorrybrenner/perforated_dashboard_mcp:v0.1.0
