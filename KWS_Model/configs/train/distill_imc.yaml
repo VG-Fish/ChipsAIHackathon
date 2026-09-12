@@ -2,7 +2,7 @@
 # data pipeline and optimizer while adopting the three losses and weights from
 # Song et al., "Knowledge Distillation for In-Memory Keyword Spotting Model."
 augment: true
-epochs: 40
+epochs: 200
 batch_size: 128
 num_workers: 4
 persistent_workers: true
