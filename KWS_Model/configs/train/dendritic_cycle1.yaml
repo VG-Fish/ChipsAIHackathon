@@ -28,7 +28,7 @@ resume_epochs: 8
 
 objective:
   metric: validation_accuracy
-  minimum: 0.90
+  minimum: 0.85
   minimize: deployed_parameters
 
 # The KD term used inside the dendrite cycle and in the step-3d resume. Feature

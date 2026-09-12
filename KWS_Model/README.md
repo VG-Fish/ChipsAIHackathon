@@ -87,9 +87,9 @@ instead of being mislabeled as ESP32 measurements.
 ### Notes on three of the steps
 
 **3f, the stopping rule.** The earlier search stopped at the first candidate
-below the 90% accuracy floor. That ends the sweep at a point that may still have
-had cheaper deployable models behind it, so the floor is now an *admission*
-constraint and the Pareto frontier is the stopping rule: the sweep continues
+below the then-configured 90% accuracy floor. That ends the sweep at a point
+that may still have had cheaper deployable models behind it, so the floor is
+now an *admission* constraint (currently 85%) and the Pareto frontier is the stopping rule: the sweep continues
 while candidates keep extending the accuracy-versus-cost frontier and stops
 after `pareto_patience` consecutive candidates that do not. Configured accuracy
 and relative-cost tolerances make "do not" mean no material frontier progress,

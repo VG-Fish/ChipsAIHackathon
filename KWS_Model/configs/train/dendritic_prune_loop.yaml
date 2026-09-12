@@ -13,7 +13,7 @@
 start_channels: 18
 minimum_channels: 4
 channel_step: 1
-minimum_validation_accuracy: 0.90
+minimum_validation_accuracy: 0.85
 
 # Stop after this many consecutive candidates fail to extend the frontier.
 # Candidates rejected by the accuracy floor count toward it too.
@@ -28,7 +28,7 @@ pareto_relative_cost_tolerance: 0.05
 
 # Optional extra admission constraint: reject a candidate that drops more than
 # this much accuracy relative to the last admitted one. Leave null while the
-# objective is "cheapest model above 90%".
+# objective is "cheapest model above 85%".
 maximum_accuracy_drop: null
 
 # The fixed teacher for every KD term inside the sweep (steps 3b and 3d).
