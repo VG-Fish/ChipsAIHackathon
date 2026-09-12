@@ -654,3 +654,38 @@ is not required for the unit suite.
 - All new and existing Python tests plus the PAI Skills shell tests pass, legacy
   no-root commands remain compatible, and no test/run creates a project-owned
   artifact outside its selected temporary output root.
+
+## Future ideas (not scheduled)
+
+- **Turn step 3 into a true compounding prune+dendrite loop.** Today's step 3
+  (`dendritic_prune_loop.py`) sweeps a precomputed list of descending base
+  widths; each width is an *independent restart* pruned from the same original
+  KD-distilled checkpoint, grows its own dendrites, and the sweep stops via a
+  multi-axis Pareto frontier with patience (see the module docstring: "each
+  sparsity target gets its own base network... PerforatedAI adds capacity; it
+  does not structurally prune a learned dendritic network"). A requested
+  alternative is a genuinely iterative loop that keeps pruning *and* growing
+  dendrites on the same evolving model round over round -- prune the current
+  best (already-dendritic) model further, grow new dendrites on top, resume
+  KD, and repeat until validation performance stalls or degrades for N
+  consecutive rounds -- rather than independently restarting from the original
+  checkpoint at each width.
+  - This directly conflicts with the documented constraint that PAI cannot
+    structurally re-prune a network it has already grown dendrites onto, so
+    doing this properly needs a real answer first: either (a) collapse/merge
+    trained dendrites back into the base weights before the next prune pass,
+    or (b) only ever prune the base graph and discard-and-regrow dendrites
+    each round (losing prior dendrite training), or (c) some other scheme PAI
+    supports. Whichever is chosen touches `dendritic.py`'s PAI integration
+    assumptions, not just the sweep driver.
+  - A smaller, lower-risk version of this idea keeps today's per-width restart
+    architecture (still valid, still sidesteps the re-pruning problem) but
+    replaces the multi-axis Pareto-frontier/patience stop with a plain "stop
+    when best validation accuracy stalls or drops for N consecutive
+    candidates" rule, dropping the cost-axis frontier logic in
+    `pareto.py`/`ParetoSearch` in favor of a single-metric criterion.
+  - Raised 2026-09-12; deferred pending a decision on which of the above
+    (compounding-model rewrite vs. simplified single-metric stop vs. leave as
+    is and just document today's sweep as "iterative until stalling") is
+    wanted, since each has different blast radius across `dendritic.py`,
+    `dendritic_prune_loop.py`, `pareto.py`, configs, README, and tests.
