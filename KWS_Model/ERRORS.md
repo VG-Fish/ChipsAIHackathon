@@ -55,3 +55,73 @@ against a JSONL that stage 1 is still appending to, and no stage depends on the
 duplicate today.
 
 ---
+
+## 2026-09-12 — OPEN — stage 2 silently trained the student from scratch
+
+**Run:** `outputs/full-run-20260912T063022Z`, stage 2, started 12:36:18. Not a
+failure; the run is healthy and still going.
+
+**Signature:** stage 2 emitted a single WARNING and continued on a path the
+config explicitly says is the worse one:
+
+```
+[WARNING] Configured optional student warm-start checkpoint
+.../models/checkpoints/ds_cnn_xs_12class.pt is missing;
+training the student from scratch
+```
+
+`_resolve_optional_checkpoint` (`pipeline.py:296-307`) downgrades a missing
+warm start to `None` and logs at WARNING. `configs/train/pipeline.yaml:28-30`
+meanwhile asserts warm starting "beat distilling from scratch by 6.3 points of
+test accuracy (79.3% -> 85.6%), so it stays on." It did not stay on. Confirmed
+from the loss curve: `distill-ds_cnn_xs epoch 1/200 val_acc=0.1998`, i.e. random
+init.
+
+**Root cause:** no pipeline stage produces that checkpoint. `STAGES` is
+`(teacher, student, sparsity, cluster, quantize, benchmark)`, where `student`
+is the distillation itself; the warm start is an *external prerequisite* that
+must come from a separate hard-label `kws.train` run on `ds_cnn_xs`. A fresh
+clone can therefore never satisfy it, and the pipeline will always take the
+degraded path without failing.
+
+**The 6.3-point claim is stale and does not describe this task.** Its evidence
+is 6-class:
+
+| report | accuracy | params | classes |
+| --- | --- | --- | --- |
+| `reports/ds_cnn_xs_distilled.json` | 0.7934 | 3850 | 6 (`yes no on off _unknown_ _silence_`) |
+| `reports/ds_cnn_xs_distilled_warm.json` | 0.8563 | 3850 | 6 |
+
+This pipeline is 12-class at ~4,096 params, so capacity per class is roughly
+halved and both arms are pushed harder against the capacity ceiling. The gain
+has never been measured in the 12-class regime, and it is a single-seed n=1
+comparison on a model small enough for seed variance to be material. The one
+12-class artifact that exists, `ds_cnn_xs_distilled_warm_12class.pt`, sits at
+val 0.7302 — well below 85.6% — though it may be from an aborted run.
+
+Neither checkpoint on disk can serve as the warm start: `ds_cnn_xs.pt` is
+6-class (`num_classes: 6`), so `load_state_dict` fails against the 12-wide head
+even though `model_cfg` matches; `ds_cnn_xs_distilled_warm_12class.pt` is a
+distillation output, not a pretrain.
+
+**Decision:** let stage 2 finish from scratch. It yields the 12-class
+from-scratch baseline that the 6-class number is missing, at no extra cost —
+land near 85% and warm starting has little headroom, land near 79% and it is
+clearly worth the ~3.3 h pretrain. Re-deciding then is free; deciding now costs
+~7 h (3.3 h pretrain + restarting the ~4 h stage 2) on an untested assumption.
+
+**Fix, once measured:**
+
+- If the gain holds: add a student-pretrain step that writes
+  `ds_cnn_xs_12class.pt` before stage 2, so the prerequisite is produced rather
+  than assumed.
+- Either way, make the mismatch loud. A config that names a warm start whose
+  file is absent should fail fast, or at minimum record the downgrade in the
+  run report instead of only the log — this cost a 4-hour stage before anyone
+  noticed.
+- Replace the `pipeline.yaml:28-30` comment with a 12-class measurement, or
+  mark it explicitly as 6-class provenance.
+
+**Status:** open, pending the stage 2 result (~16:40 local).
+
+---
