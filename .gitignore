@@ -22,3 +22,4 @@ dendritic_*/
 .env
 .ruff_cache/
 KWS_Model/outputs/
+"*/PAI Skills/"
