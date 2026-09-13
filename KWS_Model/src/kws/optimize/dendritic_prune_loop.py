@@ -39,7 +39,7 @@ from kws.train import resolve_manifest_run_id, validate_checkpoint_run_id
 from kws.utils import graphs
 from kws.utils.logging import get_logger
 from kws.utils.logging import run_session
-from kws.utils.artifacts import ArtifactLayout
+from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir
 from kws.utils.seed import with_seed
 
 logger = get_logger(__name__)
@@ -680,8 +680,18 @@ def main() -> None:
         help="Override the training-config seed (must be non-negative)",
     )
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--resume-dir",
+        default=None,
+        metavar="PATH",
+        help="Resume or reuse the sparsity search from an existing output directory",
+    )
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    try:
+        args.output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+    except ValueError as error:
+        parser.error(str(error))
     if args.graphs:
         if args.output_dir is None:
             parser.error("--graphs requires --output-dir")

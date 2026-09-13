@@ -62,6 +62,22 @@ uv run --env-file .env python -m kws.pipeline \
   --output-dir outputs/my-kws-run
 ```
 
+Resumable commands also accept `--resume-dir PATH` as a shorthand for using
+that existing run root with `--resume`. It validates that the directory exists
+and selects its canonical `latest.pt`; `--resume-from PATH` can still override
+the checkpoint when needed. For example:
+
+```bash
+uv run python -m kws.train \
+  --model-config configs/model/sparknet_c12.yaml \
+  --train-config configs/train/light.yaml \
+  --stage student \
+  --resume-dir outputs/phase_b/step2_sparknet_c12_light_20260913T215424Z
+```
+
+The pipeline accepts the same flag when reusing or continuing stages in an
+existing run root.
+
 The run root contains `manifest.yaml`, append-only invocation logs under
 `logs/`, effective config snapshots under `metadata/configs/`, canonical
 epoch JSONL under `metrics/`, separate resumable `latest.pt` and deployable

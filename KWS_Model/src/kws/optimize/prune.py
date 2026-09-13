@@ -38,7 +38,7 @@ from kws.train import (
     validate_checkpoint_run_id,
 )
 from kws.utils.device import get_device
-from kws.utils.artifacts import ArtifactLayout
+from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir
 from kws.utils.checkpointing import (
     recipe_fingerprint,
     require_training_state,
@@ -64,14 +64,10 @@ def _copy_bn_subset(old_bn: nn.BatchNorm2d, new_bn: nn.BatchNorm2d, indices: tor
     with torch.no_grad():
         if old_bn.weight is None or old_bn.bias is None or new_bn.weight is None or new_bn.bias is None:
             raise ValueError("channel pruning requires affine BatchNorm parameters")
-        old_weight = cast(torch.Tensor, old_bn.weight)
-        old_bias = cast(torch.Tensor, old_bn.bias)
-        new_weight = cast(torch.Tensor, new_bn.weight)
-        new_bias = cast(torch.Tensor, new_bn.bias)
-        old_mean = cast(torch.Tensor, old_mean)
-        new_mean = cast(torch.Tensor, new_mean)
-        old_var = cast(torch.Tensor, old_var)
-        new_var = cast(torch.Tensor, new_var)
+        old_weight = old_bn.weight
+        old_bias = old_bn.bias
+        new_weight = new_bn.weight
+        new_bias = new_bn.bias
         new_weight.copy_(old_weight[indices])
         new_bias.copy_(old_bias[indices])
         new_mean.copy_(old_mean[indices])
@@ -552,6 +548,12 @@ def main():
     )
     parser.add_argument("--out-checkpoint", required=False)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--resume-dir",
+        default=None,
+        metavar="PATH",
+        help="Resume from an existing output directory (implies --resume)",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-from", default=None)
     parser.add_argument(
@@ -561,6 +563,12 @@ def main():
         help="Override the training-config seed (must be non-negative)",
     )
     args = parser.parse_args()
+    try:
+        args.output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.resume_dir is not None:
+        args.resume = True
     if args.out_checkpoint is None and args.output_dir is None:
         parser.error("--out-checkpoint is required unless --output-dir is supplied")
 

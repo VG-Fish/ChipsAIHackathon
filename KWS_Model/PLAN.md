@@ -76,13 +76,10 @@ best model with the dendrite reached 82.68%, a difference of 0.10 points, about
 points. The +3.3 points over prune + KD came from more training epochs, which
 also means prune + KD's 40-epoch budget is too short.
 
-`reports/dendritic_prune_loop.yaml` (91.9% at 2,946 deployed params) is **not** a
-12-class baseline. It is the older 6-class task:
-
-- its `base_params: 1716` equals the 12-class XXS count of 1,830 minus the 114
-  parameters the 6-way head saves;
-- its source is `ds_cnn_xs_distilled_warm.pt`, not `_12class`;
-- its accuracy floor is 0.90.
+The historical six-class sparsity report that recorded 91.9% at 2,946 deployed
+parameters was removed during the stale-artifact cleanup. It was not a
+12-class baseline: its source was `ds_cnn_xs_distilled_warm.pt` (not the
+12-class checkpoint), and its 0.90 accuracy floor belonged to the older task.
 
 ### 2. Deployment cost measured with the project's profiler
 

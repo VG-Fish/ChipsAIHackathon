@@ -91,6 +91,35 @@ def redact_argv(argv: list[str] | None) -> list[str]:
     return redacted
 
 
+def resolve_resume_dir(
+    output_dir: str | Path | None,
+    resume_dir: str | Path | None,
+) -> str | Path | None:
+    """Resolve the CLI shorthand for resuming an existing run root.
+
+    ``--resume-dir PATH`` is intentionally stricter than ``--output-dir``:
+    it must identify an existing directory, and it cannot silently override a
+    different output root supplied through another CLI option.  Callers set
+    their command-specific ``resume`` flag after using this helper.
+    """
+    if resume_dir is None:
+        return output_dir
+
+    resume_path = Path(resume_dir).expanduser()
+    if not resume_path.is_dir():
+        raise ValueError(
+            f"--resume-dir must point to an existing directory: {resume_path}"
+        )
+
+    if output_dir is not None:
+        output_path = Path(output_dir).expanduser()
+        if output_path.resolve() != resume_path.resolve():
+            raise ValueError(
+                "--resume-dir and --output-dir must refer to the same directory"
+            )
+    return str(resume_path)
+
+
 def sha256_path(path: str | Path) -> str:
     """Return the SHA-256 digest of a file without loading it all at once."""
     digest = hashlib.sha256()

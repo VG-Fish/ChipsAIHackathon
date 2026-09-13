@@ -55,7 +55,7 @@ from kws.train import (
     validate_checkpoint_run_id,
 )
 from kws.utils import graphs
-from kws.utils.artifacts import ArtifactLayout
+from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir
 from kws.utils.checkpointing import (
     CHECKPOINT_FORMAT_VERSION,
     MetricsRecorder,
@@ -639,6 +639,12 @@ def main():
     )
     parser.add_argument("--out-checkpoint", required=False)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--resume-dir",
+        default=None,
+        metavar="PATH",
+        help="Resume from an existing output directory (implies --resume)",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-from", default=None)
     parser.add_argument(
@@ -649,6 +655,12 @@ def main():
     )
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    try:
+        args.output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.resume_dir is not None:
+        args.resume = True
     if args.out_checkpoint is None and args.output_dir is None:
         parser.error("--out-checkpoint is required unless --output-dir is supplied")
     if args.graphs:

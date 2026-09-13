@@ -425,7 +425,14 @@ Each accepts a shape the current pipeline never produces:
 and 3 must wait for the current run — stage 3 has not started, and it is the
 stage that reads `framework_cycle_version` and the repo-root teacher fallback.
 
-**Status:** open. Group 1 ready; groups 2-3 deferred until the run completes.
+**Status:** stale artifact group 2 resolved 2026-09-13. After the current
+12-class run completed, the listed 6-class checkpoints and reports and the
+superseded `dendritic_prune_w*` runs were removed, along with the unreferenced
+six-class cycle/debug outputs. The provenance defect in group 1 and the
+legacy-format shims in group 3 remain open. The current
+12-class checkpoints, the full-run output root, and the completed Phase B runs
+remain available for resume or comparison; abandoned Phase B runs and their
+duplicate top-level logs were removed as well.
 
 ---
 

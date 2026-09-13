@@ -64,7 +64,7 @@ from kws.train import (
 )
 from kws.utils import graphs
 from kws.utils.device import get_device
-from kws.utils.artifacts import ArtifactLayout, sha256_path
+from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir, sha256_path
 from kws.utils.checkpointing import record_input
 from kws.utils.checkpointing import write_phase_summary
 from kws.utils.logging import get_logger
@@ -1486,6 +1486,12 @@ def main() -> None:
         default=None,
         help="Exact run root for logs, metrics, checkpoints, PAI files, and reports",
     )
+    parser.add_argument(
+        "--resume-dir",
+        default=None,
+        metavar="PATH",
+        help="Resume or reuse stages from an existing output directory",
+    )
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
 
@@ -1495,7 +1501,12 @@ def main() -> None:
         parser.error(f"unknown stage(s) {unknown}; choose from {list(STAGES)}")
 
     config = load_yaml(args.config)
-    output_dir = args.output_dir if args.output_dir is not None else config.get("output_dir")
+    try:
+        output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+    except ValueError as error:
+        parser.error(str(error))
+    if output_dir is None:
+        output_dir = config.get("output_dir")
     if args.graphs:
         if output_dir is None:
             parser.error("--graphs requires --output-dir (or output_dir in the config)")

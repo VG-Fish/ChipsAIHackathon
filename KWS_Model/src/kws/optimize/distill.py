@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 
 import torch
+import torch.nn as nn
 import yaml
 
 from kws.data.dataset import build_datasets
@@ -39,7 +40,7 @@ from kws.train import (
     validate_checkpoint_run_id,
 )
 from kws.utils import graphs
-from kws.utils.artifacts import ArtifactLayout
+from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir
 from kws.utils.checkpointing import MetricsRecorder, atomic_torch_save, write_phase_summary
 from kws.utils.device import get_device
 from kws.utils.logging import get_logger
@@ -207,12 +208,15 @@ def distill(
         datasets[VAL], train_cfg, shuffle=False, generator=val_generator
     )
 
+    student_fc = getattr(student, "fc", None)
+    if not isinstance(student_fc, nn.Linear):
+        raise ValueError("student model must expose an nn.Linear fc head")
     kd = DistillationCriterion(
         teacher,
         KDWeights.from_config(train_cfg.get("distillation")),
         train_cfg["label_smoothing"],
         device,
-        student_feature_dim=student.fc.in_features,
+        student_feature_dim=student_fc.in_features,
     )
     if layout is not None:
         layout.ensure_tree()
@@ -346,6 +350,12 @@ def main():
     )
     parser.add_argument("--out-checkpoint", required=False)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--resume-dir",
+        default=None,
+        metavar="PATH",
+        help="Resume from an existing output directory (implies --resume)",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-from", default=None)
     parser.add_argument(
@@ -356,6 +366,12 @@ def main():
     )
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    try:
+        args.output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.resume_dir is not None:
+        args.resume = True
     if args.out_checkpoint is None and args.output_dir is None:
         parser.error("--out-checkpoint is required unless --output-dir is supplied")
     if args.graphs:

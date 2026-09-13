@@ -69,7 +69,7 @@ from kws.train import (
 )
 from kws.utils import graphs
 from kws.utils.device import get_device
-from kws.utils.artifacts import ArtifactLayout, sha256_path
+from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir, sha256_path
 from kws.utils.checkpointing import (
     MetricsRecorder,
     atomic_torch_save,
@@ -766,7 +766,7 @@ def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
     with path.open(newline="") as file:
         # ``DictReader`` infers field names from the first row at runtime;
         # typeshed currently omits that valid no-argument overload.
-        for row in csv.DictReader(cast(Any, file)):  # ty: ignore[no-matching-overload]
+        for row in csv.DictReader(cast(Any, file)):
             rows.append((float(row["Max Valid Scores"]), int(row["Param Counts"])))
     if not rows:
         raise ValueError(f"PAI architecture results are empty: {path}")
@@ -1903,8 +1903,9 @@ def run_cycle(
         for loader, loader_state in zip(
             (train_loader, val_loader), pai_state.get("loader_generator_states", [])
         ):
-            if getattr(loader, "generator", None) is not None and loader_state is not None:
-                loader.generator.set_state(
+            loader_generator = getattr(loader, "generator", None)
+            if loader_generator is not None and loader_state is not None:
+                cast(torch.Generator, loader_generator).set_state(
                     loader_state.to(device="cpu", dtype=torch.uint8)
                 )
         if pai_recorder is not None:
@@ -2335,6 +2336,12 @@ def main() -> None:
     )
     parser.add_argument("--save-name", default="dendritic_xxs_cycle1")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--resume-dir",
+        default=None,
+        metavar="PATH",
+        help="Resume from an existing output directory (implies --resume)",
+    )
     resume_group = parser.add_mutually_exclusive_group()
     resume_group.add_argument(
         "--resume",
@@ -2359,6 +2366,12 @@ def main() -> None:
     )
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    try:
+        args.output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.resume_dir is not None and args.resume_from is None:
+        args.resume = True
     if args.graphs:
         if args.output_dir is None:
             parser.error("--graphs requires --output-dir")
