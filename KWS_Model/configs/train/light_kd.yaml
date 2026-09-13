@@ -1,0 +1,35 @@
+# Phase B light recipe (configs/train/light.yaml) plus response and
+# classification KD from the fixed teacher. Keep the two files identical above
+# the distillation block.
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  spec_augment: false
+epochs: 200
+batch_size: 256
+# Uncached augmented training does its feature extraction in the workers.
+num_workers: 6
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+seed: 0
+
+# Response and classification KD only. Song et al.'s 0.1 / 0.6 weights,
+# renormalized after dropping the feature term; the teacher and student share
+# the 40-bin log-mel input (kws.optimize.kd.DistillationCriterion).
+distillation:
+  temperature: 1.0
+  feature_weight: 0.0
+  response_weight: 0.1428571
+  classification_weight: 0.8571429

@@ -84,7 +84,7 @@ def convert(
     TorchAO has no equivalent Conv2d conversion yet; unrelated user warnings
     (for example, an uncalibrated observer) remain visible.
     """
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(record=False):
         warnings.filterwarnings(
             "ignore",
             category=DeprecationWarning,

@@ -1,12 +1,15 @@
 import argparse
+import sys
 import hashlib
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
 import torch
+import yaml
 
 from kws.evaluate import load_model_from_checkpoint
+from kws.models.registry import checkpoint_input_shape
 from kws.utils.artifacts import ArtifactLayout
 from kws.utils.logging import get_logger
 from kws.utils.logging import run_session
@@ -68,7 +71,7 @@ def export_to_onnx(
 ) -> float:
     model, ckpt = load_model_from_checkpoint(checkpoint_path, torch.device("cpu"))
     return export_module_to_onnx(
-        model, tuple(ckpt["input_shape"]), onnx_path, atol, seed=seed
+        model, checkpoint_input_shape(ckpt), onnx_path, atol, seed=seed
     )
 
 
@@ -98,7 +101,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.export.to_onnx",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=[(args.checkpoint, "checkpoint")],
     ):
@@ -117,7 +120,7 @@ def main():
             metadata_path = destination.with_suffix(destination.suffix + ".yaml")
             temporary_metadata = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
             temporary_metadata.write_text(
-                __import__("yaml").safe_dump(metadata), encoding="utf-8"
+                yaml.safe_dump(metadata), encoding="utf-8"
             )
             temporary_metadata.replace(metadata_path)
 

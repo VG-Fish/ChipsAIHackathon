@@ -1,0 +1,11 @@
+# SparkNet (Svirsky et al., Interspeech 2024), C=8 block channels.
+# See PLAN.md Finding 3 for the architecture and Finding 4 for the loss.
+# On this project's 40-bin log-mel input (40, 101) with 12 classes:
+# 2,508 parameters and 192,688 MACs.
+family: sparknet
+name: sparknet_c8
+channels: 8
+# The released checkpoints hard-code 32; see PLAN.md Open questions.
+gate_channels: 32
+# Weight of the gate sparsity term, relative to a task loss of weight 1.
+sparsity_weight: 0.01

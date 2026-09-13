@@ -14,6 +14,7 @@ and the code path an always-on wake-word device actually runs.
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 import statistics
 from dataclasses import asdict, dataclass
@@ -30,6 +31,7 @@ from kws.data.dataset import build_datasets
 from kws.data.splits import TEST, VAL
 from kws.evaluate import load_model_from_checkpoint
 from kws.export.to_onnx import export_to_onnx
+from kws.models.registry import checkpoint_input_shape
 from kws.utils.artifacts import ArtifactLayout
 from kws.utils.logging import get_logger
 from kws.utils.logging import run_session
@@ -181,7 +183,7 @@ def export_and_benchmark(
     set_seed(seed)
     device = torch.device("cpu")
     torch_model, checkpoint = load_model_from_checkpoint(checkpoint_path, device)
-    input_shape = tuple(checkpoint["input_shape"])
+    input_shape = checkpoint_input_shape(checkpoint)
 
     session = ort.InferenceSession(onnx_path)
     input_name = session.get_inputs()[0].name
@@ -396,7 +398,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.export.benchmark",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=[(args.data_config, "data_config"), (args.checkpoint, "checkpoint")],
     ):

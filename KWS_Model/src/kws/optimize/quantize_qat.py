@@ -17,7 +17,9 @@ re-imposed after each step; ``prepare_qat`` swaps modules and would otherwise
 quietly break the codebook.
 """
 import argparse
+import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -30,6 +32,7 @@ from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.models.ds_cnn import build_ds_cnn
 from kws.models.ds_cnn import FeatureModel
+from kws.models.registry import checkpoint_input_shape
 from kws.optimize.kd import (
     DistillationCriterion,
     FrozenTeacher,
@@ -261,7 +264,7 @@ def quantize_aware_distill_model(
         torch.load(resume_from, map_location="cpu", weights_only=False)
         if resume_from is not None else None
     )
-    if resume_state is not None:
+    if resume_state is not None and resume_from is not None:
         validate_checkpoint_run_id(resume_state, run_id, source=resume_from)
     run_id = run_id or (
         resume_state.get("run_id") if resume_state is not None else None
@@ -294,6 +297,7 @@ def quantize_aware_distill_model(
         seed=train_cfg["seed"],
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
     )
     train_generator = torch.Generator().manual_seed(int(train_cfg["seed"]))
     val_generator = torch.Generator().manual_seed(int(train_cfg["seed"]) + 1)
@@ -336,11 +340,15 @@ def quantize_aware_distill_model(
     else:
         logger.info("No teacher supplied; running plain quantization-aware training")
 
-    post_step = None
+    post_step: Callable[[nn.Module], None] | None = None
     if codebook_projector is not None and len(codebook_projector):
         # The projector addresses modules by name, which survives the QAT swap.
-        def post_step(module):
-            codebook_projector(module.model)
+        projector = codebook_projector
+
+        def project_after_step(module: nn.Module) -> None:
+            cast(Callable[[nn.Module], None], projector)(cast(nn.Module, module.model))
+
+        post_step = project_after_step
 
         logger.info(
             "Re-imposing weight sharing on %d clustered layers after each step",
@@ -574,7 +582,7 @@ def quantize_aware_distill(
     ):
         validate_checkpoint_run_id(checkpoint, run_id, source=checkpoint_path)
     model = build_ds_cnn(
-        checkpoint["model_cfg"], tuple(checkpoint["input_shape"]), checkpoint["num_classes"],
+        checkpoint["model_cfg"], checkpoint_input_shape(checkpoint), checkpoint["num_classes"],
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     if resume_from is None and resume:
@@ -587,7 +595,7 @@ def quantize_aware_distill(
             resume_from = candidate
     return quantize_aware_distill_model(
         model,
-        tuple(checkpoint["input_shape"]),
+        checkpoint_input_shape(checkpoint),
         data_cfg,
         train_cfg,
         out_checkpoint,
@@ -677,7 +685,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.optimize.quantize_qat",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=inputs,
     ):

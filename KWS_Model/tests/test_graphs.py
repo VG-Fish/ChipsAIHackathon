@@ -77,7 +77,7 @@ def test_recorder_writes_chart_and_csv_only_when_enabled(tmp_path):
     assert csv_path.exists() and html_path.exists()
     assert (layout.root / "graphs" / "index.html").exists()
 
-    rows = list(csv.DictReader(io.StringIO(csv_path.read_text())))
+    rows = list(csv.DictReader(io.StringIO(csv_path.read_text())))  # ty: ignore[no-matching-overload]
     assert len(rows) == 4, "the CSV mirrors every JSONL record, not just new ones"
     assert rows[0]["epoch"] == "1" and rows[-1]["epoch"] == "4"
     # A single-element list is a scalar in disguise; keep it usable in a cell.
@@ -88,6 +88,7 @@ def test_chart_buckets_axes_and_drops_aliased_series(tmp_path):
     root = tmp_path / "run"
     metrics_path = root / "metrics" / "teacher" / "ds_cnn_l.jsonl"
     html_path = graphs.update_phase(root, metrics_path, _records())
+    assert html_path is not None
 
     payload = _payload(html_path)
     names = {item["name"]: item["axis"] for item in payload["series"]}
@@ -109,6 +110,7 @@ def test_chart_falls_back_for_an_unfamiliar_schema(tmp_path):
     html_path = graphs.update_phase(root, metrics_path, records)
 
     assert html_path == root / "graphs" / "sparsity" / "w12" / "pai.html"
+    assert html_path is not None
     payload = _payload(html_path)
     assert [item["name"] for item in payload["series"]] == ["dendrites"]
     assert payload["series"][0]["axis"] == "loss", "an unknown series still gets an axis"

@@ -1,5 +1,6 @@
 import copy
 import random
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -171,7 +172,7 @@ def test_kd_adapter_is_checkpointed_and_restored(tmp_path):
     recipe = {"model": "tiny-feature", "train": config, "kd": KDWeights().as_dict()}
     model = TinyFeatureClassifier()
     kd = DistillationCriterion(
-        TinyTeacher(), KDWeights(), 0.0, torch.device("cpu"),
+        cast(Any, TinyTeacher()), KDWeights(), 0.0, torch.device("cpu"),
         student_feature_dim=2,
     )
     train_loader, val_loader = _loaders(7)
@@ -195,7 +196,7 @@ def test_kd_adapter_is_checkpointed_and_restored(tmp_path):
 
     resumed_model = TinyFeatureClassifier()
     resumed_kd = DistillationCriterion(
-        TinyTeacher(), KDWeights(), 0.0, torch.device("cpu"),
+        cast(Any, TinyTeacher()), KDWeights(), 0.0, torch.device("cpu"),
         student_feature_dim=2,
     )
     train_loader, val_loader = _loaders(7)
@@ -214,4 +215,37 @@ def test_kd_adapter_is_checkpointed_and_restored(tmp_path):
     )
 
     assert result.completed_epoch == 1
-    assert torch.equal(resumed_kd.adapter.weight, kd.adapter.weight)
+    resumed_adapter = resumed_kd.adapter
+    source_adapter = kd.adapter
+    assert resumed_adapter is not None and source_adapter is not None
+    assert torch.equal(resumed_adapter.weight, source_adapter.weight)
+
+
+class TinyAuxiliaryClassifier(TinyClassifier):
+    """Adds a constant auxiliary term so the weighted total is predictable."""
+
+    def auxiliary_losses(self):
+        return {"constant": (torch.tensor(2.0), 0.5)}
+
+
+def test_auxiliary_losses_are_weighted_into_the_total_and_logged(tmp_path):
+    set_seed(0)
+    model = TinyAuxiliaryClassifier()
+    train_loader, val_loader = _loaders(7)
+    features, labels = next(iter(DataLoader(train_loader.dataset, batch_size=4)))
+    with torch.no_grad():
+        task_loss = torch.nn.functional.cross_entropy(model(features), labels).item()
+
+    result = run_finetune(
+        model,
+        DataLoader(train_loader.dataset, batch_size=4),
+        val_loader,
+        torch.device("cpu"),
+        {**_cfg(), "epochs": 1, "lr": 0.0},
+        stage="train",
+        phase="tiny",
+    )
+
+    record = result.history[-1]
+    assert record["train_constant"] == pytest.approx(2.0)
+    assert record["train_loss"] == pytest.approx(task_loss + 0.5 * 2.0, abs=1e-6)

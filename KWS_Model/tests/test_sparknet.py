@@ -149,3 +149,62 @@ def test_sparknet_checkpoint_loads_through_the_evaluate_dispatch(tmp_path):
     x = torch.randn(1, 1, 32, 101)
     with torch.no_grad():
         assert torch.allclose(loaded_model(x), model.eval()(x))
+
+
+def test_sparsity_term_is_the_reference_open_gate_probability():
+    torch.manual_seed(0)
+    model = SparkNet(n_feat=6, num_classes=12, channels=8, sparsity_weight=0.25)
+    captured = {}
+    model.gate_bn.register_forward_hook(
+        lambda module, inputs, output: captured.update(gate_bn=output.detach())
+    )
+    model.train()
+    model(torch.randn(3, 1, 6, 9))
+    value, weight = model.auxiliary_losses()["gate_sparsity"]
+    assert weight == 0.25
+
+    mu = torch.tanh(captured["gate_bn"])  # the pre-noise gate
+    # The reference writes it as mean(0.5 - 0.5 * erf((-0.5 - mu) / (sqrt(2) * 0.5))).
+    expected = torch.mean(0.5 - 0.5 * torch.erf((-0.5 - mu) / (2 ** 0.5 * 0.5)))
+    assert torch.allclose(value.detach(), expected, atol=1e-6)
+
+
+def test_sparsity_term_is_popped_once_and_absent_in_eval():
+    model = SparkNet(n_feat=6, num_classes=12, channels=8)
+    x = torch.randn(2, 1, 6, 9)
+    model.train()
+    model(x)
+    value, _ = model.auxiliary_losses()["gate_sparsity"]
+    value.backward()
+    assert model.gate_conv.weight.grad is not None
+    assert model.auxiliary_losses() == {}
+
+    model(x)
+    model.eval()
+    with torch.no_grad():
+        model(x)
+    assert model.auxiliary_losses() == {}
+
+
+def test_build_sparknet_reads_sparsity_weight_and_records_input_shape():
+    model = build_sparknet(
+        {"channels": 8, "gate_channels": 32, "sparsity_weight": 0.0}, (40, 101), 12,
+    )
+    assert model.sparsity_weight == 0.0
+    assert model.input_shape == (40, 101)
+    default = build_sparknet({"channels": 8, "gate_channels": 32}, (40, 101), 12)
+    assert default.sparsity_weight == 0.01
+
+
+def test_phase_b_model_configs_have_the_planned_costs():
+    import yaml
+    from kws.models.registry import build_model
+
+    expected = {8: (2_508, 192_688), 12: (3_584, 295_708), 16: (4_852, 418_120)}
+    for channels, (params, macs) in expected.items():
+        with open(f"configs/model/sparknet_c{channels}.yaml") as f:
+            model_cfg = yaml.safe_load(f)
+        model = build_model(model_cfg, (40, 101), 12)
+        assert isinstance(model, SparkNet)
+        assert sum(p.numel() for p in model.parameters()) == params
+        assert count_macs(model, (40, 101)) == macs

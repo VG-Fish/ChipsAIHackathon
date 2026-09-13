@@ -195,7 +195,7 @@ def apply_weight_clustering(model: nn.Module, spec: ClusterSpec) -> ClusteringRe
     skipped: list[str] = []
     dense_params = sum(parameter.numel() for parameter in model.parameters())
     clusterable_weights = sum(
-        module.weight.numel()
+        cast(nn.Conv2d | nn.Linear, module).weight.numel()
         for module in model.modules()
         if isinstance(module, CLUSTERABLE_TYPES)
     )
@@ -644,7 +644,7 @@ def codebook_finetune(
         torch.load(resume_from, map_location=device, weights_only=False)
         if resume_from is not None else None
     )
-    if resume_state is not None:
+    if resume_state is not None and resume_from is not None:
         validate_checkpoint_run_id(resume_state, run_id, source=resume_from)
     run_id = run_id or (
         resume_state.get("run_id") if resume_state is not None else None

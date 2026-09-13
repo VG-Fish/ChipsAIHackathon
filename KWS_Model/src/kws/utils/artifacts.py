@@ -20,7 +20,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 import torch
 import yaml
@@ -334,9 +334,11 @@ class ArtifactLayout:
             if os.name == "nt":
                 import msvcrt
 
+                win_lock = cast(Any, msvcrt)
+
                 try:
                     stream.seek(0)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    win_lock.locking(stream.fileno(), win_lock.LK_NBLCK, 1)
                 except OSError as exc:
                     raise RuntimeError(f"run root is already locked: {self.root}") from exc
             else:
@@ -357,8 +359,10 @@ class ArtifactLayout:
                 if os.name == "nt":
                     import msvcrt
 
+                    win_lock = cast(Any, msvcrt)
+
                     stream.seek(0)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    win_lock.locking(stream.fileno(), win_lock.LK_UNLCK, 1)
                 else:
                     import fcntl
 

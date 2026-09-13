@@ -1,6 +1,7 @@
 """Download and extract Google Speech Commands v2 (v0.02), with MD5 verification."""
 import argparse
 import hashlib
+import sys
 import tarfile
 import urllib.request
 from pathlib import Path
@@ -56,7 +57,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.data.download",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         inputs=[(args.config, "data_config")],
     ):
         download_and_extract(cfg["url"], cfg["md5"], Path(cfg["root"]))

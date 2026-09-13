@@ -1,4 +1,6 @@
 """Audio feature extraction: log-mel filterbank energies (default) or MFCC."""
+from typing import Any
+
 import torch
 import torchaudio
 
@@ -23,11 +25,17 @@ class FeatureExtractor:
         self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
 
         if feature_type == "mfcc":
+            melkwargs: Any = {
+                "n_fft": n_fft,
+                "win_length": win_length,
+                "hop_length": hop_length,
+                "n_mels": n_mels,
+            }
             self.mfcc = torchaudio.transforms.MFCC(
                 sample_rate=sample_rate,
                 n_mfcc=n_mels,
                 log_mels=log_mels,
-                melkwargs=dict(n_fft=n_fft, win_length=win_length, hop_length=hop_length, n_mels=n_mels),
+                melkwargs=melkwargs,
             )
         elif feature_type != "logmel":
             raise ValueError(f"Unknown feature_type: {feature_type}")

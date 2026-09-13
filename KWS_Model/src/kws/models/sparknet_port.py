@@ -86,9 +86,9 @@ class _RestrictedUnpickler(pickle.Unpickler):
 
 # torch.load only requires this to look like a module exposing (Un)Pickler.
 _restricted_pickle_module = types.ModuleType("kws_sparknet_restricted_pickle")
-_restricted_pickle_module.Unpickler = _RestrictedUnpickler
-_restricted_pickle_module.Pickler = pickle.Pickler
-_restricted_pickle_module.HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
+setattr(_restricted_pickle_module, "Unpickler", _RestrictedUnpickler)
+setattr(_restricted_pickle_module, "Pickler", pickle.Pickler)
+setattr(_restricted_pickle_module, "HIGHEST_PROTOCOL", pickle.HIGHEST_PROTOCOL)
 
 
 def load_lightning_state_dict(ckpt_path: str | Path) -> dict:

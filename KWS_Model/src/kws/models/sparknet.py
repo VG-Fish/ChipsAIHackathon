@@ -10,6 +10,8 @@ Conv+BN fusion (see PLAN.md Finding 7).
 import torch
 import torch.nn as nn
 
+GATE_NOISE_STD = 0.5
+
 
 class TCSBlock(nn.Module):
     """Time-channel separable conv block: depthwise -> pointwise -> BN -> (+ residual) -> ReLU.
@@ -52,8 +54,16 @@ class SparkNet(nn.Module):
     training only, the gate is perturbed by ``N(0, 0.5**2)`` noise before
     being clamped to ``[0, 1]`` and averaged over time; the classifier reads
     that pooled gate occupancy.
+
+    Training also returns the reference sparsity term through
+    ``auxiliary_losses``: the mean probability that a noisy gate is open,
+    ``mean(Phi((tanh_out + 0.5) / 0.5))``, weighted by ``sparsity_weight``.
+    The reference trains on ``100 * CE + 1 * term``; AdamW is invariant to the
+    overall loss scale, so the default 0.01 keeps that ratio on a CE of weight 1
+    (PLAN.md Finding 4).
     """
 
+    input_shape: tuple[int, int] | None
     blocks: nn.ModuleList
     gate_conv: nn.Conv2d
     gate_bn: nn.BatchNorm2d
@@ -67,10 +77,21 @@ class SparkNet(nn.Module):
         gate_channels: int = 32,
         kernels: tuple[int, ...] = (11, 15, 19, 29),
         block_bn_eps: float = 1e-3,
+        sparsity_weight: float = 0.01,
+        input_shape: tuple[int, int] | None = None,
     ):
         super().__init__()
         if len(kernels) != 4:
             raise ValueError(f"SparkNet expects 4 kernel sizes, got {kernels!r}")
+        if input_shape is not None and input_shape[0] != n_feat:
+            raise ValueError(f"input_shape {input_shape!r} does not have {n_feat} feature bins")
+        if sparsity_weight < 0:
+            raise ValueError("sparsity_weight must be non-negative")
+        self.input_shape = tuple(input_shape) if input_shape is not None else None
+        self.sparsity_weight = float(sparsity_weight)
+        # Pre-noise tanh output of the latest training forward, consumed by
+        # ``auxiliary_losses``. A plain attribute, so it never enters state_dict.
+        self._pending_gate: torch.Tensor | None = None
 
         blocks: list[TCSBlock] = []
         in_channels = n_feat
@@ -91,9 +112,26 @@ class SparkNet(nn.Module):
             x = block(x)
         gate = torch.tanh(self.gate_bn(self.gate_conv(x)))
         if self.training:
-            gate = gate + torch.randn_like(gate) * 0.5
+            self._pending_gate = gate
+            gate = gate + torch.randn_like(gate) * GATE_NOISE_STD
+        else:
+            self._pending_gate = None
         z = torch.clamp(gate + 0.5, 0.0, 1.0)
         return z.mean(dim=(2, 3))
+
+    def auxiliary_losses(self) -> dict[str, tuple[torch.Tensor, float]]:
+        """Pop the sparsity term of the latest training forward as ``(value, weight)``.
+
+        The value is the mean probability that a gate is open under the
+        training noise. Returns an empty mapping after an eval forward or when
+        nothing is pending, so a caller that polls every step never reuses a
+        stale graph.
+        """
+        pending_gate, self._pending_gate = self._pending_gate, None
+        if pending_gate is None:
+            return {}
+        open_probability = torch.special.ndtr((pending_gate + 0.5) / GATE_NOISE_STD).mean()
+        return {"gate_sparsity": (open_probability, self.sparsity_weight)}
 
     def classify_features(self, features: torch.Tensor) -> torch.Tensor:
         """Classify a pooled gate-occupancy representation."""
@@ -109,4 +147,6 @@ def build_sparknet(model_cfg: dict, input_shape: tuple[int, int], num_classes: i
         num_classes=num_classes,
         channels=model_cfg["channels"],
         gate_channels=model_cfg["gate_channels"],
+        sparsity_weight=model_cfg.get("sparsity_weight", 0.01),
+        input_shape=input_shape,
     )

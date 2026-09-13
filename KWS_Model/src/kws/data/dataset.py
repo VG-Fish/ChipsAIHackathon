@@ -1,7 +1,7 @@
 """torch Dataset for the small-keyword-set KWS task: target keywords + unknown + silence."""
 import random
 import time
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import Dataset
 
 from kws.data.audio_io import load_waveform
-from kws.data.augment import SpecAugmenter, WaveformAugmenter
+from kws.data.augment import SpecAugmenter, WaveformAugmenter, build_augmenters
 from kws.data.features import FeatureExtractor
 from kws.data.silence import SilenceSampler
 from kws.data.splits import TEST, TRAIN, VAL, build_split_index
@@ -193,7 +193,14 @@ def build_datasets(
     *,
     cache_features: bool = False,
     cache_train_features: bool = False,
+    augmentation: Mapping | None = None,
 ):
+    """Build the train, validation, and test datasets.
+
+    ``augmentation`` is the train config's optional block of augmentation
+    options (see ``kws.data.augment.build_augmenters``); it only matters when
+    ``augment`` is true.
+    """
     dataset_cfg = data_cfg["dataset"]
     dataset_root = Path(dataset_cfg["root"])
     target_keywords = data_cfg["target_keywords"]
@@ -233,8 +240,9 @@ def build_datasets(
             silence_cfg["target_ratio_to_avg_keyword_count"], rng,
         )
         is_train = split == TRAIN and augment
-        waveform_augmenter = WaveformAugmenter(noise_dir, sample_rate) if is_train else None
-        spec_augmenter = SpecAugmenter() if is_train else None
+        waveform_augmenter, spec_augmenter = (
+            build_augmenters(augmentation, noise_dir, sample_rate) if is_train else (None, None)
+        )
         # Validation/test are deterministic and use the general cache flag.
         # A non-augmented training split is deterministic too, so cache it
         # without requiring the augmented-training opt-in.  Augmented training

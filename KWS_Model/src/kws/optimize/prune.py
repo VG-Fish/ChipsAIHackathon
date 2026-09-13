@@ -19,6 +19,7 @@ point supports either, while the dendritic width sweep deliberately uses
 structured pruning because its search variable is channel width.
 """
 import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -29,6 +30,7 @@ import yaml
 
 from kws.data.dataset import build_datasets
 from kws.models.ds_cnn import DSCNN
+from kws.models.registry import checkpoint_input_shape
 from kws.optimize.kd import DistillationCriterion, FrozenTeacher, KDWeights, file_sha256
 from kws.train import (
     resolve_manifest_run_id,
@@ -60,8 +62,18 @@ def _copy_bn_subset(old_bn: nn.BatchNorm2d, new_bn: nn.BatchNorm2d, indices: tor
     if old_mean is None or new_mean is None or old_var is None or new_var is None:
         raise ValueError("channel pruning requires BatchNorm running statistics")
     with torch.no_grad():
-        new_bn.weight.copy_(old_bn.weight[indices])
-        new_bn.bias.copy_(old_bn.bias[indices])
+        if old_bn.weight is None or old_bn.bias is None or new_bn.weight is None or new_bn.bias is None:
+            raise ValueError("channel pruning requires affine BatchNorm parameters")
+        old_weight = cast(torch.Tensor, old_bn.weight)
+        old_bias = cast(torch.Tensor, old_bn.bias)
+        new_weight = cast(torch.Tensor, new_bn.weight)
+        new_bias = cast(torch.Tensor, new_bn.bias)
+        old_mean = cast(torch.Tensor, old_mean)
+        new_mean = cast(torch.Tensor, new_mean)
+        old_var = cast(torch.Tensor, old_var)
+        new_var = cast(torch.Tensor, new_var)
+        new_weight.copy_(old_weight[indices])
+        new_bias.copy_(old_bias[indices])
         new_mean.copy_(old_mean[indices])
         new_var.copy_(old_var[indices])
 
@@ -103,8 +115,10 @@ def prune_ds_cnn(model: DSCNN, keep_ratio: float) -> DSCNN:
 
         keep_in = keep_out
 
+    if keep_in is None or model.fc.bias is None or new_model.fc.bias is None:
+        raise ValueError("channel pruning requires a classifier bias")
     new_model.fc.weight.data = model.fc.weight.data[:, keep_in].clone()
-    new_model.fc.bias.data = model.fc.bias.data.clone()
+    new_model.fc.bias.data = cast(torch.Tensor, model.fc.bias).data.clone()
     return new_model
 
 
@@ -270,10 +284,10 @@ def apply_sparsity(model: DSCNN, spec: SparsitySpec) -> tuple[DSCNN, SparsityMas
     if spec.kind == "structured":
         if spec.keep_ratio is None:
             raise ValueError("structured sparsity requires keep_ratio")
-        return prune_ds_cnn(model, spec.keep_ratio), None
+        return prune_ds_cnn(model, float(spec.keep_ratio)), None
     if spec.n is None or spec.m is None:
         raise ValueError("N:M sparsity requires both n and m")
-    return model, apply_nm_sparsity(model, spec.n, spec.m)
+    return model, apply_nm_sparsity(model, int(spec.n), int(spec.m))
 
 
 def _resolve_prune_resume_from(
@@ -388,7 +402,7 @@ def prune_and_fine_tune(
         validate_checkpoint_run_id(checkpoint, run_id, source=checkpoint_path)
 
     from kws.models.ds_cnn import build_ds_cnn
-    model = build_ds_cnn(checkpoint["model_cfg"], tuple(checkpoint["input_shape"]), checkpoint["num_classes"])
+    model = build_ds_cnn(checkpoint["model_cfg"], checkpoint_input_shape(checkpoint), checkpoint["num_classes"])
     model.load_state_dict(checkpoint["model_state_dict"])
 
     old_params = sum(parameter.numel() for parameter in model.parameters())
@@ -410,6 +424,7 @@ def prune_and_fine_tune(
         seed=train_cfg["seed"],
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
     )
 
     kd = None
@@ -582,7 +597,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.optimize.prune",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=inputs,
     ):

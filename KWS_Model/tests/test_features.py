@@ -1,5 +1,6 @@
 import torch
 import torchaudio
+from typing import Any, cast
 
 from kws.data.features import FeatureExtractor
 
@@ -34,9 +35,15 @@ def test_mfcc_log_mels_matches_torchaudio_reference():
     # bins/coefficients, a 25 ms window, and a 10 ms hop at 16 kHz.
     extractor = FeatureExtractor(sample_rate=16000, n_mels=32, win_length_ms=25, hop_length_ms=10,
                                   feature_type="mfcc", log_mels=True)
-    reference = torchaudio.transforms.MFCC(
+    mfcc = cast(Any, torchaudio.transforms.MFCC)
+    reference = mfcc(
         sample_rate=16000, n_mfcc=32, log_mels=True,
-        melkwargs=dict(n_fft=512, win_length=400, hop_length=160, n_mels=32),
+        melkwargs=cast(Any, {
+            "n_fft": 512,
+            "win_length": 400,
+            "hop_length": 160,
+            "n_mels": 32,
+        }),
     )
     waveform = torch.randn(1, 16000)
     assert torch.allclose(extractor(waveform), reference(waveform))

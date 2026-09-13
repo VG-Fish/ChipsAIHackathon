@@ -22,8 +22,9 @@ import contextlib
 import csv
 import hashlib
 import os
+import sys
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import monotonic
@@ -47,6 +48,8 @@ from kws.models.ds_cnn import build_ds_cnn
 from kws.models.ds_cnn import FeatureModel
 from kws.models.ds_cnn import DSCNN
 from kws.models.layers import DSConvBlock
+from torch.nn.modules.batchnorm import _BatchNorm
+from kws.models.registry import checkpoint_input_shape
 from kws.optimize.kd import (
     DistillationCriterion,
     FrozenTeacher,
@@ -319,7 +322,7 @@ def _restore_pai_tracker_state(model_state: Mapping[str, Any]) -> None:
     restore = getattr(GPA.pai_tracker, "from_string", None)
     if not callable(restore):
         raise RuntimeError("installed PerforatedAI cannot restore tracker state")
-    restore(tracker_text)
+    cast(Callable[[str], Any], restore)(tracker_text)
 
 
 def _restore_pai_training_state(
@@ -483,7 +486,7 @@ def _save_pai_restart_pair(
     # directory is the folder and "latest" is the name.  Passing the candidate
     # leaf as the name instead writes <parent>/<candidate>.pt and leaves the
     # path asserted below missing.
-    save_system(model, str(run_dir), "latest")
+    cast(Callable[..., Any], save_system)(model, str(run_dir), "latest")
 
     native_latest = (run_dir / "latest.pt").resolve()
     if not native_latest.is_file() or native_latest.is_symlink():
@@ -576,7 +579,7 @@ def build_cycle_base(
     validate_checkpoint_run_id(checkpoint, expected_run_id, source=checkpoint_path)
     model = build_ds_cnn(
         checkpoint["model_cfg"],
-        tuple(checkpoint["input_shape"]),
+        checkpoint_input_shape(checkpoint),
         checkpoint["num_classes"],
     )
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -761,7 +764,9 @@ def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
 
     rows: list[tuple[float, int]] = []
     with path.open(newline="") as file:
-        for row in csv.DictReader(file):
+        # ``DictReader`` infers field names from the first row at runtime;
+        # typeshed currently omits that valid no-argument overload.
+        for row in csv.DictReader(cast(Any, file)):  # ty: ignore[no-matching-overload]
             rows.append((float(row["Max Valid Scores"]), int(row["Param Counts"])))
     if not rows:
         raise ValueError(f"PAI architecture results are empty: {path}")
@@ -1114,7 +1119,7 @@ def freeze_base_batchnorm_stats(model: nn.Module) -> int:
     """
     pinned = 0
     for module_name, module in model.named_modules():
-        if not isinstance(module, nn.modules.batchnorm._BatchNorm):
+        if not isinstance(module, _BatchNorm):
             continue
         # A dendrite's own BatchNorm is part of what is being trained, so it
         # keeps its statistics live. The dummy ".weight" leaf lets the shared
@@ -1417,7 +1422,7 @@ def disarm_pai_debugger() -> None:
             "See KWS_Model/ERRORS.md entry 5 for the known instance."
         )
 
-    pdb.set_trace = _raise_instead_of_trace
+    setattr(pdb, "set_trace", _raise_instead_of_trace)
 
 
 def configure_perforatedai(config: dict, device: torch.device) -> None:
@@ -1635,7 +1640,7 @@ def run_cycle(
         checkpoint_path, teacher_checkpoint, data_cfg, model_cfg, train_cfg
     )
     base_params = sum(parameter.numel() for parameter in base.parameters())
-    input_shape = tuple(checkpoint["input_shape"])
+    input_shape = checkpoint_input_shape(checkpoint)
     layout = ArtifactLayout(output_dir) if output_dir is not None else None
     run_id = resolve_manifest_run_id(layout, run_id)
     run_dir = (
@@ -1698,6 +1703,7 @@ def run_cycle(
         seed=train_cfg["seed"],
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
     )
 
     if teacher_checkpoint and run_id is not None and (
@@ -1734,7 +1740,7 @@ def run_cycle(
             pre_checkpoint,
             pre_latest,
             checkpoint_path=checkpoint_path,
-            teacher_checkpoint=teacher_checkpoint,
+            teacher_checkpoint=teacher.checkpoint_path,
             model_cfg=model_cfg,
             train_cfg=train_cfg,
             expected_run_id=run_id,
@@ -1785,7 +1791,7 @@ def run_cycle(
                 resume_from=pre_latest if pre_latest.exists() else None,
                 run_id=run_id,
                 recipe=_prune_finetune_recipe(
-                    checkpoint_path, teacher_checkpoint, train_cfg
+                    checkpoint_path, teacher.checkpoint_path, train_cfg
                 ),
             )
             best_pruned = torch.load(
@@ -1828,14 +1834,15 @@ def run_cycle(
             making_graphs=True,
             maximizing_score=True,
         ).to(device)
-        if resume_candidate:
+        if pai_state is not None:
+            assert pai_state is not None
             load_system = getattr(UPA, "load_system", None)
             if not callable(load_system):
                 raise RuntimeError(
                     "installed PerforatedAI has no supported load_system API"
                 )
             # Mirror of the save contract: load_net reads <folder>/<name>.pt.
-            restored = load_system(
+            restored = cast(Callable[..., Any], load_system)(
                 model,
                 str(run_dir),
                 "latest",
@@ -1878,7 +1885,8 @@ def run_cycle(
         model, train_cfg, len(train_loader), kd=kd
     )
 
-    if resume_candidate:
+    if pai_state is not None:
+        assert pai_state is not None
         _restore_pai_training_state(
             pai_state,
             model=model,
@@ -1919,7 +1927,7 @@ def run_cycle(
         resume_candidate
         and pai_tracker_at_terminal_boundary(effective_max_dendrites)
     )
-    if resume_at_terminal_boundary:
+    if resume_at_terminal_boundary and pai_state is not None:
         logger.info(
             "Recovered completed PAI boundary at epoch %d; retrying final "
             "export without training another epoch",
@@ -1938,8 +1946,8 @@ def run_cycle(
     )
     last_mode = phase_trail[-1]["mode"]
 
-    epoch = int(pai_state.get("completed_epoch", 0)) - 1 if pai_state else -1
-    global_step = int(pai_state.get("global_step", 0)) if pai_state else 0
+    epoch = int(pai_state.get("completed_epoch", 0)) - 1 if pai_state is not None else -1
+    global_step = int(pai_state.get("global_step", 0)) if pai_state is not None else 0
     while not resume_at_terminal_boundary:
         epoch += 1
         epoch_started = monotonic()
@@ -2197,7 +2205,7 @@ def run_cycle(
     best_val_acc, deployed_params = read_pai_architecture_results(save_name)
 
     # Step 3d: resume KD fine-tuning of the active student parameters.
-    resume = {"status": "skipped", "reason": "no teacher supplied"}
+    resume: dict[str, Any] = {"status": "skipped", "reason": "no teacher supplied"}
     if teacher is not None:
         resume = resume_kd_finetune(
             clean_model,
@@ -2369,7 +2377,7 @@ def main() -> None:
     with run_session(
         args.output_dir,
         command="kws.optimize.dendritic",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=inputs,
     ):

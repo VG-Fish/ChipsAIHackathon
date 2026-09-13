@@ -153,12 +153,11 @@ while candidates keep extending the accuracy-versus-cost frontier and stops
 after `pareto_patience` consecutive candidates that do not. Configured accuracy
 and relative-cost tolerances make "do not" mean no material frontier progress,
 and each completed report records whether the streak came from inadmissible
-accuracy or Pareto stagnation. Replaying the
-An audit-only replay of the historical runs keeps all four of
-w18/w17/w16/w15 on the frontier and would have continued past w14 rather than
-stopping there. Those runs do not contain the other new step-3 substages, so
-the executable framework deliberately starts a fresh sweep under the
-`dendritic_framework_w*` prefix instead of reusing them.
+accuracy or Pareto stagnation. An audit-only replay of the historical runs
+keeps all four of w18/w17/w16/w15 on the frontier and would have continued past
+w14 rather than stopping there. Those runs do not contain the other new step-3
+substages, so the executable framework deliberately starts a fresh sweep under
+the `dendritic_framework_w*` prefix instead of reusing them.
 
 **3c, the freeze.** PerforatedAI freezes the base weights during its dendrite
 phase itself. The pipeline re-asserts it each epoch and records a phase trail of
@@ -379,7 +378,7 @@ uv run --env-file .env python -m kws.pipeline \
   --stages cluster,quantize,benchmark
 ```
 
-Run tests with `uv run pytest tests/`.
+Run tests with `uv run python -m pytest tests/`.
 
 Training, optimization, and ONNX-export entry points accept an optional
 `--seed` flag to override the seed in their YAML config or parity check. The
@@ -395,12 +394,14 @@ worker. Worker startup is attempted on macOS as well; if the host cannot start
 PyTorch's shared-memory manager, the loader logs the reason and retries the
 same epoch with `num_workers=0` while restoring the shuffle generator state.
 Deterministic features, including non-augmented training features, are
-precomputed once per process and cached in memory. Augmented training configs set
-`cache_train_features: true`, which samples one stronger waveform + SpecAugment
+precomputed once per process and cached in memory. When an augmented training
+config sets `cache_train_features: true`, it samples one waveform + SpecAugment
 view per entry at startup (including synthesized silence) and reuses those
 features throughout the run. This trades augmentation diversity between
-epochs for much lower input and feature-extraction overhead; remove that flag
-to resample augmentation every epoch. The default training batch is 256
+epochs for much lower input and feature-extraction overhead. The Phase B
+`light.yaml` and `light_kd.yaml` recipes instead set
+`cache_train_features: false`, so they resample augmentation every epoch. The
+default training batch is 256
 (override it in a train YAML if the available accelerator memory is smaller).
 The default recipe uses ±150 ms shifts, 0.85–1.15 speed changes, 75% noise
 mixing down to −5 dB SNR, and two larger SpecAugment masks. Speed/pitch

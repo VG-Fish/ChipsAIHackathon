@@ -1,6 +1,8 @@
+import random
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import torch
 
 from kws.data.augment import (
@@ -9,6 +11,8 @@ from kws.data.augment import (
     _cached_resampler,
     _candidate_resample_rates,
     _quantized_resample_rate,
+    add_white_noise,
+    build_augmenters,
     mix_background_noise,
     speed_perturb,
     time_shift,
@@ -164,3 +168,89 @@ def test_waveform_augmenter_end_to_end_on_real_noise_files():
         out = augmenter(waveform)
         assert out.shape == waveform.shape
         assert torch.isfinite(out).all()
+
+
+# ---- configurable recipe ----
+
+def test_zero_fill_time_shift_drops_samples_instead_of_wrapping():
+    waveform = torch.arange(1.0, 11.0).unsqueeze(0)
+    with patch("kws.data.augment.random.randint", return_value=3):
+        right = time_shift(waveform, max_shift_samples=5, mode="zero_fill")
+    with patch("kws.data.augment.random.randint", return_value=-3):
+        left = time_shift(waveform, max_shift_samples=5, mode="zero_fill")
+    assert right.tolist() == [[0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]]
+    assert left.tolist() == [[4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 0.0, 0.0, 0.0]]
+
+
+def test_white_noise_level_is_relative_to_full_scale():
+    torch.manual_seed(0)
+    waveform = torch.zeros(1, 160000)
+    noisy = add_white_noise(waveform, level_db_range=(-40.0, -40.0))
+    assert noisy.std().item() == pytest.approx(0.01, rel=0.02)
+
+
+def test_augmentation_block_rejects_unknown_options(tmp_path):
+    with pytest.raises(ValueError, match="unknown augmentation options"):
+        build_augmenters({"time_shift": 100}, tmp_path, 16000)
+
+
+def test_absent_augmentation_block_keeps_the_original_recipe(tmp_path):
+    waveform_augmenter, spec_augmenter = build_augmenters(None, tmp_path, 16000)
+    reference = WaveformAugmenter(tmp_path, 16000)
+    assert isinstance(spec_augmenter, SpecAugmenter)
+    for name in (
+        "max_shift_samples", "shift_mode", "shift_probability", "snr_db_range",
+        "speed_factor_range", "noise_probability", "white_noise_probability",
+    ):
+        assert getattr(waveform_augmenter, name) == getattr(reference, name), name
+    assert sorted(waveform_augmenter.speed_resamplers) == sorted(reference.speed_resamplers)
+
+
+def test_default_augmenter_consumes_the_original_random_stream():
+    """Adding options must not change the draws the original recipe makes."""
+    noise = [torch.randn(1, 16000)]
+    waveform = torch.sin(torch.linspace(0, 100, 16000)).unsqueeze(0)
+    augmenter = WaveformAugmenter(Path("/nonexistent"), 16000)
+    augmenter.noise_waveforms = noise
+
+    random.seed(5)
+    torch.manual_seed(5)
+    actual = augmenter(waveform)
+
+    random.seed(5)
+    torch.manual_seed(5)
+    expected = time_shift(waveform, augmenter.max_shift_samples)
+    expected = speed_perturb(expected, 16000, (0.85, 1.15), augmenter.speed_resamplers)
+    if random.random() < 0.75:
+        expected = mix_background_noise(expected, noise, (-5, 15))
+    assert torch.equal(actual, expected)
+
+
+def test_light_recipe_disables_speed_background_noise_and_spec_augment():
+    import yaml
+
+    with open("configs/train/light.yaml") as f:
+        light = yaml.safe_load(f)
+    with open("configs/train/light_kd.yaml") as f:
+        light_kd = yaml.safe_load(f)
+    assert {k: v for k, v in light_kd.items() if k != "distillation"} == light
+
+    waveform_augmenter, spec_augmenter = build_augmenters(
+        light["augmentation"], REAL_NOISE_DIR, 16000,
+    )
+    assert spec_augmenter is None
+    assert waveform_augmenter.speed_factor_range is None
+    assert waveform_augmenter.speed_resamplers == {}
+    assert waveform_augmenter.noise_waveforms == []
+    assert waveform_augmenter.max_shift_samples == 1600
+    assert waveform_augmenter.shift_mode == "zero_fill"
+
+    random.seed(0)
+    torch.manual_seed(0)
+    waveform = torch.zeros(1, 16000)
+    waveform[0, 8000] = 1.0
+    for _ in range(20):
+        out = waveform_augmenter(waveform)
+        assert out.shape == waveform.shape
+        # White noise at most -46 dB (std ~0.005) never moves the peak off 1 by much.
+        assert out.abs().max().item() < 1.1

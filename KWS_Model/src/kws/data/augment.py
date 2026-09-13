@@ -1,7 +1,14 @@
 """Training-time augmentation: time-shift, background-noise mixing, SpecAugment,
-speed/pitch perturbation. Applied only to the train split.
+speed/pitch perturbation, white noise. Applied only to the train split.
+
+Without an ``augmentation`` block in the train config the recipe is the
+original DS-CNN one: +/-150 ms circular shift, speed 0.85-1.15, background
+noise with probability 0.75 at -5 to 15 dB SNR, and two SpecAugment mask
+pairs. ``build_augmenters`` accepts a block that changes any of those, which
+is how the SparkNet reference recipe (PLAN.md Finding 5) is expressed.
 """
 import random
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,11 +18,40 @@ import torchaudio
 from kws.data.audio_io import load_waveform
 
 
-def time_shift(waveform: torch.Tensor, max_shift_samples: int) -> torch.Tensor:
+TIME_SHIFT_MODES = ("roll", "zero_fill")
+
+
+def time_shift(waveform: torch.Tensor, max_shift_samples: int, mode: str = "roll") -> torch.Tensor:
+    """Shift by a uniform whole number of samples.
+
+    ``roll`` wraps the displaced samples around. ``zero_fill`` drops them and
+    pads the vacated end with zeros, as NeMo's ``ShiftPerturbation`` does.
+    """
+    if mode not in TIME_SHIFT_MODES:
+        raise ValueError(f"unknown time shift mode {mode!r}")
     if max_shift_samples <= 0:
         return waveform
     shift = random.randint(-max_shift_samples, max_shift_samples)
-    return torch.roll(waveform, shifts=shift, dims=-1)
+    if mode == "roll":
+        return torch.roll(waveform, shifts=shift, dims=-1)
+    if shift == 0:
+        return waveform
+    shifted = torch.zeros_like(waveform)
+    if shift > 0:
+        shifted[..., shift:] = waveform[..., :-shift]
+    else:
+        shifted[..., :shift] = waveform[..., -shift:]
+    return shifted
+
+
+def add_white_noise(waveform: torch.Tensor, level_db_range: tuple[float, float]) -> torch.Tensor:
+    """Add Gaussian noise whose standard deviation is ``10 ** (dB / 20)``.
+
+    The level is relative to full scale, not to the signal, matching NeMo's
+    ``WhiteNoisePerturbation``.
+    """
+    level_db = random.uniform(level_db_range[0], level_db_range[1])
+    return waveform + torch.randn_like(waveform) * (10.0 ** (level_db / 20.0))
 
 
 def mix_background_noise(waveform: torch.Tensor, noise_waveforms: list[torch.Tensor],
@@ -28,7 +64,7 @@ def mix_background_noise(waveform: torch.Tensor, noise_waveforms: list[torch.Ten
     if noise_clip.shape[-1] < clip_len:
         noise_clip = torch.nn.functional.pad(noise_clip, (0, clip_len - noise_clip.shape[-1]))
 
-    snr_db = random.uniform(*snr_db_range)
+    snr_db = random.uniform(snr_db_range[0], snr_db_range[1])
     signal_power = waveform.pow(2).mean()
     noise_power = noise_clip.pow(2).mean().clamp_min(1e-10)
     target_noise_power = signal_power / (10 ** (snr_db / 10))
@@ -73,7 +109,7 @@ def speed_perturb(waveform: torch.Tensor, sample_rate: int,
     previous implementation) round-trips to ~the original signal, doing 2x the
     work for close to zero real augmentation effect.
     """
-    factor = random.uniform(*factor_range)
+    factor = random.uniform(factor_range[0], factor_range[1])
     orig_len = waveform.shape[-1]
     new_sr = _quantized_resample_rate(sample_rate, factor)
     if new_sr == sample_rate:
@@ -94,33 +130,66 @@ def speed_perturb(waveform: torch.Tensor, sample_rate: int,
     return resampled
 
 
+def _check_probability(name: str, value: float) -> None:
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be between 0 and 1")
+
+
 class WaveformAugmenter:
+    """Shift, then speed perturbation, then background noise, then white noise.
+
+    A probability of exactly 1 draws no random number, and white noise at
+    probability 0 draws none either, so the default recipe consumes the same
+    random stream as before these options existed.
+    """
+
     def __init__(self, background_noise_dir: Path, sample_rate: int,
-                 max_shift_ms: float = 150, snr_db_range=(-5, 15),
-                 speed_factor_range=(0.85, 1.15), noise_probability: float = 0.75):
+                 max_shift_ms: float = 150,
+                 snr_db_range: tuple[float, float] = (-5.0, 15.0),
+                 speed_factor_range: tuple[float, float] | None = (0.85, 1.15),
+                 noise_probability: float = 0.75,
+                 *, shift_mode: str = "roll", shift_probability: float = 1.0,
+                 white_noise_probability: float = 0.0,
+                 white_noise_db_range: tuple[float, float] = (-90.0, -46.0)):
+        if shift_mode not in TIME_SHIFT_MODES:
+            raise ValueError(f"unknown time shift mode {shift_mode!r}")
+        _check_probability("noise_probability", noise_probability)
+        _check_probability("shift_probability", shift_probability)
+        _check_probability("white_noise_probability", white_noise_probability)
         self.sample_rate = sample_rate
         self.max_shift_samples = int(sample_rate * max_shift_ms / 1000)
+        self.shift_mode = shift_mode
+        self.shift_probability = shift_probability
         self.snr_db_range = snr_db_range
         self.speed_factor_range = speed_factor_range
-        if not 0.0 <= noise_probability <= 1.0:
-            raise ValueError("noise_probability must be between 0 and 1")
         self.noise_probability = noise_probability
-        self.speed_resamplers = {
-            rate: torchaudio.transforms.Resample(sample_rate, rate)
-            for rate in _candidate_resample_rates(sample_rate, speed_factor_range)
-            if rate != sample_rate
-        }
+        self.white_noise_probability = white_noise_probability
+        self.white_noise_db_range = tuple(white_noise_db_range)
+        self.speed_resamplers = (
+            {
+                rate: torchaudio.transforms.Resample(sample_rate, rate)
+                for rate in _candidate_resample_rates(sample_rate, speed_factor_range)
+                if rate != sample_rate
+            }
+            if speed_factor_range is not None
+            else {}
+        )
         self.noise_waveforms = []
-        for wav_path in sorted(Path(background_noise_dir).glob("*.wav")):
-            self.noise_waveforms.append(load_waveform(wav_path, sample_rate))
+        if noise_probability > 0:
+            for wav_path in sorted(Path(background_noise_dir).glob("*.wav")):
+                self.noise_waveforms.append(load_waveform(wav_path, sample_rate))
 
     def __call__(self, waveform: torch.Tensor) -> torch.Tensor:
-        waveform = time_shift(waveform, self.max_shift_samples)
-        waveform = speed_perturb(
-            waveform, self.sample_rate, self.speed_factor_range, self.speed_resamplers,
-        )
+        if self.shift_probability >= 1.0 or random.random() < self.shift_probability:
+            waveform = time_shift(waveform, self.max_shift_samples, self.shift_mode)
+        if self.speed_factor_range is not None:
+            waveform = speed_perturb(
+                waveform, self.sample_rate, self.speed_factor_range, self.speed_resamplers,
+            )
         if self.noise_waveforms and random.random() < self.noise_probability:
             waveform = mix_background_noise(waveform, self.noise_waveforms, self.snr_db_range)
+        if self.white_noise_probability > 0 and random.random() < self.white_noise_probability:
+            waveform = add_white_noise(waveform, self.white_noise_db_range)
         return waveform
 
 
@@ -135,3 +204,58 @@ class SpecAugmenter:
             features = self.time_masking(features)
             features = self.freq_masking(features)
         return features
+
+
+AUGMENTATION_DEFAULTS = {
+    "time_shift_ms": 150.0,
+    "time_shift_mode": "roll",
+    "time_shift_probability": 1.0,
+    "speed_factor_range": [0.85, 1.15],
+    "background_noise_probability": 0.75,
+    "background_noise_snr_db_range": [-5.0, 15.0],
+    "white_noise_probability": 0.0,
+    "white_noise_db_range": [-90.0, -46.0],
+    "spec_augment": True,
+}
+
+
+def build_augmenters(
+    augmentation: Mapping | None,
+    background_noise_dir: Path,
+    sample_rate: int,
+) -> tuple[WaveformAugmenter, SpecAugmenter | None]:
+    """Build the training augmenters from a train config's ``augmentation`` block.
+
+    Missing keys take ``AUGMENTATION_DEFAULTS``, the original recipe, so an
+    absent block changes nothing. Unknown keys are rejected so a misspelled
+    option cannot silently fall back to the default. ``speed_factor_range:
+    null`` disables speed perturbation.
+    """
+    options = dict(augmentation or {})
+    unknown = sorted(set(options).difference(AUGMENTATION_DEFAULTS))
+    if unknown:
+        raise ValueError(f"unknown augmentation options: {unknown}")
+    cfg = {**AUGMENTATION_DEFAULTS, **options}
+    speed = cfg["speed_factor_range"]
+    def float_pair(value: object, name: str) -> tuple[float, float]:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"{name} must contain exactly two numbers")
+        first, second = value
+        if not isinstance(first, (int, float)) or not isinstance(second, (int, float)):
+            raise ValueError(f"{name} must contain only numbers")
+        return float(first), float(second)
+
+    waveform_augmenter = WaveformAugmenter(
+        background_noise_dir,
+        sample_rate,
+        max_shift_ms=float(cfg["time_shift_ms"]),
+        snr_db_range=float_pair(cfg["background_noise_snr_db_range"], "background_noise_snr_db_range"),
+        speed_factor_range=float_pair(speed, "speed_factor_range") if speed is not None else None,
+        noise_probability=float(cfg["background_noise_probability"]),
+        shift_mode=cfg["time_shift_mode"],
+        shift_probability=float(cfg["time_shift_probability"]),
+        white_noise_probability=float(cfg["white_noise_probability"]),
+        white_noise_db_range=float_pair(cfg["white_noise_db_range"], "white_noise_db_range"),
+    )
+    spec_augmenter = SpecAugmenter() if cfg["spec_augment"] else None
+    return waveform_augmenter, spec_augmenter

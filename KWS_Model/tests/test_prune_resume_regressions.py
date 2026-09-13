@@ -1,5 +1,6 @@
 from contextlib import nullcontext
 import sys
+from typing import Any, cast
 
 import pytest
 import torch
@@ -167,7 +168,7 @@ def test_programmatic_resume_does_not_duplicate_committed_epoch_metrics(
     spec = SparsitySpec("dense")
     destination = tmp_path / "unused-best.pt"
 
-    run_finetune = train_module.run_finetune
+    run_finetune = cast(Any, train_module.run_finetune)
 
     def interrupt_after_first_epoch(*args, **kwargs):
         def on_epoch_end(record):
@@ -232,7 +233,7 @@ def test_cli_resolves_resume_and_preserves_explicit_precedence(
         return {}
 
     monkeypatch.setattr(prune_module, "prune_and_fine_tune", fake_prune_and_fine_tune)
-    monkeypatch.setattr(prune_module, "run_session", lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(prune_module, "run_session", lambda *args, **kwargs: cast(Any, nullcontext)())
     argv = [
         "kws.optimize.prune",
         "--data-config",

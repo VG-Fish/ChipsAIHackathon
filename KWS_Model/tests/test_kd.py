@@ -1,6 +1,7 @@
 import pytest
 import torch
 import torch.nn.functional as F
+from typing import Any, cast
 
 from kws.models.ds_cnn import DSCNN
 from kws.optimize.kd import (
@@ -115,24 +116,29 @@ class _TeacherDescription:
 def test_distillation_criterion_state_round_trips_feature_adapter():
     weights = KDWeights()
     source = DistillationCriterion(
-        _TeacherDescription(), weights, 0.0, torch.device("cpu"),
+        cast(Any, _TeacherDescription()), weights, 0.0, torch.device("cpu"),
         student_feature_dim=3,
     )
     with torch.no_grad():
-        source.adapter.weight.copy_(torch.arange(15, dtype=torch.float32).reshape(5, 3))
+        source_adapter = source.adapter
+        assert source_adapter is not None
+        source_adapter.weight.copy_(torch.arange(15, dtype=torch.float32).reshape(5, 3))
 
     restored = DistillationCriterion(
-        _TeacherDescription(), weights, 0.0, torch.device("cpu"),
+        cast(Any, _TeacherDescription()), weights, 0.0, torch.device("cpu"),
         student_feature_dim=3,
     )
     restored.load_state_dict(source.state_dict(), strict=True)
 
-    assert torch.equal(restored.adapter.weight, source.adapter.weight)
+    restored_adapter = restored.adapter
+    source_adapter = source.adapter
+    assert restored_adapter is not None and source_adapter is not None
+    assert torch.equal(restored_adapter.weight, source_adapter.weight)
 
 
 def test_distillation_criterion_rejects_missing_required_adapter_state():
     criterion = DistillationCriterion(
-        _TeacherDescription(), KDWeights(), 0.0, torch.device("cpu"),
+        cast(Any, _TeacherDescription()), KDWeights(), 0.0, torch.device("cpu"),
         student_feature_dim=3,
     )
     state = criterion.state_dict()

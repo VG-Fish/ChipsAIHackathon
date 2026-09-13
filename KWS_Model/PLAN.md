@@ -550,32 +550,77 @@ Phase A is done. Numbers come from `reports/sparknet_phase_a.yaml`, seed 0.
     - accuracy excluding silence +10.5 points;
     - 8.5× fewer MACs.
   - C=8 is not competitive.
-- **Decision.** Proceed to Phase B with C=16. Phase B trains on this project's
-  silence, so the confound goes away there. Gate B, not Gate A, is the real
-  test. In Phase B, watch the `_silence_` and `up` F1 scores.
+- **Decision.** Proceed to Phase B. Phase B trains on this project's silence,
+  so the confound goes away there. Gate B, not Gate A, is the real test.
+  - C=16 is over XS's parameter budget, so C=12 is the gated candidate and C=16
+    is the reference.
+  - In Phase B, watch the `_silence_` and `up` F1 scores.
 
 ### Phase B: controlled step-2 A/B in this project
 
-- [ ] **Minimum code.** Reuse Phase A's `src/kws/models/sparknet.py`. Replace
+- **Front end: 40-bin log-mel for every run**, the teacher's and XS's input.
+  - `kd.py:315` feeds the teacher and the student the same input tensor, so a
+    KD run cannot give SparkNet MFCC-32.
+  - The shared input also keeps the XS comparison on identical features.
+  - Phase A's MFCC-32 path exists only to verify the port.
+  - Gate width stays at the released 32; see Open questions.
+- **Size: C=12 is the gated candidate.**
+  - Gate B caps parameters at XS's 4,096.
+  - At log-mel 40, C=16 has 4,852 parameters and is over the cap. It is trained
+    only as a reference point.
+  - C=12 has 3,584 parameters (3,800 with gate width 40) and 295,708 MACs, so
+    it fits.
+- [x] **Minimum code.** Reuse Phase A's `src/kws/models/sparknet.py`. Replace
       the evaluate dispatch with a model registry covering only the train,
       distill, and evaluate build sites.
-- [ ] **Sparsity loss.** Add the auxiliary-loss hook to `run_finetune`, with the
+  - Done in `src/kws/models/registry.py`. A model config selects its builder
+    with `family` (default `ds_cnn`). Checkpoints written by train and distill
+    also record `model_family`, the key the Phase A port uses.
+  - `kws.train` gained `--stage` (default `teacher`) so a student run does not
+    write under `teacher/`.
+  - Model configs: `configs/model/sparknet_c{8,12,16}.yaml`.
+  - Still DS-CNN only: the KD teacher, pipeline, prune, PAI, and QAT build
+    sites (Phase C).
+- [x] **Sparsity loss.** Add the auxiliary-loss hook to `run_finetune`, with the
       weight configurable and starting near 0.01 × the CE weight.
-- [ ] **Light recipe.** Add a train config that approximates the reference
+  - `SparkNet.auxiliary_losses()` returns the reference term
+    `mean(Φ((μ + 0.5) / 0.5))` over the pre-noise gate μ, with its weight.
+  - `run_finetune` adds the weighted term to the total in both the plain and
+    KD paths, and logs the unweighted value as `train_gate_sparsity`.
+  - The weight is `sparsity_weight: 0.01` in the SparkNet model config, not the
+    train config, so SparkNet and XS runs share every recipe file verbatim.
+  - The PAI loop (`src/kws/optimize/dendritic.py:1990`) does not call the hook
+    yet (Phase C).
+- [x] **Light recipe.** Add a train config that approximates the reference
       recipe: ±100 ms shift, low-level white noise, no SpecAugment, no speed
       perturbation, and no fixed augmented-view cache. Keep AdamW. If SGD is
       ever tried, apply Finding 4's ×100 rescaling rather than copying the
       reference lr and weight decay.
+  - `configs/train/light.yaml`: ±100 ms zero-fill shift and −90 to −46 dB
+    white noise, each with p = 0.8, as in the reference YAML. No background
+    noise mixing, speed perturbation, or SpecAugment, and
+    `cache_train_features: false`. `configs/train/light_kd.yaml` is the same
+    plus response + CE KD with weights 1/7 and 6/7 (Song et al.'s 0.1 / 0.6
+    renormalized).
+  - Train configs take an optional `augmentation` block
+    (`kws.data.augment.build_augmenters`). Without one, the recipe and its
+    random draws are unchanged (tested). Unknown keys are rejected. All six
+    augmented `build_datasets` call sites pass the block through.
+  - Measured cost on the M3 Pro (MPS): C=12 about 5 s per epoch without KD
+    and 42 s with KD, where the DS-CNN-L teacher forward dominates.
 - [ ] **Runs, in priority order,** selected on validation:
-  1. SparkNet C=16, light recipe, no KD.
-  2. SparkNet C=16, light recipe, response + CE KD (`feature_weight: 0`).
+  1. SparkNet C=12, light recipe, no KD.
+  2. SparkNet C=12, light recipe, response + CE KD (`feature_weight: 0`).
   3. DS-CNN-XS, light recipe (architecture control).
-  4. SparkNet C=16 with the current `distill_imc.yaml` recipe (recipe control).
-  5. SparkNet C=8 and C=12 with the best recipe found above.
+  4. SparkNet C=12 with the current `distill_imc.yaml` recipe (recipe control).
+  5. SparkNet C=16 (over-budget reference) and C=8, with the best recipe found
+     above.
   6. The three-term Song et al. KD, only if run 2 helped.
-- **Gate B:** SparkNet beats DS-CNN-XS **under the same recipe** by a material
-  validation margin, at no more than XS's parameter count. Report test accuracy
-  once for the selected models.
+  7. Optional: SparkNet C=12 on MFCC-32, light recipe, no KD. Only this no-KD
+     run can use MFCC-32, and it answers the front-end open question.
+- **Gate B:** SparkNet C=12 (or any width ≤ 4,096 parameters) beats DS-CNN-XS
+  **under the same recipe** by a material validation margin. Report test
+  accuracy once for the selected models.
 
 ### Phase C: move the whole framework to SparkNet (only if Gate B passes)
 
@@ -608,13 +653,14 @@ Phase A is done. Numbers come from `reports/sparknet_phase_a.yaml`, seed 0.
 
 ## Open questions
 
-- **Front end:** if MFCC-32 clearly beats log-mel 40 for the student, either
-  retrain the teacher on MFCC or teach the dataset and cache to return two
-  feature views.
+- **Front end:** if Phase B run 7 (MFCC-32, no KD) clearly beats run 1
+  (log-mel 40, no KD), then either retrain the teacher on MFCC or teach the
+  dataset and cache to return two feature views so KD can use MFCC-32.
 - **KD with stochastic gates:** does feature KD (pooled gate occupancy projected
   onto the teacher embedding) conflict with the sparsity objective?
 - **Dendrite target:** `.fc` or the gate conv, and at which C?
 - **Gate width on log-mel 40:** keep the released 32, or use the
-  paper-faithful 40 (+248 parameters at C=16)?
+  paper-faithful 40? Gate width 40 adds 216 parameters at C=12 (3,800, still
+  under XS) and 248 at C=16.
 - **Class balance:** 2× unknown/silence stays the task definition here. Record
   1× numbers only as a bridge to the literature.

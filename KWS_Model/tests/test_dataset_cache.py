@@ -1,4 +1,5 @@
 import torch
+from typing import Any, cast
 
 from kws.data.dataset import Entry, SpeechCommandsKWSDataset, build_datasets
 from kws.data.splits import TEST, TRAIN, VAL
@@ -28,10 +29,10 @@ def test_precomputed_features_skip_repeated_deterministic_extraction(monkeypatch
     dataset = SpeechCommandsKWSDataset(
         [Entry(0, "yes/example.wav"), Entry(1, None)],
         tmp_path,
-        extractor,
+        cast(Any, extractor),
         sample_rate=16_000,
         clip_len=2,
-        silence_sampler=silence,
+        silence_sampler=cast(Any, silence),
         cache_features=True,
     )
     waveform = torch.tensor([[1.0, 2.0]])
@@ -68,11 +69,11 @@ def test_feature_cache_reuses_one_augmented_view_including_silence(monkeypatch, 
     dataset = SpeechCommandsKWSDataset(
         [Entry(0, "yes/example.wav"), Entry(1, None)],
         tmp_path,
-        extractor,
+        cast(Any, extractor),
         sample_rate=16_000,
         clip_len=2,
-        silence_sampler=silence,
-        waveform_augmenter=augmenter,
+        silence_sampler=cast(Any, silence),
+        waveform_augmenter=cast(Any, augmenter),
         cache_features=True,
     )
     waveform = torch.tensor([[1.0, 2.0]])

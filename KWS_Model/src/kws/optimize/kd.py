@@ -25,6 +25,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from kws.models.ds_cnn import FeatureModel, build_ds_cnn
+from kws.models.registry import checkpoint_input_shape
 from kws.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -161,7 +162,7 @@ class FrozenTeacher(nn.Module):
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model = build_ds_cnn(
             checkpoint["model_cfg"],
-            tuple(checkpoint["input_shape"]),
+            checkpoint_input_shape(checkpoint),
             checkpoint["num_classes"],
         )
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -173,7 +174,7 @@ class FrozenTeacher(nn.Module):
         self.checkpoint_path = str(checkpoint_path)
         self.checkpoint_sha256 = file_sha256(checkpoint_path)
         self.model_cfg = checkpoint["model_cfg"]
-        self.input_shape = tuple(checkpoint["input_shape"])
+        self.input_shape = checkpoint_input_shape(checkpoint)
         self.num_classes = int(checkpoint["num_classes"])
         self.num_keywords = int(checkpoint["num_keywords"])
         self.label_map = checkpoint.get("label_map")

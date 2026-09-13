@@ -1,6 +1,7 @@
 """Shared DataLoader construction for overlapped input processing."""
 
 from collections.abc import Iterator, Mapping
+from typing import Callable, cast
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -92,7 +93,7 @@ class _ResilientDataLoader:
             # Ensure persistent workers do not linger after a failed startup.
             shutdown = getattr(iterator, "_shutdown_workers", None)
             if callable(shutdown):
-                shutdown()
+                cast(Callable[[], None], shutdown)()
             if generator is not None and generator_state is not None:
                 generator.set_state(generator_state)
             elif global_generator_state is not None:

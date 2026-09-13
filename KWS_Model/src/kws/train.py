@@ -1,6 +1,7 @@
 import argparse
 import copy
 import math
+import sys
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
@@ -10,12 +11,14 @@ from typing import cast
 
 import torch
 import torch.nn as nn
+from torch.nn.modules.batchnorm import _BatchNorm
 import yaml
 
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
-from kws.models.ds_cnn import FeatureModel, build_ds_cnn
+from kws.models.ds_cnn import FeatureModel
+from kws.models.registry import build_model, model_family
 from kws.utils import graphs
 from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout
@@ -29,7 +32,7 @@ from kws.utils.checkpointing import (
     restore_rng_state,
     write_phase_summary,
 )
-from kws.utils.logging import get_logger
+from kws.utils.logging import get_logger, run_session
 from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
@@ -141,10 +144,24 @@ def _trainable(parameters: Iterable[nn.Parameter]) -> list[nn.Parameter]:
     return [parameter for parameter in parameters if parameter.requires_grad]
 
 
+def collect_auxiliary_losses(model: nn.Module) -> dict[str, tuple[torch.Tensor, float]]:
+    """Training-only loss terms a model family defines for itself.
+
+    A model opts in with an ``auxiliary_losses()`` method that returns
+    ``{name: (value, weight)}`` for its latest training forward. SparkNet's
+    gate sparsity term is the only one so far. Models without the method add
+    nothing.
+    """
+    collect = getattr(model, "auxiliary_losses", None)
+    if not callable(collect):
+        return {}
+    return dict(cast(Callable[[], Mapping[str, tuple[torch.Tensor, float]]], collect)())
+
+
 def keep_frozen_batchnorm_eval(model: nn.Module) -> None:
     """Keep BatchNorm statistics fixed when all of its affine params are frozen."""
     for module in model.modules():
-        if not isinstance(module, nn.modules.batchnorm._BatchNorm):
+        if not isinstance(module, _BatchNorm):
             continue
         local_parameters = list(module.parameters(recurse=False))
         if not any(parameter.requires_grad for parameter in local_parameters):
@@ -305,7 +322,7 @@ def run_finetune(
         state_payload = build_training_state(
             run_id=run_id,
             stage=stage,
-            phase=phase,
+            phase=phase or "default",
             completed_epoch=completed_epoch,
             target_epochs=target_epochs,
             global_step=global_step,
@@ -364,6 +381,12 @@ def run_finetune(
                     else model(features)
                 )
                 losses = kd(features, logits, labels, student_features)
+            for name, (value, weight) in collect_auxiliary_losses(model).items():
+                if name in losses:
+                    raise ValueError(f"auxiliary loss {name!r} collides with a task loss")
+                losses[name] = value
+                if weight:
+                    losses["total"] = losses["total"] + weight * value
             losses["total"].backward()
             optimizer.step()
             scheduler.step()
@@ -514,6 +537,7 @@ def train_model(model, datasets, label_map: dict, model_cfg: dict, train_cfg: di
     def save_best(trained_model, val_acc):
         checkpoint = {
             "model_state_dict": trained_model.state_dict(),
+            "model_family": model_family(model_cfg),
             "model_cfg": model_cfg,
             "input_shape": trained_model.input_shape,
             "num_classes": trained_model.fc.out_features,
@@ -573,6 +597,7 @@ def train_model(model, datasets, label_map: dict, model_cfg: dict, train_cfg: di
         latest = torch.load(latest_path, map_location="cpu", weights_only=False)
         checkpoint = {
             "model_state_dict": latest["best_model_state_dict"],
+            "model_family": model_family(model_cfg),
             "model_cfg": model_cfg,
             "input_shape": model.input_shape,
             "num_classes": model.fc.out_features,
@@ -610,6 +635,7 @@ def train(
     resume_from: str | Path | None = None,
     reset_metrics: bool = False,
     run_id: str | None = None,
+    stage: str = "teacher",
 ):
     train_cfg = with_seed(train_cfg, seed)
     set_seed(train_cfg["seed"])
@@ -621,6 +647,7 @@ def train(
         seed=train_cfg["seed"],
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
     )
     label_names = [name for name, _ in sorted(label_map.items(), key=lambda kv: kv[1])]
     num_keywords = len(data_cfg["target_keywords"])
@@ -629,7 +656,7 @@ def train(
     input_shape = (sample_features.shape[-2], sample_features.shape[-1])
     num_classes = len(label_names)
 
-    model = build_ds_cnn(model_cfg, input_shape, num_classes).to(device)
+    model = build_model(model_cfg, input_shape, num_classes).to(device)
     logger.info("Model %s: %d params, input_shape=%s, num_classes=%d",
                 model_cfg["name"], sum(p.numel() for p in model.parameters()), input_shape, num_classes)
 
@@ -640,10 +667,10 @@ def train(
         requested_checkpoint = Path(checkpoint_path)
         checkpoint_path = layout.legacy_output_path(
             requested_checkpoint,
-            category="models/checkpoints/teacher",
+            category=f"models/checkpoints/{stage}",
             default="best.pt",
         )
-        latest_path = layout.checkpoint_path("teacher", phase, "latest")
+        latest_path = layout.checkpoint_path(stage, phase, "latest")
         if resume and resume_from is None and latest_path.exists():
             resume_from = latest_path
     elif resume and resume_from is None:
@@ -661,14 +688,14 @@ def train(
         device,
         num_keywords,
         output_dir=output_dir,
-        stage="teacher",
+        stage=stage,
         phase=phase,
         resume_from=resume_from,
         recipe={
             "data": data_cfg,
             "model": model_cfg,
             "train": train_cfg,
-            "stage": "teacher",
+            "stage": stage,
             "phase": phase,
         },
         run_id=run_id,
@@ -685,6 +712,11 @@ def main():
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-from", default=None)
+    parser.add_argument(
+        "--stage",
+        default="teacher",
+        help="Artifact stage name for checkpoints and metrics (default: teacher)",
+    )
     parser.add_argument(
         "--seed",
         type=int,
@@ -710,10 +742,10 @@ def main():
         if args.checkpoint is not None
         else Path("models/checkpoints/best.pt")
     )
-    with __import__("kws.utils.logging", fromlist=["run_session"]).run_session(
+    with run_session(
         args.output_dir,
         command="kws.train",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=[
             (args.data_config, "data_config"),
@@ -730,6 +762,7 @@ def main():
             output_dir=args.output_dir,
             resume=args.resume,
             resume_from=args.resume_from,
+            stage=args.stage,
         )
 
 

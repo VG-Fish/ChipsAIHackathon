@@ -12,6 +12,7 @@ adapter maps student features to the teacher width. The adapter is
 intentionally absent from the saved deployment model.
 """
 import argparse
+import sys
 import hashlib
 import uuid
 from pathlib import Path
@@ -20,9 +21,10 @@ import torch
 import yaml
 
 from kws.data.dataset import build_datasets
+from kws.data.features import build_feature_extractor
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
-from kws.models.ds_cnn import build_ds_cnn
+from kws.models.registry import build_model, model_family
 from kws.optimize.kd import (
     DistillationCriterion,
     FrozenTeacher,
@@ -31,6 +33,7 @@ from kws.optimize.kd import (
     file_sha256,
 )
 from kws.train import (
+    FinetuneResult,
     resolve_manifest_run_id,
     run_finetune,
     validate_checkpoint_run_id,
@@ -44,6 +47,25 @@ from kws.utils.logging import run_session
 from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
+
+
+def validate_data_feature_shape(
+    data_cfg: dict,
+    expected_shape: tuple[int, int],
+    teacher_checkpoint: str,
+) -> None:
+    """Reject data recipes that cannot produce inputs for the teacher."""
+    clip_len = int(
+        data_cfg["dataset"]["sample_rate"] * data_cfg["dataset"]["clip_seconds"]
+    )
+    feature_shape = build_feature_extractor(data_cfg)(torch.zeros(1, clip_len)).shape
+    data_shape = (int(feature_shape[-2]), int(feature_shape[-1]))
+    expected_shape = (int(expected_shape[0]), int(expected_shape[1]))
+    if data_shape != expected_shape:
+        raise ValueError(
+            f"data config produces features shaped {data_shape} (n_mels, frames), "
+            f"but teacher checkpoint {teacher_checkpoint} expects {expected_shape}"
+        )
 
 
 def distillation_fingerprint(
@@ -122,7 +144,7 @@ def distill(
     resume_from: str | Path | None = None,
     reset_metrics: bool = False,
     run_id: str | None = None,
-) -> object:
+) -> FinetuneResult:
     """Train the student against the fixed teacher and return full history."""
     train_cfg = with_seed(train_cfg, seed)
     set_seed(train_cfg["seed"])
@@ -143,6 +165,7 @@ def distill(
     teacher = FrozenTeacher(teacher_checkpoint, device)
     input_shape = teacher.input_shape
     num_classes = teacher.num_classes
+    validate_data_feature_shape(data_cfg, input_shape, teacher_checkpoint)
     recipe_fingerprint = distillation_fingerprint(
         teacher_checkpoint,
         student_model_cfg,
@@ -151,7 +174,7 @@ def distill(
         student_checkpoint,
     )
 
-    student = build_ds_cnn(student_model_cfg, input_shape, num_classes).to(device)
+    student = build_model(student_model_cfg, input_shape, num_classes).to(device)
     if student_checkpoint is not None:
         initial = torch.load(student_checkpoint, map_location=device, weights_only=False)
         if run_id is not None and (
@@ -169,6 +192,7 @@ def distill(
         seed=train_cfg["seed"],
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
     )
     if len(label_map) != num_classes:
         raise ValueError(
@@ -224,6 +248,7 @@ def distill(
             out_checkpoint,
             {
                 "model_state_dict": model.state_dict(),
+                "model_family": model_family(student_model_cfg),
                 "model_cfg": student_model_cfg,
                 "input_shape": input_shape,
                 "num_classes": num_classes,
@@ -356,7 +381,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.optimize.distill",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=inputs,
     ):

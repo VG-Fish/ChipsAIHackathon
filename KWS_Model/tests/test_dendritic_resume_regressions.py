@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import torch
@@ -288,7 +289,7 @@ def test_pai_pair_save_persists_kd_state_and_requires_matching_native_digest(
         sidecar_path=sidecar_path,
         optimizer=optimizer,
         scheduler=scheduler,
-        kd=FakeKD(),
+        kd=cast(Any, FakeKD()),
         adapter_optimizer=adapter_optimizer,
         adapter_scheduler=adapter_scheduler,
         phase_trail=[{"epoch": 0, "mode": "n"}],
@@ -374,11 +375,11 @@ def test_restore_loads_kd_adapter_before_its_optimizer_and_loads_model_strictly(
 
     dendritic._restore_pai_training_state(
         state,
-        model=FakeModel(),
-        optimizer=model_optimizer,
+        model=cast(Any, FakeModel()),
+        optimizer=cast(Any, model_optimizer),
         scheduler=model_scheduler,
-        kd=FakeKD(),
-        adapter_optimizer=adapter_optimizer,
+        kd=cast(Any, FakeKD()),
+        adapter_optimizer=cast(Any, adapter_optimizer),
         adapter_scheduler=adapter_scheduler,
         device=torch.device("cpu"),
     )
@@ -446,8 +447,8 @@ def test_pai_epoch_metrics_include_named_kd_losses_and_adapter_lr(monkeypatch):
         train_accuracy=0.75,
         val_loss=0.9,
         val_accuracy=0.5,
-        optimizer=optimizer,
-        adapter_optimizer=adapter_optimizer,
+        optimizer=cast(Any, optimizer),
+        adapter_optimizer=cast(Any, adapter_optimizer),
         mode="p",
         next_mode="n",
         base_params_in_optimizer_count=0,
@@ -501,7 +502,7 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
             "latency_iterations": 1,
         },
     }
-    tracker = SimpleNamespace(member_vars={"mode": "n", "num_dendrites_integrated": 0})
+    tracker: Any = SimpleNamespace(member_vars={"mode": "n", "num_dendrites_integrated": 0})
     tracker.add_extra_score = lambda *_args: None
 
     def finish_with_internal_p_to_n_transition(_score, value):
@@ -648,7 +649,7 @@ def test_post_pai_kd_materializes_best_checkpoint_when_zero_does_not_improve(
             "distillation": {},
         },
         torch.device("cpu"),
-        teacher,
+        cast(Any, teacher),
         (1, 2),
         "candidate",
         baseline_val_acc=0.0,
@@ -681,7 +682,7 @@ def test_standalone_cli_forwards_resume_options(
         "sys.argv", ["kws.optimize.dendritic", *cli_args]
     )
     monkeypatch.setattr(dendritic, "load_yaml", lambda path: {"path": path})
-    monkeypatch.setattr(dendritic, "run_session", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(dendritic, "run_session", lambda *_args, **_kwargs: cast(Any, nullcontext)())
     monkeypatch.setattr(
         dendritic,
         "run_cycle",

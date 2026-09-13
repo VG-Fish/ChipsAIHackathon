@@ -17,6 +17,7 @@ Only validation accuracy controls acceptance. The test split is never loaded.
 """
 
 import argparse
+import sys
 import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -147,9 +148,10 @@ def judge_candidate(
 def candidate_costs(result: DendriticCycleResult) -> dict[str, float]:
     """The deployment costs this candidate actually recorded."""
     costs: dict[str, float] = {"deployed_params": float(result.deployed_params)}
+    recorded_cost = result.cost
     for key in CANDIDATE_COST_KEYS:
-        if key != "deployed_params" and result.cost and key in result.cost:
-            costs[key] = float(result.cost[key])
+        if key != "deployed_params" and recorded_cost is not None and key in recorded_cost:
+            costs[key] = float(recorded_cost[key])
     return costs
 
 
@@ -696,7 +698,7 @@ def main() -> None:
     with run_session(
         args.output_dir,
         command="kws.optimize.dendritic_prune_loop",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=inputs,
     ):

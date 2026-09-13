@@ -8,7 +8,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from kws.utils.artifacts import ArtifactLayout, redact_argv
 
@@ -22,19 +22,19 @@ class _Tee:
         self.terminal = terminal
         self.log_stream = log_stream
 
-    def write(self, value):
+    def write(self, value: str) -> int:
         self.terminal.write(value)
         self.log_stream.write(value)
         return len(value)
 
-    def flush(self):
+    def flush(self) -> None:
         self.terminal.flush()
         self.log_stream.flush()
 
-    def isatty(self):
+    def isatty(self) -> bool:
         return bool(getattr(self.terminal, "isatty", lambda: False)())
 
-    def fileno(self):
+    def fileno(self) -> int:
         return self.terminal.fileno()
 
     @property
@@ -46,7 +46,7 @@ def get_logger(name: str) -> logging.Logger:
     """Return a propagating logger; configuration belongs to ``run_session``."""
     global _DEFAULT_CONFIGURED
     if not _DEFAULT_CONFIGURED and not logging.getLogger().handlers:
-        handler = logging.StreamHandler(sys.stdout)
+        handler = logging.StreamHandler(cast(Any, sys.stdout))
         setattr(handler, _HANDLER_MARKER, True)
         handler.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -75,7 +75,10 @@ def run_session(
         yield None
         return
 
-    layout = layout or ArtifactLayout(output_dir)
+    if layout is None:
+        if output_dir is None:
+            raise AssertionError("run_session requires output_dir or layout")
+        layout = ArtifactLayout(output_dir)
     layout.ensure_tree()
     invocation_id = uuid.uuid4().hex[:12]
     log_path = layout.log_path(command, invocation_id)
@@ -94,7 +97,7 @@ def run_session(
             root.removeHandler(old_handler)
             with contextlib.suppress(Exception):
                 old_handler.close()
-    handler = logging.StreamHandler(tee_stdout)
+    handler = logging.StreamHandler(cast(Any, tee_stdout))
     setattr(handler, _HANDLER_MARKER, True)
     handler.setFormatter(logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

@@ -100,7 +100,12 @@ def test_distill_best_checkpoint_callback_uses_atomic_save_contract(
         return SimpleNamespace(best_val_acc=0.5)
 
     monkeypatch.setattr(distill_module, "FrozenTeacher", FakeTeacher)
-    monkeypatch.setattr(distill_module, "build_ds_cnn", lambda *args: FakeStudent())
+    monkeypatch.setattr(
+        distill_module,
+        "build_feature_extractor",
+        lambda _cfg: lambda _waveform: torch.zeros(1, 2, 2),
+    )
+    monkeypatch.setattr(distill_module, "build_model", lambda *args: FakeStudent())
     monkeypatch.setattr(
         distill_module,
         "build_datasets",
@@ -115,7 +120,7 @@ def test_distill_best_checkpoint_callback_uses_atomic_save_contract(
     distill_module.distill(
         str(teacher_checkpoint),
         {"name": "student"},
-        {"dataset": "tiny"},
+        {"dataset": {"sample_rate": 4, "clip_seconds": 1.0}},
         {
             "seed": 1,
             "augment": False,
@@ -128,3 +133,46 @@ def test_distill_best_checkpoint_callback_uses_atomic_save_contract(
     checkpoint = torch.load(out_checkpoint, map_location="cpu", weights_only=False)
     assert checkpoint["val_acc"] == 0.5
     assert checkpoint["distillation"]["recipe_fingerprint"]
+
+
+def test_distill_rejects_data_shape_that_does_not_match_teacher(
+    tmp_path, monkeypatch,
+):
+    teacher_checkpoint = tmp_path / "teacher.pt"
+    teacher_checkpoint.write_bytes(b"teacher")
+
+    class FakeTeacher:
+        input_shape = (40, 101)
+        num_classes = 12
+
+        def __init__(self, checkpoint_path, device):
+            pass
+
+    monkeypatch.setattr(distill_module, "FrozenTeacher", FakeTeacher)
+    monkeypatch.setattr(
+        distill_module,
+        "build_feature_extractor",
+        lambda _cfg: lambda _waveform: torch.zeros(1, 32, 101),
+    )
+    monkeypatch.setattr(
+        distill_module,
+        "build_model",
+        lambda *_args: pytest.fail("student must not be built for incompatible data"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"produces features shaped \(32, 101\).*expects \(40, 101\)",
+    ):
+        distill_module.distill(
+            str(teacher_checkpoint),
+            {"name": "student"},
+            {"dataset": {"sample_rate": 4, "clip_seconds": 1.0}},
+            {
+                "seed": 1,
+                "augment": False,
+                "label_smoothing": 0.0,
+                "distillation": {},
+            },
+            tmp_path / "student-best.pt",
+        )

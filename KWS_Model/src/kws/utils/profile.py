@@ -52,25 +52,22 @@ def count_macs(model: nn.Module, input_shape: tuple[int, int]) -> int:
     depthwise convolutions, and any dendrite copies present, are all correct
     without the caller describing the topology.
     """
-    total = 0
+    total = [0]
     handles = []
 
     def conv_hook(module: nn.Conv2d, _inputs, output: torch.Tensor) -> None:
-        nonlocal total
         output_elements = output.numel()
         kernel_macs = (
             module.in_channels // module.groups
             * module.kernel_size[0]
             * module.kernel_size[1]
         )
-        total += output_elements * kernel_macs
+        total[0] += output_elements * kernel_macs
 
     def linear_hook(module: nn.Linear, _inputs, output: torch.Tensor) -> None:
-        nonlocal total
-        total += output.numel() * module.in_features
+        total[0] += output.numel() * module.in_features
 
     def residual_hook(module: nn.Module, _inputs, output: torch.Tensor) -> None:
-        nonlocal total
         # Each learned skip edge performs one per-element multiply/add. The
         # branch convolutions/linears are counted by their own hooks.
         if hasattr(module, "pai_skip_connection_count"):
@@ -80,7 +77,7 @@ def count_macs(model: nn.Module, input_shape: tuple[int, int]) -> int:
             if not isinstance(skip_weights, nn.ParameterList):
                 return
             edges = sum(weight.shape[0] for weight in skip_weights)
-        total += output.numel() * edges
+        total[0] += output.numel() * edges
 
     for module in model.modules():
         if isinstance(module, (nn.Conv2d, nnq.Conv2d)):
@@ -95,7 +92,7 @@ def count_macs(model: nn.Module, input_shape: tuple[int, int]) -> int:
     _run_probe(model, input_shape)
     for handle in handles:
         handle.remove()
-    return total
+    return total[0]
 
 
 # Modules that reinterpret or pass through their input without allocating a new
@@ -256,15 +253,15 @@ def measure_latency(
     """
     if iterations < 1:
         raise ValueError("iterations must be positive")
-    device = device or _model_device(model)
+    active_device = device if device is not None else _model_device(model)
     was_training = model.training
     model.eval()
-    sample = torch.zeros(1, 1, *input_shape, device=device)
+    sample = torch.zeros(1, 1, *input_shape, device=active_device)
 
     def synchronize() -> None:
-        if device.type == "cuda":
+        if active_device.type == "cuda":
             torch.cuda.synchronize()
-        elif device.type == "mps":
+        elif active_device.type == "mps":
             torch.mps.synchronize()
 
     try:
@@ -301,11 +298,11 @@ def profile_model(
     latency_warmup: int = 10,
 ) -> DeploymentCost:
     """Measure every deployment cost the Pareto search compares candidates on."""
-    device = device or _model_device(model)
+    active_device = device if device is not None else _model_device(model)
     latency = measure_latency(
         model,
         input_shape,
-        device=device,
+        device=active_device,
         iterations=latency_iterations,
         warmup=latency_warmup,
     )
@@ -316,7 +313,7 @@ def profile_model(
         activation_peak_bytes=measure_peak_activation_bytes(
             model, input_shape, bytes_per_activation=bytes_per_activation,
         ),
-        device=str(device),
+        device=str(active_device),
         bits_per_weight=bits_per_weight,
         weight_memory_method=(
             "packed_quantized_operators_plus_dense_parameters"
@@ -331,5 +328,7 @@ def profile_model(
             )
             else "forward_hook_sequential_liveness_estimate"
         ),
-        **latency,
+        latency_ms_mean=latency["latency_ms_mean"],
+        latency_ms_p50=latency["latency_ms_p50"],
+        latency_ms_p90=latency["latency_ms_p90"],
     )

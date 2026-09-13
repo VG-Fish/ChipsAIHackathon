@@ -22,6 +22,7 @@ stages 2, 3b, 3d, 4, and 5.
 from __future__ import annotations
 
 import argparse
+import sys
 import copy
 import hashlib
 from pathlib import Path
@@ -35,6 +36,7 @@ from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
 from kws.export.benchmark import benchmark_module, benchmark_scripted_model
 from kws.models.ds_cnn import FeatureModel, build_ds_cnn
+from kws.models.registry import checkpoint_input_shape
 from kws.optimize.cluster import (
     ClusterSpec,
     CodebookProjector,
@@ -258,7 +260,7 @@ def stage_teacher(config: dict, *, force: bool, seed: int | None = None) -> dict
         )
         model = build_ds_cnn(
             existing["model_cfg"],
-            tuple(existing["input_shape"]),
+            checkpoint_input_shape(existing),
             existing["num_classes"],
         )
         return {
@@ -642,11 +644,12 @@ def load_candidate_model(
         expected_run_id=(layout.manifest_run_id if layout is not None else None),
     )
     configure_perforatedai(metadata["perforatedai"], device)
-    reload_root = (
-        layout.root / "pai" / "reload" / Path(save_name).name
-        if config.get("output_dir")
-        else Path(f"{save_name}_reload")
-    )
+    if config.get("output_dir"):
+        if layout is None:
+            raise AssertionError("output_dir must create an artifact layout")
+        reload_root = layout.root / "pai" / "reload" / Path(save_name).name
+    else:
+        reload_root = Path(f"{save_name}_reload")
     reload_root.mkdir(parents=True, exist_ok=True)
     reload_name = reload_root.name
     previous_cwd = Path.cwd()
@@ -724,7 +727,7 @@ def load_candidate_model(
         ensure_clean_dendrite_skip_weights(model, state["model_state_dict"])
         model.load_state_dict(state["model_state_dict"], strict=True)
         logger.info("Loaded the step-3d resumed weights from %s", resumed)
-    return model, tuple(checkpoint["input_shape"]), checkpoint["num_keywords"]
+    return model, checkpoint_input_shape(checkpoint), int(checkpoint["num_keywords"])
 
 
 def stage_cluster(
@@ -754,6 +757,7 @@ def stage_cluster(
         seed=train_cfg["seed"],
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
     )
     train_generator = torch.Generator().manual_seed(int(train_cfg["seed"]))
     val_generator = torch.Generator().manual_seed(int(train_cfg["seed"]) + 1)
@@ -963,7 +967,7 @@ def run_pipeline(
         config = _configure_unified_outputs(config, layout)
         manifest_path = layout.root / "manifest.yaml"
         manifest = layout.load_manifest(
-            command="kws.pipeline", argv=__import__("sys").argv, seed=seed,
+            command="kws.pipeline", argv=sys.argv, seed=seed,
             device=str(get_device()),
         )
         manifest_run_id = manifest["run_id"]
@@ -1496,7 +1500,7 @@ def main() -> None:
         if output_dir is None:
             parser.error("--graphs requires --output-dir (or output_dir in the config)")
         graphs.enable()
-    with run_session(output_dir, command="kws.pipeline", argv=__import__("sys").argv, seed=args.seed):
+    with run_session(output_dir, command="kws.pipeline", argv=sys.argv, seed=args.seed):
         run_pipeline(
             config,
             stages,

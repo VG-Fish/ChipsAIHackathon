@@ -6,6 +6,7 @@ Perforated AI's dendrite library needs a real-valued, differentiable FP32
 PyTorch graph, so the checkpoint that continues to Phase 3 must stay FP32.
 """
 import argparse
+import sys
 import os
 from pathlib import Path
 
@@ -105,7 +106,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.optimize.quantize_ptq",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=[(args.data_config, "data_config"), (args.checkpoint, "checkpoint")],
     ):
@@ -116,7 +117,7 @@ def main():
             int8_path,
             seed=args.seed,
         )
-        if args.output_dir is not None:
+        if layout is not None:
             layout.atomic_json(
                 layout.output_path(
                     args.report,

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any
 from typing import cast
 
 import torch
@@ -445,12 +446,12 @@ def test_gentle_restart_applies_only_after_dendrite_integration():
 def test_completed_pai_tracker_boundary_is_export_only(monkeypatch):
     from kws.optimize import dendritic
 
-    tracker = SimpleNamespace(
+    tracker = cast(Any, SimpleNamespace(
         member_vars={
             "doing_pai": True,
             "num_dendrites_integrated": 1,
         }
-    )
+    ))
     monkeypatch.setattr(dendritic.GPA, "pai_tracker", tracker)
 
     assert dendritic.pai_tracker_at_terminal_boundary(1)

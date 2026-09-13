@@ -1,4 +1,5 @@
 import argparse
+import sys
 import json
 from pathlib import Path
 
@@ -10,8 +11,7 @@ from torch.utils.data import DataLoader
 from kws.data.dataset import build_datasets
 from kws.data.features import build_feature_extractor
 from kws.data.splits import TEST, VAL
-from kws.models.ds_cnn import build_ds_cnn
-from kws.models.sparknet import build_sparknet
+from kws.models.registry import build_model_from_checkpoint, checkpoint_input_shape
 from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout
 from kws.utils.checkpointing import record_input
@@ -25,14 +25,7 @@ logger = get_logger(__name__)
 
 def load_model_from_checkpoint(checkpoint_path: str, device: torch.device):
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model_family = ckpt.get("model_family", "ds_cnn")
-    input_shape = tuple(ckpt["input_shape"])
-    if model_family == "ds_cnn":
-        model = build_ds_cnn(ckpt["model_cfg"], input_shape, ckpt["num_classes"])
-    elif model_family == "sparknet":
-        model = build_sparknet(ckpt["model_cfg"], input_shape, ckpt["num_classes"])
-    else:
-        raise ValueError(f"unknown model_family: {model_family!r}")
+    model = build_model_from_checkpoint(ckpt)
     model.load_state_dict(ckpt["model_state_dict"])
     model.to(device).eval()
     return model, ckpt
@@ -89,7 +82,7 @@ def main():
         device = get_device()
         model, ckpt = load_model_from_checkpoint(args.checkpoint, device)
 
-        checkpoint_shape = tuple(ckpt["input_shape"])
+        checkpoint_shape = checkpoint_input_shape(ckpt)
         clip_len = int(data_cfg["dataset"]["sample_rate"] * data_cfg["dataset"]["clip_seconds"])
         data_shape = tuple(build_feature_extractor(data_cfg)(torch.zeros(1, clip_len)).shape[-2:])
         if data_shape != checkpoint_shape:
@@ -128,7 +121,7 @@ def main():
     with run_session(
         args.output_dir,
         command="kws.evaluate",
-        argv=__import__("sys").argv,
+        argv=sys.argv,
         seed=args.seed,
         inputs=[(args.data_config, "data_config"), (args.checkpoint, "checkpoint")],
     ):
