@@ -11,10 +11,14 @@ epochs: 40
 # the pre-finetune budget. This is the intended cosine horizon; the scheduler
 # clamps after it rather than oscillating if PAI runs longer.
 dendritic_schedule_epochs: 130
-batch_size: 128
+batch_size: 256
 num_workers: 4
 persistent_workers: true
 prefetch_factor: 2
+# Validation/test log-mel tensors and one augmented view of every training
+# entry are cached once at startup and reused across epochs.
+cache_features: true
+cache_train_features: true
 lr: 0.001
 weight_decay: 0.0001
 label_smoothing: 0.1

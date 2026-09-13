@@ -93,16 +93,21 @@ def build_lr_scheduler(optimizer, total_steps: int, warmup_fraction: float):
 
 def evaluate_loss_acc(model, loader, device, criterion):
     model.eval()
-    total_loss, total_correct, total_count = 0.0, 0, 0
+    total_loss = torch.zeros((), dtype=torch.float32, device=device)
+    total_correct = torch.zeros((), dtype=torch.long, device=device)
+    total_count = 0
     with torch.no_grad():
         for features, labels in loader:
             features, labels = features.to(device), labels.to(device)
             logits = model(features)
             loss = criterion(logits, labels)
-            total_loss += loss.item() * labels.size(0)
-            total_correct += (logits.argmax(dim=1) == labels).sum().item()
+            # Keep reductions on the device until the epoch boundary.  Calling
+            # ``item()`` here forces an accelerator synchronization for every
+            # batch (hundreds of thousands of syncs in PAI).
+            total_loss = total_loss + loss.detach() * labels.size(0)
+            total_correct = total_correct + (logits.argmax(dim=1) == labels).sum()
             total_count += labels.size(0)
-    return total_loss / total_count, total_correct / total_count
+    return total_loss.item() / total_count, total_correct.item() / total_count
 
 
 @dataclass
@@ -337,9 +342,11 @@ def run_finetune(
         set_train_mode_preserving_frozen_batchnorm(model)
         if kd is not None:
             kd.train()
-        running = {"total": 0.0}
+        running: dict[str, torch.Tensor] = {
+            "total": torch.zeros((), dtype=torch.float32, device=device)
+        }
         seen = 0
-        correct = 0
+        correct = torch.zeros((), dtype=torch.long, device=device)
         for features, labels in train_loader:
             features, labels = features.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -363,11 +370,14 @@ def run_finetune(
             if post_step is not None:
                 post_step(model)
             for name, value in losses.items():
-                running[name] = running.get(name, 0.0) + value.item() * labels.size(0)
-            correct += int((logits.detach().argmax(dim=1) == labels).sum().item())
+                contribution = value.detach() * labels.size(0)
+                running[name] = running.get(name, torch.zeros_like(contribution)) + contribution
+            correct = correct + (logits.detach().argmax(dim=1) == labels).sum()
             seen += labels.size(0)
 
-        train_losses = {name: value / max(seen, 1) for name, value in running.items()}
+        train_losses = {
+            name: value.item() / max(seen, 1) for name, value in running.items()
+        }
         if kd is not None:
             kd.eval()
         val_loss, val_acc = evaluate_loss_acc(model, val_loader, device, criterion)
@@ -380,7 +390,7 @@ def run_finetune(
             "global_step": global_step + len(train_loader),
             "elapsed_seconds": time.monotonic() - epoch_started,
             "train_loss": train_losses["total"],
-            "train_accuracy": correct / max(seen, 1),
+            "train_accuracy": correct.item() / max(seen, 1),
             "val_loss": val_loss,
             "val_acc": val_acc,
             "val_accuracy": val_acc,
@@ -605,7 +615,13 @@ def train(
     set_seed(train_cfg["seed"])
     device = get_device()
 
-    datasets, label_map = build_datasets(data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"])
+    datasets, label_map = build_datasets(
+        data_cfg,
+        augment=train_cfg["augment"],
+        seed=train_cfg["seed"],
+        cache_features=bool(train_cfg.get("cache_features", True)),
+        cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+    )
     label_names = [name for name, _ in sorted(label_map.items(), key=lambda kv: kv[1])]
     num_keywords = len(data_cfg["target_keywords"])
 

@@ -164,7 +164,11 @@ def distill(
         student.load_state_dict(initial["model_state_dict"])
 
     datasets, label_map = build_datasets(
-        data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"],
+        data_cfg,
+        augment=train_cfg["augment"],
+        seed=train_cfg["seed"],
+        cache_features=bool(train_cfg.get("cache_features", True)),
+        cache_train_features=bool(train_cfg.get("cache_train_features", False)),
     )
     if len(label_map) != num_classes:
         raise ValueError(

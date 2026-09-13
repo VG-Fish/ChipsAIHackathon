@@ -96,12 +96,15 @@ def speed_perturb(waveform: torch.Tensor, sample_rate: int,
 
 class WaveformAugmenter:
     def __init__(self, background_noise_dir: Path, sample_rate: int,
-                 max_shift_ms: float = 100, snr_db_range=(0, 15),
-                 speed_factor_range=(0.9, 1.1)):
+                 max_shift_ms: float = 150, snr_db_range=(-5, 15),
+                 speed_factor_range=(0.85, 1.15), noise_probability: float = 0.75):
         self.sample_rate = sample_rate
         self.max_shift_samples = int(sample_rate * max_shift_ms / 1000)
         self.snr_db_range = snr_db_range
         self.speed_factor_range = speed_factor_range
+        if not 0.0 <= noise_probability <= 1.0:
+            raise ValueError("noise_probability must be between 0 and 1")
+        self.noise_probability = noise_probability
         self.speed_resamplers = {
             rate: torchaudio.transforms.Resample(sample_rate, rate)
             for rate in _candidate_resample_rates(sample_rate, speed_factor_range)
@@ -116,13 +119,13 @@ class WaveformAugmenter:
         waveform = speed_perturb(
             waveform, self.sample_rate, self.speed_factor_range, self.speed_resamplers,
         )
-        if self.noise_waveforms and random.random() < 0.5:
+        if self.noise_waveforms and random.random() < self.noise_probability:
             waveform = mix_background_noise(waveform, self.noise_waveforms, self.snr_db_range)
         return waveform
 
 
 class SpecAugmenter:
-    def __init__(self, time_mask_param: int = 20, freq_mask_param: int = 8, num_masks: int = 1):
+    def __init__(self, time_mask_param: int = 30, freq_mask_param: int = 10, num_masks: int = 2):
         self.time_masking = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param)
         self.freq_masking = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)
         self.num_masks = num_masks

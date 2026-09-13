@@ -391,9 +391,22 @@ deterministic dataset construction.
 Training configs expose `num_workers`, `persistent_workers`, and
 `prefetch_factor` for overlapping audio preparation with accelerator work. The
 default configs use four persistent workers with two batches prefetched per
-worker. Speed/pitch augmentation snaps random factors to a fine rational rate
-grid and reuses prebuilt resampling kernels, avoiding the very large one-off
-sinc kernels produced by arbitrary integer sample-rate pairs.
+worker. Worker startup is attempted on macOS as well; if the host cannot start
+PyTorch's shared-memory manager, the loader logs the reason and retries the
+same epoch with `num_workers=0` while restoring the shuffle generator state.
+Deterministic features, including non-augmented training features, are
+precomputed once per process and cached in memory. Augmented training configs set
+`cache_train_features: true`, which samples one stronger waveform + SpecAugment
+view per entry at startup (including synthesized silence) and reuses those
+features throughout the run. This trades augmentation diversity between
+epochs for much lower input and feature-extraction overhead; remove that flag
+to resample augmentation every epoch. The default training batch is 256
+(override it in a train YAML if the available accelerator memory is smaller).
+The default recipe uses ±150 ms shifts, 0.85–1.15 speed changes, 75% noise
+mixing down to −5 dB SNR, and two larger SpecAugment masks. Speed/pitch
+augmentation snaps random factors to a fine rational rate grid and reuses
+prebuilt resampling kernels, avoiding the very large one-off sinc kernels
+produced by arbitrary integer sample-rate pairs.
 
 ## Model sizes (12-way task: 10 keywords + unknown + silence)
 

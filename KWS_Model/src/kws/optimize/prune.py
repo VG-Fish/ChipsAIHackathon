@@ -404,7 +404,13 @@ def prune_and_fine_tune(
     )
 
     set_seed(train_cfg["seed"])
-    datasets, label_map = build_datasets(data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"])
+    datasets, label_map = build_datasets(
+        data_cfg,
+        augment=train_cfg["augment"],
+        seed=train_cfg["seed"],
+        cache_features=bool(train_cfg.get("cache_features", True)),
+        cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+    )
 
     kd = None
     if teacher_checkpoint is not None:

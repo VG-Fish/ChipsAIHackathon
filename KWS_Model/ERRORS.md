@@ -12,6 +12,18 @@ too, marked OPEN until they are fixed.
 
 ---
 
+## 2026-09-13 — stale cache test after enabling fixed augmented views
+
+- **Symptom:** `test_precomputed_features_skip_repeated_deterministic_extraction`
+  expected one cached tensor for a two-entry fixture and failed with
+  `assert 2 == 1`.
+- **Diagnosis:** The test encoded the previous policy that synthesized silence
+  was always regenerated. The requested augmented-training cache deliberately
+  materializes silence and its augmentation once at startup, so `2` is the
+  correct count.
+- **Resolution:** Updated the expectation and documented that repeated silence
+  accesses reuse the cached augmented feature. No production defect found.
+
 ## 9. Epoch-301 `.fc` cleanup rejected PAI's real branch container and missed its terminal integration
 
 **Date:** 2026-09-13
@@ -1070,3 +1082,14 @@ git diff --check
 ```
 
 ---
+## 2026-09-13 — stale cache test after enabling fixed augmented views
+
+- **Symptom:** `test_precomputed_features_skip_repeated_deterministic_extraction`
+  expected one cached tensor for a two-entry fixture and failed with
+  `assert 2 == 1`.
+- **Diagnosis:** The test encoded the previous policy that synthesized silence
+  was always regenerated. The requested augmented-training cache deliberately
+  materializes silence and its augmentation once at startup, so `2` is the
+  correct count.
+- **Resolution:** Updated the expectation and documented that repeated silence
+  accesses reuse the cached augmented feature. No production defect found.

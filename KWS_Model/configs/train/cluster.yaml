@@ -4,10 +4,14 @@
 augment: true
 epochs: 8
 cluster_epochs: 8
-batch_size: 128
+batch_size: 256
 num_workers: 4
 persistent_workers: true
 prefetch_factor: 2
+cache_features: true
+# Materialize one stronger augmented view per training entry at startup and
+# reuse it throughout this run.
+cache_train_features: true
 lr: 0.005
 weight_decay: 0.0
 label_smoothing: 0.1

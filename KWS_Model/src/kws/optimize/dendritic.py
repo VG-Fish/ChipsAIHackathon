@@ -1693,7 +1693,11 @@ def run_cycle(
     )
 
     datasets, label_map = build_datasets(
-        data_cfg, augment=train_cfg["augment"], seed=train_cfg["seed"]
+        data_cfg,
+        augment=train_cfg["augment"],
+        seed=train_cfg["seed"],
+        cache_features=bool(train_cfg.get("cache_features", True)),
+        cache_train_features=bool(train_cfg.get("cache_train_features", False)),
     )
 
     if teacher_checkpoint and run_id is not None and (
@@ -1961,8 +1965,10 @@ def run_cycle(
             freeze_base_batchnorm_stats(model)
         if kd is not None:
             kd.train()
-        running_losses = {"total": 0.0}
-        train_correct = 0
+        running_losses: dict[str, torch.Tensor] = {
+            "total": torch.zeros((), dtype=torch.float32, device=device)
+        }
+        train_correct = torch.zeros((), dtype=torch.long, device=device)
         train_count = 0
         for features, labels in train_loader:
             features, labels = features.to(device), labels.to(device)
@@ -1991,17 +1997,19 @@ def run_cycle(
             if adapter_scheduler is not None:
                 adapter_scheduler.step()
             for name, value in losses.items():
+                contribution = value.detach() * labels.size(0)
                 running_losses[name] = (
-                    running_losses.get(name, 0.0) + value.item() * labels.size(0)
+                    running_losses.get(name, torch.zeros_like(contribution))
+                    + contribution
                 )
-            train_correct += (logits.argmax(dim=1) == labels).sum().item()
+            train_correct = train_correct + (logits.argmax(dim=1) == labels).sum()
             train_count += labels.size(0)
 
         train_losses = {
-            name: value / train_count for name, value in running_losses.items()
+            name: value.item() / train_count for name, value in running_losses.items()
         }
         train_loss = train_losses["total"]
-        train_acc = train_correct / train_count
+        train_acc = train_correct.item() / train_count
         global_step += len(train_loader)
         if kd is not None:
             kd.eval()

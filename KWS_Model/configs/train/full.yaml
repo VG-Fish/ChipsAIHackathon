@@ -3,10 +3,12 @@
 # that warm-starts the step-2 student.
 augment: true
 epochs: 200
-batch_size: 128
+batch_size: 256
 num_workers: 4
 persistent_workers: true
 prefetch_factor: 2
+cache_features: true
+cache_train_features: true
 lr: 0.001
 weight_decay: 0.0001
 label_smoothing: 0.1
