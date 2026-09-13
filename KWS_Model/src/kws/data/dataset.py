@@ -216,6 +216,7 @@ def build_datasets(
         win_length_ms=data_cfg["features"]["win_length_ms"],
         hop_length_ms=data_cfg["features"]["hop_length_ms"],
         feature_type=data_cfg["features"]["type"],
+        log_mels=data_cfg["features"].get("log_mels", False),
     )
     noise_dir = dataset_root / silence_cfg["background_noise_dir"]
     silence_sampler = SilenceSampler(

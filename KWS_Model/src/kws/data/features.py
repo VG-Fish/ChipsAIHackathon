@@ -5,7 +5,7 @@ import torchaudio
 
 class FeatureExtractor:
     def __init__(self, sample_rate: int, n_mels: int, win_length_ms: float,
-                 hop_length_ms: float, feature_type: str = "logmel"):
+                 hop_length_ms: float, feature_type: str = "logmel", log_mels: bool = False):
         self.feature_type = feature_type
         win_length = int(sample_rate * win_length_ms / 1000)
         hop_length = int(sample_rate * hop_length_ms / 1000)
@@ -26,6 +26,7 @@ class FeatureExtractor:
             self.mfcc = torchaudio.transforms.MFCC(
                 sample_rate=sample_rate,
                 n_mfcc=n_mels,
+                log_mels=log_mels,
                 melkwargs=dict(n_fft=n_fft, win_length=win_length, hop_length=hop_length, n_mels=n_mels),
             )
         elif feature_type != "logmel":
@@ -46,4 +47,5 @@ def build_feature_extractor(data_cfg: dict) -> FeatureExtractor:
         win_length_ms=feat_cfg["win_length_ms"],
         hop_length_ms=feat_cfg["hop_length_ms"],
         feature_type=feat_cfg["type"],
+        log_mels=feat_cfg.get("log_mels", False),
     )

@@ -1,691 +1,620 @@
-# Unified KWS Run Outputs, Metrics, and Resume Plan
+# SparkNet Student Evaluation Plan
 
-## Goal
+**Status:** Phase A done (2026-09-13; see "Phase A results"). Every finding was rechecked on 2026-09-13
+against the paper text, the vendored NeMo code, the released checkpoints'
+tensors and stored hyperparameters, the project source, and the run outputs.
+Corrections from that pass are folded in below.
 
-Give every KWS command one optional, user-selected run directory and keep every
-artifact produced by that run inside it: console logs, epoch metrics, best and
-latest training checkpoints, PerforatedAI (PAI) files, deployable models, and
-reports. A run interrupted after a completed epoch should be able to continue
-from that epoch without losing optimizer or scheduler progress.
+The previous contents of this file, the unified run-outputs, metrics, and
+resume plan, had already been removed from the working tree before this rewrite.
+They remain available with `git show a0eebe9:KWS_Model/PLAN.md`.
 
-This plan is based on the repository's tracked source, configs, tests, project
-documentation, and PAI Skills package. The ignored virtual environments,
-caches, raw data, historical reports, model binaries, and `dendritic_*` run
-directories are generated state, not source. A historical dendritic directory
-was inspected only to confirm PAI's native filenames and output conventions;
-`.env` was not read.
+## Question
 
-## Original baseline and gaps
+Should the framework's step-2 deployment student change from DS-CNN-XS to
+SparkNet (Svirsky, Shaham, and Lindenbaum, "Sparse Binarization for Fast
+Keyword Spotting," Interspeech 2024)?
 
-The bullets in this section describe the repository when this plan was first
-written. The dated post-implementation audit below is the current defect list.
+## Recommendation
 
-- Output paths are split among CLI flags, two YAML files, implicit paths rooted
-  at the current working directory, and stdout. The pipeline alone currently
-  has separate paths for its report, teacher, student, sparsity summary and
-  prefix, clustered graph, quantized graph, ONNX graph, and benchmark report
-  (`configs/train/pipeline.yaml` and
-  `configs/train/dendritic_prune_loop.yaml`).
-- `kws.utils.logging.get_logger` creates stdout-only handlers, so no durable log
-  captures project logging, PAI `print` output, warnings, or tracebacks.
-- `run_finetune` computes epoch `train_loss`, `val_loss`, `val_acc`, and KD loss
-  components, and returns them in memory. `train_model` and distillation reduce
-  that result to a single best validation accuracy, so their histories are
-  lost. The PAI loop computes train accuracy and additional phase information,
-  but KWS does not persist a uniform epoch history.
-- Ordinary training saves only a best-model checkpoint. It does not save the
-  completed epoch, global step, optimizer, scheduler, KD adapter, history, or
-  RNG state. Cluster and QAT best state exists only in memory until the phase
-  completes; the QAT `.pt` is a converted deployment graph, not resumable
-  training state.
-- Pipeline reuse is stage-level reuse of completed artifacts. It is not
-  epoch-level crash recovery. A nonempty partial PAI candidate is currently
-  rejected with advice to resume manually.
-- PAI owns a large family of CSV, PNG, config, and checkpoint files under its
-  `save_name`. The installed PAI version also creates a native `latest.pt` and
-  exposes `save_system`/`load_system` for network plus tracker state, but KWS
-  still needs a sidecar for its optimizer, scheduler, KD adapter, RNG, and
-  uniform metrics.
-- The installed PAI implementation expects a leaf `save_name` and warns that
-  slash-containing relative paths are unsupported. Supplying
-  `<output-dir>/pai/<candidate>` directly is therefore not a valid routing
-  strategy.
-- Raw Speech Commands data and preprocessing caches are large, reusable inputs.
-  They should remain controlled by the data config rather than being copied
-  into every run. The download command's console output can still be logged to
-  a selected output directory.
+Yes, but only after checks. The evidence below makes SparkNet the
+highest-leverage change available to the student: at a similar parameter count
+it reports about ten more points of 12-class accuracy than this project's XS
+student, and it needs about eight times fewer MACs. The paper's accuracy was
+measured on a different class balance, feature front end, and training recipe,
+though, and the pipeline is wired to DS-CNN in about eight modules. So:
 
-## Post-implementation audit findings (2026-09-12)
+1. **Phase A:** score the released checkpoints on this project's split, with no
+   training.
+2. **Phase B:** run a short, recipe-controlled step-2 A/B.
+3. **Phase C:** refactor the framework only if Phase B passes.
 
-The implementation is not yet plan-complete. The existing Python and PAI
-Skills test suites pass, but the audit found the following unresolved defects.
-All items below must be fixed and covered by regression tests before using the
-definition of done.
+## Sources and how they were examined
 
-Verification after the current fix pass: `184` Python tests passed,
-`PAI Skills/test.sh` passed all `26` checks, compilation passed, and
-`git diff --check` passed. The remaining unchecked items are not masked by
-those passing suites.
+- **Paper:** <https://www.isca-archive.org/interspeech_2024/svirsky24_interspeech.pdf>.
+- **Reference code:** <https://github.com/jsvir/sparknet> at commit `e66915e`,
+  MIT license. Read `model.py`, `inference.py`,
+  `conf/cfg_labels_12_channels_16_data_v2.yaml`, and the vendored NeMo
+  `parts/submodules/jasper.py` and `modules/audio_preprocessing.py`. Inspected
+  the tensors and the stored hyperparameters and callbacks of the released
+  `ckpt/kws_C_{4,8,16,32}.ckpt`. Copies of the checkpoints and the license are
+  in `models/checkpoints/external/sparknet/`, which is gitignored.
+- **12-class run:** metrics JSONL and logs in
+  `outputs/full-run-20260912T063022Z`, read 2026-09-13. The run is **not
+  running**. It stopped on a `KeyboardInterrupt` at 12:36:40 on 2026-09-13,
+  three epochs into candidate w17's PAI phase (best 79.29% so far), although
+  `reports/sparsity.yaml` still says `status: running`.
+- **Cost measurements:** a scratch SparkNet reimplementation, not committed and
+  sketched in Finding 7, measured with this project's `kws.utils.profile`
+  hooks.
 
-### Blocking training failures
+## Findings
 
-- [x] `DistillationCriterion` has no `state_dict` or `load_state_dict`, while
-  the shared training loop calls both when saving and restoring checkpoints.
-  Every KD-backed path can therefore fail at its first completed checkpoint or
-  on resume. Define an explicit KD state contract that includes trainable
-  adapters and use it consistently in student distillation, pruning/KD,
-  clustering/KD, QAT/KD, and post-PAI KD resume.
-- [x] `kws.optimize.distill` calls `atomic_torch_save` with three arguments even
-  though the helper accepts two. The first improved validation epoch crashes
-  before the best checkpoint and latest state can be committed.
+### 1. Where the 12-class pipeline currently stands
 
-### Resume and checkpoint correctness
+Values are best validation accuracy unless noted. Test accuracy comes from
+`ERRORS.md`.
 
-- [x] `kws.optimize.prune --resume` does not resolve the phase's standard
-  `latest.pt`; resume only occurs when `--resume-from` is also supplied. Make
-  the flag behave like train, distill, and QAT, and prevent a fresh epoch-1 run
-  from appending to old metrics.
-- [x] The PAI sidecar stores adapter optimizer/scheduler state but not the KD
-  adapter weights/state. A resumed PAI cycle therefore uses a newly initialized
-  adapter. Save and restore the adapter before loading its optimizer.
-- [x] Standalone `kws.optimize.dendritic` has no `--resume` or `--resume-from`
-  option and does not safely handle a nonempty native PAI candidate when its KWS
-  sidecar is absent. It must reject incompatible partial state, resume a valid
-  pair, or reuse explicitly completed metadata; it must never silently
-  overwrite the candidate.
-- [x] PAI pair validation accepts missing native checkpoint/digest metadata in
-  some paths, and loads the sidecar model with `strict=False` without validating
-  missing or unexpected keys. Require both members, both digests, compatible
-  metadata, and an exact expected state schema.
-- [x] The first post-restructure PAI sidecar/native save occurs before the
-  adapter optimizer is reset. An interruption before the second save can pair a
-  post-restructure model with a pre-restructure optimizer. Make the paired
-  commit represent one internally consistent epoch boundary.
-- [x] QAT writes `latest.pt` but never writes the standard
-  `models/checkpoints/quantize/best.pt`; its in-memory best state is only used
-  for the exported TorchScript graph. Persist distinct best and latest training
-  checkpoints.
-- [x] Post-PAI KD resume can return `no_improvement` without ever creating
-  `best.pt`. The first completed validation epoch must establish a best
-  checkpoint even when its metric is zero or fails to improve over imported
-  metadata.
-- [x] Cluster `best.pt` is assembled by copying the full latest training
-  checkpoint and replacing only `model_state_dict`, leaving it labeled as a
-  latest-style `kws_training_state`. Give best checkpoints an unambiguous,
-  loadable schema consistent with every other phase.
+| Stage | Params | Accuracy |
+|---|---|---|
+| Teacher DS-CNN-L | 469,604 | 97.69% val (epoch 57) |
+| Student DS-CNN-XS, distilled from scratch | 4,096 | 85.07% val (epoch 167), 83.64% test |
+| w18 prune + KD | 1,830 | 79.38% (best at epoch 39 of 40, still rising) |
+| w18 PAI (`.fc` dendrite) | 2,058 | 82.68% (epoch 276) |
+| w18 resume KD | 2,070 | 82.53% |
+| w17 prune + KD | 1,750 | 78.94% |
+| w17 PAI | — | 79.29% after 3 epochs, then interrupted |
 
-### Metrics, manifests, and provenance
+The project's reference target is Edge Impulse's ~3,800 parameters at ~92%.
+Both w18 and w17 are below the search's 0.85 accuracy floor.
 
-- [x] PAI epoch metrics discard the named KD classification, response, and
-  feature losses and record only total loss. They also omit the adapter
-  optimizer learning rate. Persist every component required by this plan.
-- [x] `MetricsRecorder` raises on a malformed trailing JSONL fragment instead
-  of trimming the incomplete final record. Recover only the trailing fragment,
-  preserve every prior valid record, then reconcile metrics against the latest
-  checkpoint.
-- [x] A forced/fresh rerun can restart at epoch 1 while retaining an existing
-  recorder history, producing duplicate epoch records. Fresh and forced phase
-  execution must archive, replace, or explicitly reset its canonical history.
-- [x] Registering an artifact path a second time returns its old manifest
-  record without refreshing digest and size. Repeated invocations that
-  overwrite reports or checkpoints therefore leave stale integrity metadata;
-  the final containment/integrity failure is then swallowed by logging cleanup.
-  Refresh the record atomically and do not suppress manifest finalization
-  errors.
-- [x] The manifest schema does not store the required effective-config digest,
-  and the pipeline snapshots only a subset of configs. Record the pipeline,
-  data, model, phase train, sparsity, cluster, quantization, benchmark, and
-  effective merged configs, plus warm-start inputs and digests.
-- [x] Tie checkpoint run IDs to the manifest run ID. `ArtifactLayout` now owns
-  one stable manifest ID per output root; every project-owned training,
-  clustering, pruning, QAT, PAI, native-PAI, packed-codebook, and deployment
-  checkpoint records that ID, while resume and pipeline reuse reject mismatched
-  checkpoints. External input checkpoints remain allowed as recorded inputs.
-- [x] Resume fingerprints are incomplete for QAT, clustering, post-PAI KD, and
-  pruning. Include data/model recipes, source and teacher content digests,
-  upstream graph digests, and all schedule-critical optimization settings so an
-  incompatible run cannot be accepted accidentally.
+**The w18 PAI gain is not a dendrite effect.** PAI starts in neuron mode,
+which is plain continued KD on the base model. Before the first restructure at
+epoch 105, that base-only phase had already reached **82.58% at epoch 80**. The
+best model with the dendrite reached 82.68%, a difference of 0.10 points, about
+5 of 5,185 validation clips. One validation standard error is about 0.53
+points. The +3.3 points over prune + KD came from more training epochs, which
+also means prune + KD's 40-epoch budget is too short.
 
-### Output containment, portability, and documentation
+`reports/dendritic_prune_loop.yaml` (91.9% at 2,946 deployed params) is **not** a
+12-class baseline. It is the older 6-class task:
 
-- [x] Several active-root entrypoints reduce user-provided output paths to
-  `Path(...).name`. Absolute paths and `..` escapes are therefore silently
-  rewritten instead of rejected. Evaluation, ONNX export, benchmarking, PTQ,
-  QAT, pipeline output mapping, and artifact stage/phase helpers must validate
-  the original value before any normalization.
-- [x] Pipeline and sparsity reports store absolute run-owned output paths, and
-  candidate reuse consumes those literal paths. Store run-owned outputs
-  relative to the run root so moving a complete run does not break reuse.
-- [x] The README documents the unified pipeline report as
-  `reports/pipeline/pipeline.yaml`, while the plan and implementation use
-  `reports/pipeline.yaml`. Make the documented tree and actual layout agree.
-- [ ] The current test suite does not exercise the fatal KD checkpoint path or
-  the required real/dependency-backed PAI interruption/resume contract. Passing
-  tests are not completion evidence until the missing cases below are added.
+- its `base_params: 1716` equals the 12-class XXS count of 1,830 minus the 114
+  parameters the 6-way head saves;
+- its source is `ds_cnn_xs_distilled_warm.pt`, not `_12class`;
+- its accuracy floor is 0.90.
 
-## Required behavior
+### 2. Deployment cost measured with the project's profiler
 
-1. Add `--output-dir PATH` to every output-producing `python -m kws...`
-   entrypoint. Add an optional top-level `output_dir` to the pipeline config.
-2. Treat `PATH` as the exact run root; do not silently add a timestamped parent
-   or child. Reusing the same path is how a user resumes the same run.
-3. With an active output root, every project-owned runtime artifact must resolve
-   below it. Input configs, input/warm-start checkpoints, and the shared dataset
-   remain external inputs and are recorded by path and digest rather than
-   copied.
-4. Without an output root, retain today's paths, required flags, and best
-   checkpoint formats so existing commands and old model artifacts keep
-   working.
-5. Store the best deployable weights separately from `latest.pt`, which is a
-   full training-state checkpoint written after every completed epoch.
-6. Persist every metric the code computes during training, including accuracy,
-   losses, KD components, learning rate, and PAI phase/cost fields where they
-   exist. JSONL is the canonical record; TensorBoard may mirror it but must not
-   be the only copy.
-7. Resume only when the checkpoint's recipe and upstream artifact digests match
-   the requested run. Never silently turn an incompatible resume into a fresh
-   run.
-8. Use atomic replacement for checkpoints, manifests, YAML/JSON summaries, and
-   converted model metadata. A crash must leave either the previous valid file
-   or the new valid file, not a partially written file.
-9. Preserve all invocations and failures in append-only/per-invocation logs.
-   Do not record `.env` contents, credentials, or tokens in logs or manifests.
+Input is the real feature shape, 40 log-mel bins × 101 frames. MACs count only
+Conv2d and Linear layers, exactly as the Pareto search does. Peak activations
+use the profiler's liveness estimate, in elements, which equals bytes at int8.
 
-## Output directory contract
+| Model | Params | MACs | Peak activations |
+|---|---|---|---|
+| DS-CNN-XS | 4,096 | 3,358,320 | 81,600 |
+| DS-CNN-XXS (w18 base) | 1,830 | 1,450,656 | 36,720 |
+| DS-CNN w15 base | 1,596 | 1,267,020 | 36,720 |
+| SparkNet C=16, log-mel 40 | 4,852 | 418,120 | 8,080 |
+| SparkNet C=12, log-mel 40 | 3,584 | 295,708 | 8,080 |
+| SparkNet C=8, log-mel 40 | 2,508 | 192,688 | 8,080 |
+| SparkNet C=16, MFCC 32 (paper input) | 4,636 | 396,304 | 6,464 |
+| SparkNet C=8, MFCC 32 (paper input) | 2,356 | 177,336 | 6,464 |
+| SparkNet C=4, MFCC 32 (paper input) | 1,504 | 96,940 | 6,464 |
 
-Use one shared `ArtifactLayout` to produce paths; callers must not concatenate
-their own run-root strings.
+- **Counting method:** the paper reports 454.5K MACs for C=16 using `thop`.
+  `thop` also charges every BatchNorm 4 × its input elements and ignores conv
+  bias. A `thop`-style count of the scratch model reproduces the paper exactly
+  for C=16 (454,480) and approximately for C=32 (1,170,368 against "1.2M").
+  This project's hooks count 396,304 for the same C=16 model. Compare ratios,
+  not absolute MACs across the two methods.
+- **Size relative to XS:** SparkNet C=16 on log-mel 40 has 18% *more*
+  parameters than XS (4,852 against 4,096) and 8.0× fewer MACs. C=12 is the
+  closest match under XS's parameter budget, with 3,584 parameters and 11.4×
+  fewer MACs.
+- **Stale shape comments:** model config comments say the input is (40, 98),
+  but `FeatureExtractor` emits 101 frames. Models derive `input_shape` from
+  data, so only the comments are affected.
+- **Receptive field** in feature frames, at a 10 ms hop:
+  - DS-CNN-XS sees **13 frames (~130 ms)** before global average pooling: the
+    5-wide stride-2 stem, then two 3×3 depthwise convs at jump 2.
+  - DS-CNN-L sees 34 frames.
+  - SparkNet sees **71 frames (~710 ms)**: 1 + 10 + 14 + 18 + 28.
 
-```text
-<output-dir>/
-  manifest.yaml
-  .run.lock
-  logs/
-    2026-09-11T120000_kws.pipeline.log
-    2026-09-11T153000_kws.pipeline.log
-  metadata/
-    configs/                         # effective non-secret YAML snapshots
-  metrics/
-    teacher/train.jsonl
-    student/distill.jsonl
-    sparsity/w18/prune_kd.jsonl
-    sparsity/w18/pai.jsonl
-    sparsity/w18/resume_kd.jsonl
-    cluster/codebook.jsonl
-    quantize/qat.jsonl
-    summaries.yaml
-  models/
-    checkpoints/
-      teacher/{best.pt,latest.pt}
-      student/{best.pt,latest.pt}
-      sparsity/w18/prune_kd/{best.pt,latest.pt}
-      sparsity/w18/pai/latest.pt     # KWS sidecar, not PAI's native file
-      sparsity/w18/resume_kd/{best.pt,latest.pt}
-      cluster/{best.pt,latest.pt}
-      quantize/{best.pt,latest.pt}
-    exported/
-      clustered.pt
-      kws_int8.pt
-      kws_int8.pt.yaml
-      kws_int8.pt.codebook.pt
-      kws.onnx
-  pai/
-    candidates/w18/                  # native PAI CSV/PNG/config/checkpoints
-      latest.pt                      # PAI network/tracker format
-      ...
-    reload/                          # reconstruction-only PAI state if retained
-  reports/
-    pipeline.yaml
-    sparsity.yaml
-    evaluation.json
-    benchmark.json
-    export.json
-    ptq.json
+  Keywords last roughly 300–800 ms. BC-ResNet-0.625 (4,585 parameters) reports
+  95.4% on SC2 and SparkNet C=16 (4,636) reports 95.7%, while XS sits at 83.6%
+  test here. Those papers use 1× unknown/silence balance and this project uses
+  2× (Finding 5), so the gap is suggestive, not controlled. It still points to
+  XS's temporal reach as a likely cause of its deficit, more than its parameter
+  budget.
+
+### 3. The reference architecture, verified from the released checkpoints
+
+SparkNet processes MFCC frames as 1D sequences, with frequency bins as channels:
+
+| Layer | Kernel | Output | Residual |
+|---|---|---|---|
+| Time-channel separable conv 1 | 11 | C | no |
+| Time-channel separable conv 2 | 15 | C | yes |
+| Time-channel separable conv 3 | 19 | C | yes |
+| Time-channel separable conv 4 | 29 | C | yes |
+| 1×1 gate conv (with bias) → BN → tanh | 1 | 32 | no |
+| Mean over time → Linear | — | 12 | no |
+
+Each separable conv is a depthwise conv, a pointwise conv (neither has a bias),
+BN, and ReLU, with `same` padding K // 2. The residual path is **not an
+identity**: NeMo's `JasperBlock` adds a 1×1 conv plus BN, and the ReLU follows
+the residual sum.
+
+**BatchNorm epsilon differs by layer.** The block and residual BNs are built
+as `BatchNorm1d(C, eps=1e-3, momentum=0.1)` (vendored `jasper.py:962`). The
+gate BN is a default `BatchNorm1d(32)` with eps 1e-5. A port that uses the
+default eps everywhere will not reproduce the checkpoints' outputs.
+
+**Gate width.** The paper defines the gate z as "the same size as its input x"
+(F channels), so that z can mask x. The released `model.py` hard-codes 32
+(`Conv1d(C, 32, 1)`, `Linear(32, 12)`), which equals F for the paper's MFCC-32
+input. The released inference path never multiplies z by x, so the width is
+free in practice, and SparkNet can consume this project's 40-bin log-mel
+features directly. At 40 bins the paper-faithful width would be 40: at C=16
+that is 5,100 parameters and 431,144 project MACs, against 4,852 and 418,120
+with width 32.
+
+Parameter counts, excluding the checkpoint's preprocessor buffers:
+
+| C | Checkpoint | Paper | Paper MACs (`thop`) | Paper SC2 accuracy |
+|---|---|---|---|---|
+| 32 | 11,500 | 11,500 | 1.2M | 97.0–97.1% |
+| 16 | 4,636 | 4,636 | 454.5K | 95.7% |
+| 8 | 2,356 | 2,292 | 190K | 92.1% |
+| 4 | 1,504 | 1,416 | 105K | 83.5% |
+
+The paper's C=8 and C=4 rows are below the released checkpoints in parameters
+(2,292 against 2,356; 1,416 against 1,504) and in MACs. The `thop`-style count
+gives 212,888 and 121,180 against the paper's 190K and 105K. The same counting
+method reproduces C=16 exactly, so the released C=8 and C=4 checkpoints are
+probably not the models behind those rows, and **their accuracy may not match
+92.1% and 83.5%**. The C=32 accuracy appears as 97.0 in Table 3 and 97.1 in
+Table 4.
+
+Each released checkpoint is one training run, selected by minimum
+`val_loss_gates`: C=16 at epoch 195 (run `seed_4`) and C=8 at epoch 191.
+
+Checkpoint tensor names, needed for the Phase A port:
+
+- **Separable convs:** `fs.encoder.{i}.mconv.0` is the depthwise conv
+  `(C_in, 1, K)`; `mconv.1` is the pointwise conv `(C_out, C_in, 1)`; `mconv.2`
+  is the BN.
+- **Residual path:** `fs.encoder.{i}.res.0.0` is the 1×1 conv and `res.0.1` its
+  BN, for i = 1..3.
+- **Gate:** `output_layer.0` is the gate conv (with bias) and `output_layer.1`
+  its BN.
+- **Classifier:** `freq_linear_proj`.
+- **Front end:** the preprocessor stores `dct_mat (32, 32)`, a mel filterbank
+  `(257, 32)`, and a `window (400,)`.
+
+The Lightning checkpoint pickles OmegaConf/NeMo objects. Loading it needs those
+packages installed, or a restricted unpickler. The restricted version resolves
+only `torch`, `torch._utils`, `torch.storage`, `collections.OrderedDict`, and
+plain builtin containers and scalars, and replaces every other class with an
+inert stub. This loads `state_dict` from all four checkpoints (verified).
+
+### 4. What "sparse binarization" does and does not buy
+
+- **Training:** `z = clamp(tanh(u) + 0.5 + ε, 0, 1)` with `ε ~ N(0, 0.5²)`, and
+  the classifier sees `fc(mean_t z)`.
+- **Inference:** the noise is disabled, so `z = clamp(tanh(u) + 0.5, 0, 1)`.
+  This is a continuous hard sigmoid, **not a binary tensor**, and nothing in
+  `inference.py` thresholds it. The deployed graph has no binary or sparse
+  kernel to exploit.
+- **Where the speedup comes from:** entirely from the 1D time-channel separable
+  architecture.
+- **Loss as actually implemented:** `100·CE + 1·mean(Φ((0.5 + μ)/σ))`, with σ =
+  0.5. The paper's "λ = 1e+2" multiplies the cross-entropy, not the sparsity
+  term. AdamW is invariant to the overall loss scale, so start a port with a
+  sparsity weight of about 0.01 × the CE weight.
+- **The ×100 also rescales the SGD recipe.** Relative to a loss with CE weight
+  1, SGD on `100·CE + reg` is SGD with 100× the learning rate, 1/100 of the
+  weight decay, and a 0.01 sparsity weight. The configured lr 1e-2 and weight
+  decay 1e-3 are therefore an effective lr of 1.0 and weight decay of 1e-5 on
+  the CE scale. Copying the numbers onto an unscaled loss does not reproduce
+  the reference.
+- **Ablation:** removing the noise, clipping, and sparsity term costs one point
+  (94.7% versus 95.7%). The stochastic gate is a modest regularizer, not the
+  source of the efficiency.
+
+### 5. Why the published accuracy will not transfer directly
+
+- **Class balance:** the reference manifests rebalance `_unknown_` and
+  `_silence_` to 1× the keyword-class mean. This project uses 2×, a harder task
+  and one closer to deployment.
+- **Evaluation data:** according to the checkpoint hyperparameters, the
+  reference trains and tests on
+  `google_speech_commands_v2_bcresnet/{train,valid,test}_manifest_balanced.json`.
+  That is a BC-ResNet-style preparation whose script is not released. This
+  project samples its own unknown pool from the official lists and synthesizes
+  silence with gain 0.1–1.0.
+- **Front end:** NeMo `AudioToMFCCPreprocessor`, which wraps
+  `torchaudio.transforms.MFCC` with:
+  - `log_mels=True`, meaning `ln(mel_power + 1e-6)`;
+  - 32 mel bins and 32 coefficients, DCT-II with `ortho` norm;
+  - `n_fft` 512, a 400-sample periodic Hann window, and a 160-sample hop;
+  - torchaudio defaults for the rest (`center=True`, reflect padding, power 2,
+    HTK mel scale, no mel norm).
+
+  With torchaudio 2.11, this configuration reproduces the checkpoint's stored
+  `dct_mat`, mel `fb`, and `window` buffers to within 4.3e-6 (verified).
+
+  NeMo right-pads each batch's waveforms with zeros to the longest clip, then
+  symmetrically zero-pads or randomly crops the features to 101 frames. Almost
+  every batch contains a full 1 s clip, so this matches this project's
+  right-pad of every clip to 16,000 samples, which yields 101 frames.
+
+  **This project's existing `type: mfcc` path is not equivalent.** It leaves
+  torchaudio's default `log_mels=False`, which is dB with `top_db` 80. The
+  project's default front end is log-mel with 40 bins and a 30 ms window.
+- **Recipe:**
+
+  | Setting | Reference config | This project |
+  |---|---|---|
+  | Optimizer | SGD, momentum 0.9, lr 1e-2, weight decay 1e-3, on `100·CE` (see Finding 4) | AdamW, lr 1e-3 |
+  | Schedule | warmup 5%, hold 40%, then poly-2 decay to 1e-6 | cosine |
+  | Epochs / batch | 200 / 128 | 200 / 256 |
+  | Time shift | ±100 ms, p = 0.8 | ±150 ms circular roll |
+  | Noise | white noise −90 to −46 dB, p = 0.8 | background noise, 75%, down to −5 dB SNR |
+  | Other augmentation | none (no SpecAugment) | speed 0.85–1.15, two SpecAugment mask pairs |
+  | View caching | new augmentation every epoch | `cache_train_features` fixes one augmented view per entry for the whole run |
+
+  Notes on the reference column:
+  - The paper, the repository YAML, and the C=4, C=8, and C=32 checkpoints
+    agree on it.
+  - The released **C=16 checkpoint differs:** its stored hyperparameters show
+    lr 0.1 and hold ratio 0.
+  - C=32 additionally used Freesound background noise at 0–20 dB SNR.
+  - The paper's prose describes the decay as covering "the remaining 85%",
+    which does not add up with 5% warmup and 40% hold.
+
+- **Seeds:** the paper reports mean ± std but does not say over how many runs,
+  and each released checkpoint is a single run. This project's comparisons are
+  single-seed.
+
+### 6. Confound: tiny students underfit the current recipe
+
+Last-epoch training accuracy, measured in train mode with dropout on and the
+fixed augmented views, compared with validation accuracy:
+
+| Model | Train accuracy | Val accuracy |
+|---|---|---|
+| XS student | 64.7% | 84.6% |
+| w18 PAI | 60.0% | 82.1% |
+| Teacher | 96.1% | 97.4% |
+
+The augmentation and dropout strength suits DS-CNN-L, not a few-thousand-parameter
+student. A SparkNet A/B that changes architecture and recipe together will
+not show which one mattered. A lighter recipe is also an independent,
+architecture-free lever for the existing DS-CNN students.
+
+### 7. Fit with the compression framework
+
+**Implementation shape that keeps most of the framework working:** build the 1D
+convs as `nn.Conv2d` with `(1, K)` kernels on a `(B, F, 1, T)` view of the
+`(B, 1, F, T)` input. Use `BatchNorm2d`, name the classifier `.fc`, and expose
+`forward_features` (returning `mean_t z`, shape `(B, 32)`) and
+`classify_features`. Keep the 40-bin log-mel input, so the fixed teacher and
+the student share one feature view. This is the shape used for Finding 2:
+
+```python
+class TCSBlock(nn.Module):  # register each Conv2d directly before its own BN
+    def __init__(self, cin, cout, k, residual, bn_eps=1e-3):  # 1e-3 matches NeMo
+        super().__init__()
+        self.depthwise = nn.Conv2d(cin, cin, (1, k), padding=(0, k // 2), groups=cin, bias=False)
+        self.pointwise = nn.Conv2d(cin, cout, 1, bias=False)
+        self.bn = nn.BatchNorm2d(cout, eps=bn_eps)
+        self.res_conv = nn.Conv2d(cin, cout, 1, bias=False) if residual else None
+        self.res_bn = nn.BatchNorm2d(cout, eps=bn_eps) if residual else None
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        y = self.bn(self.pointwise(self.depthwise(x)))
+        if self.res_conv is not None:
+            y = y + self.res_bn(self.res_conv(x))
+        return self.relu(y)
+
+# SparkNet.forward: x.permute(0, 2, 1, 3) -> 4 TCSBlocks (K = 11, 15, 19, 29;
+# residual on blocks 2-4) -> gate_conv (bias) -> gate_bn (default eps) -> tanh
+# -> (+ N(0, 0.5^2) noise in training) -> clamp(+0.5, 0, 1) -> mean over time -> fc
 ```
 
-The exact model basenames may remain configurable, but their category and parent
-directory may not. Stage and phase names must be stable because resume and
-report links depend on them. Store paths in the manifest and reports relative
-to the run root when possible so the entire directory can be moved.
+**Expected to carry over with that shape:**
 
-Every checkpoint in the tree above carries an explicit `run_id` field equal to
-this run's `manifest.yaml` `run_id`: teacher/student training checkpoints,
-every `sparsity/<candidate>/{prune_kd,resume_kd}` checkpoint, the PAI sidecar
-at `sparsity/<candidate>/pai/latest.pt` and its paired native
-`pai/candidates/<candidate>/latest.pt`, cluster and quantize checkpoints, and
-the exported/packed-codebook deployment artifacts under `models/exported/`.
-`ArtifactLayout.manifest_run_id` is the single source of that ID per output
-root; `validate_checkpoint_run_id` and pipeline stage reuse reject any
-checkpoint whose `run_id` does not match it. External input checkpoints
-(`--checkpoint`, `--teacher-checkpoint`, `--resume-from` pointing outside the
-active root) are exempt and are instead recorded as manifest inputs by path
-and digest.
+- **Cost profiling:** `count_macs` hooks only `Conv2d`/`Linear` and reads
+  `kernel_size[0] * kernel_size[1]` (`src/kws/utils/profile.py:64`, `:86`). A
+  `Conv1d` implementation would silently contribute zero MACs, which is the
+  main reason to use `Conv2d`. `weight_memory_bytes` and
+  `deployed_parameter_count` count every float parameter. After quantization,
+  though, they unpack only `nnq.Conv2d`/`nnq.Linear` (`:186`, `:208`), so a
+  quantized `Conv1d` would be dropped as well.
+- **Clustering:** `CLUSTERABLE_TYPES` is `Conv2d`/`Linear`. Every layer has ≥ 64
+  weights at C=16. At C=8 the 8×8 pointwise and residual convs sit exactly at
+  the `min_weights: 64` threshold.
+- **N:M masks:** the depthwise kernels have input dimensions 11, 15, 19, and 29,
+  so they are skipped as indivisible. The pointwise, gate, and classifier layers
+  are eligible.
+- **QAT fusion:** Conv+BN fusion discovers adjacent `Conv2d` → `BatchNorm2d`
+  children in registration order (`src/kws/optimize/quantize_qat.py:186`). The
+  block above must keep each conv registered immediately before its own BN.
+- **KD:** the feature adapter becomes `Linear(32, 276)`, and
+  `supports_pooled_features` accepts a 2D feature tensor.
+- **PAI:** the `fc_only` conversion targets the module id `.fc`.
+- **Noise handling:** `evaluate_loss_acc` runs in eval mode, so validation sees
+  the noise-free gate.
+- **Export:** ONNX export and TorchScript benchmarking consume a live module.
 
-### Path and precedence rules
+**Needs new code:**
 
-- `--output-dir` overrides `pipeline.yaml:output_dir`.
-- If neither is present, use all existing CLI/YAML output paths unchanged.
-- Once a root is active, legacy output flags/fields may provide relative names
-  below the appropriate category. Reject an absolute path or `..` traversal
-  that escapes the root. Do not silently write the conflicting path.
-- Input-role options (`--checkpoint` on evaluation/optimization,
-  `--teacher-checkpoint`, `--student-checkpoint`, data/model/train configs) are
-  never rebased. Resolve them to absolute paths before entering PAI's working
-  directory.
-- Output-role options (`kws.train --checkpoint`, every `--out-checkpoint`,
-  `--report`, `--onnx-*-path`, pipeline report/checkpoint fields,
-  `save_prefix`) are mapped by `ArtifactLayout` when a root is active.
-- With `--output-dir`, formerly required output-only flags become optional and
-  use the standard paths above. With no root they remain required for backward
-  compatibility.
-- Acquire an advisory `.run.lock` while mutating the run. Reject a second writer
-  instead of allowing two PAI jobs or metric writers to corrupt one directory.
-  Read-only evaluation can use its own invocation log but must serialize report
-  and manifest updates.
+- **Model registry.** `build_ds_cnn` is called directly for the student in
+  `src/kws/train.py:632`, `src/kws/optimize/distill.py:154`,
+  `src/kws/evaluate.py:26`, `src/kws/optimize/prune.py:391`,
+  `src/kws/optimize/dendritic.py:577`, and
+  `src/kws/optimize/quantize_qat.py:576`. The teacher builds in
+  `src/kws/optimize/kd.py:162` and `src/kws/pipeline.py:259` can stay DS-CNN.
+- **Auxiliary-loss hook.** Both loss sites compute the loss inline:
+  `run_finetune` (`src/kws/train.py:168`) computes plain CE at `:355` and the
+  KD loss at `:366`, and the PAI loop does so at
+  `src/kws/optimize/dendritic.py:1990`. The sparsity term must reach all of
+  them.
+- **Residual-aware structured pruning.** `prune_ds_cnn`
+  (`src/kws/optimize/prune.py:69`) threads keep-masks through a plain chain. In
+  SparkNet, block 1's output and every residual branch share one channel set,
+  so a single keep-mask must cover all four blocks plus the residual convs. The
+  gate width is a second pruning axis, and kernel length a possible third.
+- **Sweep plumbing keyed on DS-CNN structure:**
+  - `_source_block_width` and `_target_model_cfg`
+    (`src/kws/optimize/dendritic_prune_loop.py:273`, `:286`) read
+    `block_channels`;
+  - `build_cycle_base` and `estimate_one_dendrite_params`
+    (`src/kws/optimize/dendritic.py:568`, `:605`) assume `.stem` and `.blocks`;
+  - `configure_perforatedai` tracks `DSConvBlock`
+    (`src/kws/optimize/dendritic.py:1460`–`1468`);
+  - the pipeline reads `block_channels[0]` (`src/kws/pipeline.py:630`).
+- **Eager int8 conversion.** The residual `+` needs `FloatFunctional.add`.
+  The `+ 0.5` can be removed from the graph instead of using `add_scalar`,
+  because `clamp(t + 0.5, 0, 1) = clamp(t, -0.5, 0.5) + 0.5`. After the mean,
+  the constant becomes `0.5 · W.sum(dim=1)`, which folds into the `fc` bias.
+  Tanh uses fixed quantization parameters. Whether this torch version's eager
+  `convert` handles `Tanh`, the clamp, and the mean has **not** been tested.
+  Add a convert-and-parity test.
+- **Activation-memory estimate.** The leaf-pair estimate does not charge the
+  residual input a block holds while its main branch runs, which undercounts
+  by up to C×T elements per block. That changes the reported peak only when
+  3·C·T exceeds the 2·F·T input peak, which means C ≥ 27 at 40 bins. For
+  example, C=32 on MFCC-32 needs 9,696 elements, not the 6,464 reported. The
+  C=16 peak of 8,080 is unaffected. Charge it explicitly anyway.
+- **Target runtime.** Whether ESP-DL or TFLite Micro supports int8 Tanh, Clip
+  (or Min/Max), Add, and Mean on the ESP32 has **not** been verified.
 
-## Shared implementation components
+### 8. Effect on the dendrite story
 
-### 1. Artifact layout and run manifest
+**The current DS-CNN evidence for dendrites is unproven.** Finding 1 shows that
+w18's PAI gain matches what PAI's own base-only phase reached before any
+dendrite was added. Any dendrite claim, on DS-CNN or SparkNet, needs a
+no-dendrite control trained for the same number of epochs.
 
-Add `src/kws/utils/artifacts.py` with:
+At C=16, SparkNet's reported accuracy leaves little gap for dendrites to close.
+The PAI claim becomes "SparkNet C=8 or C=12 plus dendrites approaches C=16 at
+fewer parameters or MACs," and it has to beat that matched-epoch control.
 
-- `ArtifactLayout(root)` and typed helpers for logs, phase metrics, best/latest
-  checkpoints, PAI candidate directories, exported models, and reports.
-- Descendant checks based on resolved paths, directory creation, a run lock,
-  atomic text/JSON/YAML writers, and atomic `torch.save` through a temporary file
-  in the destination directory followed by `Path.replace`.
-- A manifest schema containing a format version, run ID, invocation IDs,
-  command/argv, start/end timestamps, running/completed/failed/interrupted
-  status, seed, device and package versions, git commit plus dirty boolean,
-  effective config digests, upstream input paths/digests, and produced artifact
-  path/digest/size. Never serialize environment variables or `.env` contents.
-- A final containment audit over every artifact registered in the manifest.
+An `.fc`-only dendrite on SparkNet only makes a 32→12 head nonlinear. The
+reference ablation does not settle whether the head is a bottleneck. Its
+"auxiliary larger classifier" was a separate MatchboxNet-4x1x64 that read the
+gated input x⊙z and added a second CE loss during training (95.6% against
+95.7%), not a larger replacement head. Whether an `.fc` dendrite helps
+SparkNet, or whether the gate conv is the better perforation target, has to be
+measured.
 
-Add `KWS_Model/outputs/` to the root `.gitignore` as the documented local
-default. Keep existing legacy ignore patterns. An arbitrary directory name
-inside the repository cannot be dynamically ignored, so recommend either the
-ignored default or a path outside the checkout.
+## Plan
 
-### 2. Durable console logging
+### Phase A: score the released checkpoints on this split (no training)
 
-Refactor `src/kws/utils/logging.py` so logger creation is separate from one-time
-run configuration.
+Scope: no training, no PAI, and no `.env`. Do not touch the pruning, PAI,
+clustering, or QAT code. Inputs are the checkpoints in
+`models/checkpoints/external/sparknet/` (see Sources) and the run's XS student
+at
+`outputs/full-run-20260912T063022Z/models/checkpoints/student/ds_cnn_xs_distilled_warm_12class.pt`
+(12 classes, val_acc 0.8507).
 
-- Configure the root/project logger once per CLI invocation with terminal and
-  UTF-8 file output; remove/close only handlers installed by KWS.
-- Tee Python stdout and stderr to the invocation log so PAI prints, warnings,
-  and tracebacks are captured as well as `logging` records. Install the tee
-  before creating stream handlers so handlers do not retain the old stream.
-- Append a clear invocation start/end record and flush on normal exit,
-  `KeyboardInterrupt`, and error. Preserve normal terminal behavior.
-- If distributed execution is later enabled, use rank-qualified logs and allow
-  only rank zero to update shared manifests/metrics.
+- [x] **A1. Front-end option.**
+  - Add `log_mels: bool = False` to `FeatureExtractor`
+    (`src/kws/data/features.py`) and pass it to `torchaudio.transforms.MFCC`.
+    The default must leave current behavior unchanged.
+  - Both construction sites, `build_feature_extractor` and
+    `src/kws/data/dataset.py:214`, read `features.get("log_mels", False)`.
+  - Add `configs/data/speech_commands_v2_mfcc32.yaml`, a copy of
+    `speech_commands_v2.yaml` whose `features` block is `type: mfcc`,
+    `n_mels: 32`, `win_length_ms: 25`, `hop_length_ms: 10`, `log_mels: true`.
+    This yields `(1, 32, 101)` for a 16,000-sample clip.
+  - Test: the extractor matches `torchaudio.transforms.MFCC(sample_rate=16000,
+    n_mfcc=32, log_mels=True, melkwargs=dict(n_fft=512, win_length=400,
+    hop_length=160, n_mels=32))` and differs from `log_mels=False`.
+- [x] **A2. Model.** Add `src/kws/models/sparknet.py`:
+  - `SparkNet(n_feat, num_classes, channels=16, gate_channels=32,
+    kernels=(11, 15, 19, 29), block_bn_eps=1e-3)` in the Finding 7 shape.
+    Modules are `blocks` (four `TCSBlock`s, residual on the last three),
+    `gate_conv` (`Conv2d(C, G, 1)` with bias), `gate_bn` (`BatchNorm2d(G)` with
+    the default eps), and `fc` (`Linear(G, num_classes)`).
+  - Input is `(B, 1, F, T)`. `forward_features` returns `mean_t z` with shape
+    `(B, G)`. `classify_features` is `fc`, and `forward` composes the two. The
+    N(0, 0.5²) noise is added only in training mode.
+  - Add `build_sparknet(model_cfg, input_shape, num_classes)` mirroring
+    `build_ds_cnn`, with `model_cfg` keys `name`, `channels`, and
+    `gate_channels`.
+- [x] **A3. Port.** Add `src/kws/models/sparknet_port.py`, run as
+      `python -m kws.models.sparknet_port --ckpt … --data-config … --out …`.
+  - Load with the restricted unpickler from Finding 3.
+  - Map `fs.encoder.{i}.mconv.0` → `blocks.{i}.depthwise`, `mconv.1` →
+    `pointwise`, `mconv.2` → `bn`, `res.0.0` → `res_conv`, `res.0.1` →
+    `res_bn`, `output_layer.0` → `gate_conv`, `output_layer.1` → `gate_bn`,
+    and `freq_linear_proj` → `fc`. Conv weights take `unsqueeze(2)`.
+  - Infer C and G from the tensor shapes. Load with `strict=True`, and fail if
+    any non-`preprocessor.*` source key is left unused.
+  - Build the `FeatureExtractor` from `--data-config` and fail unless its MFCC
+    `dct_mat`, `MelSpectrogram.mel_scale.fb`, and
+    `MelSpectrogram.spectrogram.window` match the checkpoint's
+    `preprocessor.featurizer.*` buffers (max abs diff < 1e-4).
+  - The reference label order is `yes no up down left right on off stop go
+    _unknown_ _silence_`. Assert that it equals `build_label_map` for the data
+    config.
+  - Write a project-style checkpoint with `model_family: sparknet`,
+    `model_cfg`, `input_shape: [32, 101]`, `num_classes: 12`,
+    `num_keywords: 10`, `label_map`, `model_state_dict`, and `source`
+    (path, upstream commit, sha256).
+- [x] **A4. Evaluate.** In `src/kws/evaluate.py`:
+  - `load_model_from_checkpoint` dispatches on
+    `ckpt.get("model_family", "ds_cnn")`, so existing checkpoints are
+    unaffected.
+  - Add `--split {test,val}`, defaulting to `test`.
+  - Fail clearly if the data config's `(n_mels, frames)` differs from the
+    checkpoint's `input_shape`.
+  - Add `split` to the JSON report.
+- [x] **A5. Tests** in `tests/test_sparknet.py`, none of which may need the
+      gitignored checkpoints:
+  - **Parity.** Build a random reference-format state dict for C=8 and G=32,
+    with positive running variances. Compute an independent reference forward
+    with `F.conv1d` and `F.batch_norm` (eps 1e-3 in blocks, 1e-5 at the gate,
+    ReLU after the residual sum). Port it through the A3 mapping and match the
+    eval-mode `SparkNet` output to 1e-5.
+  - **Costs.** Pin `kws.utils.profile.count_macs` and parameter counts to the
+    Finding 2 numbers: C=16 log-mel 40 is 4,852 params and 418,120 MACs; C=16
+    MFCC-32 is 4,636 and 396,304; C=8 MFCC-32 is 2,356 and 177,336.
+  - **Dispatch.** A SparkNet checkpoint saved to `tmp_path` loads through
+    `load_model_from_checkpoint`.
+  - `uv run python -m pytest tests/` must pass. (`uv run pytest` fails to spawn
+    in this environment.)
+- [x] **A6. Runs.** Port C=16 and C=8 to
+      `models/checkpoints/sparknet_c{16,8}_ported.pt`. Evaluate each SparkNet
+      checkpoint with the MFCC-32 config, and the XS student with the default
+      config, on `val` and on `test`.
+  - Use one split per process, because synthesized silence draws from the
+    global RNG in order.
+  - Keep the default seed 0.
+  - Write the JSON reports to `reports/phase_a/`.
+- [x] **A7. Record** `reports/sparknet_phase_a.yaml`, which is not gitignored.
+      For each model and split, record:
+  - accuracy, FAR, FRR, and per-class F1;
+  - keyword-only accuracy (the diagonal over the first 10 confusion rows);
+  - parameters, and project MACs.
 
-Wrap every public `main()` with the same run-session helper. The data downloader
-uses this only for logs/manifest; its raw dataset path remains a shared cache.
+  This is a one-off characterization of an external model, and later model
+  selection stays on validation only.
+- **Harness check:** the XS test accuracy should be close to the recorded
+  0.8364. Record any gap larger than 0.5 points. All Gate A comparisons use XS
+  numbers from this same harness.
+- **Port check:** the paper reports 95.7% for C=16. If C=16's keyword-only test
+  accuracy is below 0.90, suspect the port or the front end before the task
+  difference.
+- **Gate A:** proceed if C=16 is clearly above XS under the same harness. The
+  proposed bar is ≥ 90% test accuracy. If it falls short, read the per-class
+  confusion before concluding anything about the architecture.
 
-### 3. Canonical metrics recorder
+#### Phase A results (2026-09-13)
 
-Add a recorder (in `artifacts.py` or a focused
-`src/kws/utils/checkpointing.py`) and pass it into `run_finetune` and the PAI
-loop. Each completed epoch writes one JSON object containing:
+Phase A is done. Numbers come from `reports/sparknet_phase_a.yaml`, seed 0.
 
-- schema version, stage, phase, epoch, global step, and elapsed seconds;
-- train total loss, all named KD/component losses, and train accuracy;
-- validation loss and validation accuracy;
-- learning rate for every optimizer parameter group;
-- effective seed and parameter count; and
-- phase-specific fields such as PAI mode, restructure status, frozen/trainable
-  base and dendrite counts, or QAT backend.
+| Model | Params | MACs | Val acc | Test acc | Test keyword-only | Test acc excl. silence | Test FAR (unknown / silence) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SparkNet C=16 | 4,636 | 396,304 | 0.8330 | 0.8454 | 0.9416 | 0.9149 | 0.216 / 0.571 |
+| SparkNet C=8 | 2,356 | 177,336 | 0.7290 | 0.7344 | 0.8746 | 0.8216 | 0.404 / 0.788 |
+| DS-CNN-XS | 4,096 | 3,358,320 | 0.8511 | 0.8364 | 0.8471 | 0.8096 | 0.368 / 0.002 |
 
-Enhance `run_finetune` to compute train accuracy and expose an `on_epoch_end`
-hook. Keep its in-memory `FinetuneResult.history`, but return the full result
-from `train_model` and distillation instead of throwing it away. During a
-transition, a compatibility wrapper/property can still expose
-`best_val_acc` to callers expecting a float.
+- **Checks.**
+  - The harness reproduces XS at 0.8364.
+  - The port is exact: the raw upstream ckpt run through a functional forward
+    gives a max logit difference of 0.0.
+  - The full 4,074-clip keyword test set, scored outside the harness with
+    soundfile and torchaudio MFCC, matches the harness per-class diagonal
+    exactly for both checkpoints.
+- **Gate A: not met as written, and not decidable from the released
+  checkpoints.** The whole shortfall is the synthesized silence class:
+  - C=16 labels 451 of 815 test silence clips as `up`.
+  - A gain sweep over the six noise files shows the cause:
+    - Quiet noise stays silence: gain ≤ 0.001 always, gain 0.1 about 77% of
+      the time.
+    - Loud noise becomes `up`: about 73% at gain 1.0, and `pink_noise.wav`
+      at every gain ≥ 0.1.
+  - The released model never saw this project's gain 0.1–1.0 noise labelled as
+    silence, so this is a data mismatch.
+  - Class balance does not explain it, because FAR is a rate.
+  - On everything else, C=16 clearly beats XS:
+    - keyword-only accuracy +9.5 points;
+    - unknown false accepts 0.216 vs 0.368;
+    - accuracy excluding silence +10.5 points;
+    - 8.5× fewer MACs.
+  - C=8 is not competitive.
+- **Decision.** Proceed to Phase B with C=16. Phase B trains on this project's
+  silence, so the confound goes away there. Gate B, not Gate A, is the real
+  test. In Phase B, watch the `_silence_` and `up` F1 scores.
 
-JSONL commit protocol:
+### Phase B: controlled step-2 A/B in this project
 
-1. Append and `flush`/`fsync` the completed epoch record.
-2. Atomically replace `latest.pt`, including the committed metric count/digest.
-3. If this epoch is best, materialize/update `best.pt` atomically.
+- [ ] **Minimum code.** Reuse Phase A's `src/kws/models/sparknet.py`. Replace
+      the evaluate dispatch with a model registry covering only the train,
+      distill, and evaluate build sites.
+- [ ] **Sparsity loss.** Add the auxiliary-loss hook to `run_finetune`, with the
+      weight configurable and starting near 0.01 × the CE weight.
+- [ ] **Light recipe.** Add a train config that approximates the reference
+      recipe: ±100 ms shift, low-level white noise, no SpecAugment, no speed
+      perturbation, and no fixed augmented-view cache. Keep AdamW. If SGD is
+      ever tried, apply Finding 4's ×100 rescaling rather than copying the
+      reference lr and weight decay.
+- [ ] **Runs, in priority order,** selected on validation:
+  1. SparkNet C=16, light recipe, no KD.
+  2. SparkNet C=16, light recipe, response + CE KD (`feature_weight: 0`).
+  3. DS-CNN-XS, light recipe (architecture control).
+  4. SparkNet C=16 with the current `distill_imc.yaml` recipe (recipe control).
+  5. SparkNet C=8 and C=12 with the best recipe found above.
+  6. The three-term Song et al. KD, only if run 2 helped.
+- **Gate B:** SparkNet beats DS-CNN-XS **under the same recipe** by a material
+  validation margin, at no more than XS's parameter count. Report test accuracy
+  once for the selected models.
 
-On resume, treat `latest.pt` as the commit point: validate the JSONL prefix and
-truncate a trailing record that was appended before an interrupted checkpoint
-replacement. If `best.pt` is missing or stale, regenerate it from best state
-kept in `latest.pt`. Never duplicate an epoch record.
+### Phase C: move the whole framework to SparkNet (only if Gate B passes)
 
-Write `metrics/summaries.yaml` atomically at phase/stage boundaries with best
-and final metrics plus relative artifact references. Evaluation, export,
-benchmark, pruning, PTQ, and standalone QAT must always write their returned
-metrics/report under the active root even when the legacy `--report` option was
-omitted.
+- [ ] Route every student build site through the registry.
+- [ ] Add residual-aware structured pruning with a shared keep-mask, plus
+      regression tests for output equivalence at `keep_ratio: 1.0`.
+- [ ] Generalize the sweep variable from `block_channels` to a width spec
+      covering C, and optionally gate width.
+- [ ] Lengthen prune + KD, which Finding 1 shows was still improving at
+      epoch 40.
+- [ ] Before any dendrite claim, add a no-dendrite control that trains for the
+      same number of epochs as the PAI run.
+- [ ] Make PAI module tracking architecture-aware, and add the sparsity term to
+      the PAI loss.
+- [ ] Make QAT work: `FloatFunctional` for the residual add, the `+ 0.5`
+      folded into the `fc` bias, a convert test covering Tanh, clamp, and mean,
+      and a TorchScript and ONNX parity test.
+- [ ] Charge residual liveness in the activation estimate, with a test.
+- [ ] Confirm the int8 operator coverage of the ESP32 target runtime.
+- [ ] Update the README model table, configs, and pipeline defaults.
+- [ ] Rerun step 3 as a width sweep and compare its Pareto frontier with the
+      DS-CNN frontier.
 
-TensorBoard support can be enabled by a config flag and mirror the canonical
-records into `metrics/tensorboard/<stage>/<phase>/`; resume correctness must not
-depend on TensorBoard event files.
+### Phase D: deployment follow-ups
 
-### 4. Latest training checkpoint and resume contract
+- **Streaming.** SparkNet has no striding and pools globally over time, so live
+  microphone inference can cache per-layer ring buffers and pay roughly MACs/T
+  per 10 ms hop. The `same` zero padding used in clip-level training differs
+  from a streaming context. Measure that gap before relying on streaming output.
 
-`latest.pt` is training state, not the deployment model. Give it a versioned
-schema with at least:
+## Open questions
 
-```text
-format_version, kind="kws_training_state", run_id, stage, phase
-completed_epoch, next_epoch, global_step, target_epochs
-model_state_dict, optimizer_state_dict, scheduler_state_dict
-best_metric_name, best_metric_value, best_epoch, best_model_state_dict
-history_length, last_metric_digest
-python_rng_state, numpy_rng_state, torch_cpu_rng_state, torch_cuda_rng_states
-effective data/model/train/KD config and recipe fingerprint
-upstream checkpoint paths and SHA-256 digests
-stage_specific_state
-```
-
-Stage-specific state includes the KD feature adapter and its optimizer,
-N:M masks, clustered assignments/centroids, QAT backend and prepared fake-quant
-observer buffers, and any secondary scheduler. Move optimizer tensors to the
-selected device after loading.
-
-Resume semantics:
-
-- `epochs` is the total target, not an additional count. A checkpoint completed
-  at epoch N continues with N+1 through the configured total.
-- Add `--resume` (use this run's phase `latest.pt`) and
-  `--resume-from PATH` (explicit training-state input). The pipeline should
-  automatically resume an incomplete compatible stage in the same output root;
-  `--resume` on standalone commands remains explicit.
-- Load/rebuild the model and stage wrapper first, then optimizer/scheduler and
-  stage-specific objects, then restore RNG immediately before creating/iterating
-  the next training epoch.
-- Reject changes to architecture, labels, data recipe, teacher contents, KD
-  weights, optimizer/schedule, seed, pruning masks, cluster recipe, QAT backend,
-  or PAI recipe. Offer a separately named warm-start/reset-optimizer path for
-  intentional fine-tuning; do not call it resume.
-- Legacy best-only checkpoints remain valid for inference and warm starts, but
-  produce a clear "not a resumable training-state checkpoint" error when passed
-  to `--resume-from`.
-- Write a usable best checkpoint even when the first validation accuracy is
-  exactly zero; initialize the best value to negative infinity or always accept
-  the first epoch.
-- Resume is initially supported at completed epoch boundaries. Mid-batch
-  replay is out of scope.
-
-The current module-global Python/Torch randomness and persistent DataLoader
-workers prevent a bit-for-bit guarantee after restart. In v1, save all process
-RNG and explicit DataLoader generator states and guarantee correct functional
-continuation. Tests for numerical equivalence should use `num_workers=0`.
-Document that multi-worker augmentation batches may differ after a restart.
-A later exact-replay enhancement can make augmentation/silence randomness a
-function of `(seed, epoch, sample index)` or restart workers from deterministic
-per-epoch seeds without persistent worker state.
-
-## PAI-specific containment and recovery
-
-PAI cannot be treated like an ordinary fixed-graph `state_dict` phase.
-
-1. Resolve the data root, configs, teacher/source checkpoints, and every KWS
-   output path absolutely before starting a PAI candidate.
-2. Create `<output-dir>/pai/candidates`, temporarily change the working
-   directory to it, and pass only a validated leaf such as `w18` to
-   `UPA.perforate_model`. Restore the original working directory in `finally`.
-   Keep the absolute candidate directory in KWS reports/objects; do not confuse
-   it with PAI's leaf filename prefix.
-3. Keep PAI's native filenames intact inside `pai/candidates/w18/`, including
-   its CSVs, figures, config, `best_model*`, `switch_*`, and native `latest.pt`.
-   Do not rename vendor files that PAI's loader expects.
-4. After every validation call, and again after a restructure plus optimizer
-   reset, save a mutually consistent pair:
-   - PAI network/tracker state using its supported `save_system` API; and
-   - KWS state at
-     `models/checkpoints/sparsity/w18/pai/latest.pt` with epoch, optimizers,
-     schedulers, KD adapter, phase trail, metrics commit, RNG, and the native
-     PAI checkpoint digest.
-5. To recover a partial candidate, recreate the base wrapper, use PAI's
-   `load_system(..., load_from_restart=True)` for the matching native `latest`,
-   rebuild optimizers against the restored graph, load the KWS sidecar states,
-   validate the paired digests/epoch, and continue. Saving must occur after any
-   restructure-induced optimizer reset so parameter groups match on load.
-6. Replace the current blanket rejection of a nonempty partial candidate with:
-   compatible paired latest state -> resume; incomplete/mismatched state -> fail
-   without overwriting; completed metadata -> existing completed-run reuse.
-7. Add a contract test against the pinned PAI version. If network/tracker plus
-   optimizer recovery cannot be demonstrated, explicitly limit PAI v1 recovery
-   to the last consistent PAI phase/candidate boundary. Do not claim exact
-   latest-epoch PAI resume until that test passes.
-
-`load_candidate_model` currently creates an adjacent `<save_name>_reload`
-directory. Route this under `pai/reload/` or use a temporary directory inside
-the output root and register/remove it deliberately.
-
-## File-by-file implementation plan
-
-### Phase 1: Foundation
-
-- Add `src/kws/utils/artifacts.py` and
-  `src/kws/utils/checkpointing.py` for the layout, locking, manifest, atomic
-  writes, metric commits, checkpoint schema, fingerprints, and RNG capture.
-- Refactor `src/kws/utils/logging.py` for invocation configuration and
-  stdout/stderr teeing.
-- Extend `src/kws/utils/seed.py` with capture/restore helpers, feature-detecting
-  CUDA/MPS support without assuming either backend exists.
-- Extend `src/kws/data/loader.py` to accept explicit generators and expose the
-  resume reproducibility limitation described above.
-- Add focused foundation tests before integrating model stages.
-
-### Phase 2: Shared training loop
-
-- Update `src/kws/train.py` so `run_finetune` accepts prior state, starts at the
-  next epoch, tracks train accuracy/LR/global step/duration, invokes the epoch
-  recorder, and returns full results.
-- Make `train_model` use standard best/latest paths and a reusable checkpoint
-  metadata builder while preserving the legacy best checkpoint shape.
-- Add output/resume CLI options to `kws.train` and persist a phase summary.
-- Add synthetic CPU tests for metrics, best/latest behavior, atomicity,
-  interruption, resume, and recipe mismatch.
-
-### Phase 3: Fixed-graph optimization phases
-
-- `src/kws/optimize/distill.py`: use the shared recorder; store/restore the KD
-  adapter and its optimizer; return/persist the complete result.
-- `src/kws/optimize/prune.py`: route best/latest/report paths and restore the
-  exact structured graph or N:M masks before optimizer loading.
-- `src/kws/optimize/cluster.py`: replace RAM-only best state with durable
-  codebook training state; restore assignments, parametrizations, centroids,
-  optimizer, and scheduler before resuming.
-- `src/kws/optimize/quantize_qat.py`: save a resumable prepared fake-quant
-  training graph separately from the final TorchScript artifact; restore
-  observers/fake-quant buffers, backend, projector, optimizer, and scheduler.
-- Add the common output/resume CLI options to all standalone modules while
-  retaining legacy output options when no root is active.
-
-### Phase 4: PAI cycle and sparsity search
-
-- Update `src/kws/optimize/dendritic.py` to separate `pai_run_name` from the
-  absolute `pai_run_dir`, contain PAI through the scoped working directory, emit
-  canonical epoch metrics, and create/recover the paired PAI/KWS latest state.
-- Apply the shared recorder to both pre-PAI prune/KD and post-PAI KD resume.
-  Persist no-improvement histories too.
-- Update `src/kws/optimize/dendritic_prune_loop.py` to derive candidate paths
-  from `ArtifactLayout`, resume partial compatible candidates, atomically update
-  the search summary, and retain completed candidate reuse/Pareto state.
-- Increment the framework/checkpoint format versions so old completed evidence
-  is not misrepresented as a fully resumable run.
-
-### Phase 5: Pipeline, reports, evaluation, and exports
-
-- Refactor `src/kws/pipeline.py` to construct one run context, derive every
-  output from it, pass recorders into stages, and keep all recorded paths
-  portable. Checkpoint the pipeline manifest/report before, during, and after
-  each stage; stage invalidation must not delete unrelated run history.
-- Update `src/kws/evaluate.py` to always persist full accuracy/F1/confusion/FAR/
-  FRR metrics under an active root.
-- Update `src/kws/export/to_onnx.py` to route the graph and persist parity plus
-  source/digest metadata.
-- Update `src/kws/export/benchmark.py` to route ONNX/TorchScript outputs and the
-  full runtime accuracy, FAR/FRR, latency percentiles, parity, and graph-size
-  report.
-- Update `src/kws/optimize/quantize_ptq.py` to route both graphs and persist the
-  returned accuracy/size metrics, which its CLI currently discards.
-- Update `src/kws/data/download.py` to accept the common log/manifest option
-  without moving the configured shared data root.
-
-### Phase 6: Config, docs, ignore rules, and PAI Skills
-
-- Add optional `output_dir: null` to `configs/train/pipeline.yaml`. Preserve the
-  existing path fields as legacy mode and document which are output-role fields
-  overridden/rebased in unified mode.
-- Remove output ownership from
-  `configs/train/dendritic_prune_loop.yaml` when a run context is supplied;
-  `save_prefix` becomes a logical candidate prefix and `summary_path` a legacy
-  fallback.
-- Update `KWS_Model/README.md` with one `--output-dir` pipeline example, the
-  directory tree, best-vs-latest semantics, stage reuse vs epoch resume,
-  conflict/fingerprint errors, multi-worker reproducibility limits, and legacy
-  behavior. Keep `BUG.md`, `FINDINGS.md`, and checked-in reports as historical
-  evidence; do not rewrite their old paths.
-- Add `KWS_Model/outputs/` to the repository `.gitignore` while preserving its
-  environment/cache/data/model/report/dendritic ignore rules.
-- The PAI Skills dashboard currently fixes runtime state under
-  `.perforated_tools/`. Treat `.mcp.json`, installed skills, and the launcher as
-  installation state outside the run-output promise. Add an artifact-root
-  option/environment value for runtime `dashboard.log` and visualizer exports,
-  mount that directory read-write, and update `dashboard-run.sh`, `install.sh`,
-  `uninstall.sh`, the package README, `train-my-model`, `visualize-model`,
-  `perforatedai-analyze`, and their shell tests to discover
-  `<output-dir>/pai/...` without changing PAI-native filenames.
-
-## Test plan
-
-Add `tests/test_artifacts.py` and `tests/test_training_resume.py`, then extend
-the existing pipeline, pruning, dendritic, cluster, QAT, export, and seed tests.
-
-Required cases:
-
-- Layout creates the documented tree, resolves paths containing spaces, rejects
-  traversal/symlink escapes, and enforces the run lock.
-- CLI/config precedence is identical across entrypoints; every legacy command
-  still behaves as before with no output root.
-- Logging captures KWS logs, plain stdout/stderr, warnings, a simulated PAI
-  print, and an exception without duplicating handlers on repeated test calls.
-- Every completed epoch produces one complete JSONL record. Values match the
-  returned history; resume does not duplicate records and reconciles the
-  append-before-checkpoint crash window. A malformed trailing JSONL fragment is
-  removed without losing prior valid records, and a forced/fresh rerun cannot
-  retain conflicting epoch history.
-- `latest.pt` advances every epoch, including epochs with no validation
-  improvement. `best.pt` changes only on improvement and exists after an
-  all-zero first validation epoch.
-- Every KD-backed phase completes at least one epoch, saves latest/best state,
-  and resumes with identical criterion/adapter parameters and optimizer state.
-  Include a regression test for the distillation best-checkpoint save call.
-- A tiny deterministic CPU run for N epochs matches a run interrupted after K
-  epochs and resumed to N (`num_workers=0`): model, optimizer, scheduler LR,
-  global step, metric history, and next Python/NumPy/Torch random values.
-- Resume rejects changes to model, labels/data, total schedule-critical config,
-  seed, teacher digest, KD weights, pruning/cluster/QAT recipe, or PAI pairing.
-- KD adapter state, N:M masks, codebook assignments/centroids, and prepared QAT
-  observer/fake-quant state survive a split run.
-- Old best-only checkpoints still load for inference/warm start and fail clearly
-  as `--resume-from` inputs.
-- A mocked lightweight pipeline creates no registered artifact outside
-  `tmp_path`, resumes a partial stage, reuses completed stages from the same
-  root, and preserves downstream invalidation/provenance behavior. Repeat an
-  invocation that overwrites the same registered path and assert that manifest
-  digest/size metadata is refreshed and finalization errors are visible.
-- Every active-root CLI rejects absolute output-role paths and traversal before
-  basename or slug normalization. Move a completed run directory and verify
-  that pipeline/candidate reuse resolves all run-owned report paths relative to
-  the new root.
-- A mocked PAI test proves the library receives a basename while its working
-  directory is `<root>/pai/candidates`, paired latest state is saved after
-  restructure, partial runs call `load_system`, and completed runs still reuse.
-  Interrupt immediately after restructure and verify that model, native PAI
-  state, KD adapter, both optimizers, scheduler, metrics, and digests recover as
-  one compatible pair. Also cover missing-sidecar and digest-mismatch rejection
-  through the standalone PAI CLI.
-- PAI Skills shell tests cover custom runtime log/export roots, Docker mount
-  paths, uninstall behavior, and preservation of user artifacts.
-
-Verification commands after implementation:
-
-```bash
-uv run python -m compileall src tests
-uv run pytest tests/
-sh "PAI Skills/test.sh"
-```
-
-Also run a tiny real or dependency-backed PAI interruption/resume contract test
-before marking PAI latest-epoch recovery complete. Long Speech Commands training
-is not required for the unit suite.
-
-## Migration and safety
-
-- Do not move, rename, or rewrite existing ignored checkpoints, reports, or
-  `dendritic_*` directories automatically. Their reports contain literal paths
-  and provenance fingerprints that can be invalidated by a move.
-- A legacy artifact can be supplied as an external input/warm start. The new
-  manifest records its absolute path and SHA-256; new outputs still remain under
-  the selected root.
-- Starting in a nonempty root without compatible resumable state must fail with
-  an actionable message. `--force` may recompute a requested stage and update
-  dependent report entries, but it must not recursively delete the run root.
-- Temporary files must stay beside their destination and be cleaned only when
-  their exact, validated path is known. Never follow a user path with a broad
-  recursive deletion.
-- Fingerprints should use effective config content, artifact content digests,
-  and logical artifact roles, not the absolute output-root string, so a complete
-  run directory remains portable.
-
-## Definition of done
-
-- A user can run the full pipeline with one output argument, inspect the
-  documented tree, and find every KWS/PAI runtime artifact and console log under
-  that root.
-- Every training phase has durable epoch metrics and a distinct atomic
-  `best.pt` and `latest.pt`.
-- Killing a supported phase after epoch N and rerunning with the same compatible
-  root continues at N+1 with restored model/optimizer/scheduler/stage/RNG state.
-- Partial PAI recovery is demonstrated against the pinned library or is clearly
-  and narrowly reported as phase-boundary-only; it is never silently restarted
-  or overwritten.
-- Evaluation, export, benchmark, PTQ, stage reports, and manifests persist their
-  complete returned results automatically in unified mode.
-- All new and existing Python tests plus the PAI Skills shell tests pass, legacy
-  no-root commands remain compatible, and no test/run creates a project-owned
-  artifact outside its selected temporary output root.
-
-## Future ideas (not scheduled)
-
-- **Turn step 3 into a true compounding prune+dendrite loop.** Today's step 3
-  (`dendritic_prune_loop.py`) sweeps a precomputed list of descending base
-  widths; each width is an *independent restart* pruned from the same original
-  KD-distilled checkpoint, grows its own dendrites, and the sweep stops via a
-  multi-axis Pareto frontier with patience (see the module docstring: "each
-  sparsity target gets its own base network... PerforatedAI adds capacity; it
-  does not structurally prune a learned dendritic network"). A requested
-  alternative is a genuinely iterative loop that keeps pruning *and* growing
-  dendrites on the same evolving model round over round -- prune the current
-  best (already-dendritic) model further, grow new dendrites on top, resume
-  KD, and repeat until validation performance stalls or degrades for N
-  consecutive rounds -- rather than independently restarting from the original
-  checkpoint at each width.
-  - This directly conflicts with the documented constraint that PAI cannot
-    structurally re-prune a network it has already grown dendrites onto, so
-    doing this properly needs a real answer first: either (a) collapse/merge
-    trained dendrites back into the base weights before the next prune pass,
-    or (b) only ever prune the base graph and discard-and-regrow dendrites
-    each round (losing prior dendrite training), or (c) some other scheme PAI
-    supports. Whichever is chosen touches `dendritic.py`'s PAI integration
-    assumptions, not just the sweep driver.
-  - A smaller, lower-risk version of this idea keeps today's per-width restart
-    architecture (still valid, still sidesteps the re-pruning problem) but
-    replaces the multi-axis Pareto-frontier/patience stop with a plain "stop
-    when best validation accuracy stalls or drops for N consecutive
-    candidates" rule, dropping the cost-axis frontier logic in
-    `pareto.py`/`ParetoSearch` in favor of a single-metric criterion.
-  - Raised 2026-09-12; deferred pending a decision on which of the above
-    (compounding-model rewrite vs. simplified single-metric stop vs. leave as
-    is and just document today's sweep as "iterative until stalling") is
-    wanted, since each has different blast radius across `dendritic.py`,
-    `dendritic_prune_loop.py`, `pareto.py`, configs, README, and tests.
+- **Front end:** if MFCC-32 clearly beats log-mel 40 for the student, either
+  retrain the teacher on MFCC or teach the dataset and cache to return two
+  feature views.
+- **KD with stochastic gates:** does feature KD (pooled gate occupancy projected
+  onto the teacher embedding) conflict with the sparsity objective?
+- **Dendrite target:** `.fc` or the gate conv, and at which C?
+- **Gate width on log-mel 40:** keep the released 32, or use the
+  paper-faithful 40 (+248 parameters at C=16)?
+- **Class balance:** 2× unknown/silence stays the task definition here. Record
+  1× numbers only as a bridge to the literature.

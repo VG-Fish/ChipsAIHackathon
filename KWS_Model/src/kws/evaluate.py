@@ -8,8 +8,10 @@ import yaml
 from torch.utils.data import DataLoader
 
 from kws.data.dataset import build_datasets
-from kws.data.splits import TEST
+from kws.data.features import build_feature_extractor
+from kws.data.splits import TEST, VAL
 from kws.models.ds_cnn import build_ds_cnn
+from kws.models.sparknet import build_sparknet
 from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout
 from kws.utils.checkpointing import record_input
@@ -23,7 +25,14 @@ logger = get_logger(__name__)
 
 def load_model_from_checkpoint(checkpoint_path: str, device: torch.device):
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model = build_ds_cnn(ckpt["model_cfg"], tuple(ckpt["input_shape"]), ckpt["num_classes"])
+    model_family = ckpt.get("model_family", "ds_cnn")
+    input_shape = tuple(ckpt["input_shape"])
+    if model_family == "ds_cnn":
+        model = build_ds_cnn(ckpt["model_cfg"], input_shape, ckpt["num_classes"])
+    elif model_family == "sparknet":
+        model = build_sparknet(ckpt["model_cfg"], input_shape, ckpt["num_classes"])
+    else:
+        raise ValueError(f"unknown model_family: {model_family!r}")
     model.load_state_dict(ckpt["model_state_dict"])
     model.to(device).eval()
     return model, ckpt
@@ -45,6 +54,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-config", default="configs/data/speech_commands_v2.yaml")
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--split", choices=["test", "val"], default="test",
+                        help="Which split to evaluate (default: test)")
     parser.add_argument("--report", default=None, help="Optional path to write JSON metrics report")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--seed", type=int, default=0,
@@ -78,16 +89,27 @@ def main():
         device = get_device()
         model, ckpt = load_model_from_checkpoint(args.checkpoint, device)
 
+        checkpoint_shape = tuple(ckpt["input_shape"])
+        clip_len = int(data_cfg["dataset"]["sample_rate"] * data_cfg["dataset"]["clip_seconds"])
+        data_shape = tuple(build_feature_extractor(data_cfg)(torch.zeros(1, clip_len)).shape[-2:])
+        if data_shape != checkpoint_shape:
+            raise ValueError(
+                f"data config {args.data_config} produces features shaped {data_shape} "
+                f"(n_mels, frames), but checkpoint {args.checkpoint} expects {checkpoint_shape}"
+            )
+
         datasets, label_map = build_datasets(data_cfg, augment=False, seed=args.seed)
         label_names = [name for name, _ in sorted(label_map.items(), key=lambda kv: kv[1])]
-        test_loader = DataLoader(datasets[TEST], batch_size=128, shuffle=False, num_workers=0)
+        split = TEST if args.split == "test" else VAL
+        eval_loader = DataLoader(datasets[split], batch_size=128, shuffle=False, num_workers=0)
 
-        y_true, y_pred = run_inference(model, test_loader, device)
+        y_true, y_pred = run_inference(model, eval_loader, device)
         metrics = compute_metrics(y_true, y_pred, ckpt["num_keywords"], label_names)
         metrics["num_params"] = sum(p.numel() for p in model.parameters())
+        metrics["split"] = args.split
 
-        logger.info("Test accuracy: %.4f  FAR: %.4f  FRR: %.4f  params: %d",
-                    metrics["accuracy"], metrics["far"], metrics["frr"], metrics["num_params"])
+        logger.info("%s accuracy: %.4f  FAR: %.4f  FRR: %.4f  params: %d",
+                    args.split, metrics["accuracy"], metrics["far"], metrics["frr"], metrics["num_params"])
         for name, f1 in metrics["f1_per_class"].items():
             logger.info("  F1[%s] = %.4f", name, f1)
 

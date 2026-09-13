@@ -1,0 +1,158 @@
+description: 'Phase A: released SparkNet checkpoints (C=16, C=8) and this run''s XS student, scored on
+  this project''s val/test split with no training. See PLAN.md, section ''Phase A: score the released
+  checkpoints on this split (no training)''.'
+seed: 0
+models:
+  sparknet_c16:
+    checkpoint: models/checkpoints/sparknet_c16_ported.pt
+    data_config: configs/data/speech_commands_v2_mfcc32.yaml
+    params: 4636
+    macs: 396304
+    val:
+      accuracy: 0.8329797492767599
+      keyword_only_accuracy: 0.9246556845800702
+      far: 0.39473684210526316
+      frr: 0.07534431541992978
+      f1_per_class:
+        'yes': 0.9573934837092731
+        'no': 0.8930817610062893
+        up: 0.5399361022364217
+        down: 0.9172141918528253
+        left: 0.9172714078374455
+        right: 0.9388297872340425
+        'on': 0.8945945945945946
+        'off': 0.9078212290502793
+        stop: 0.9451476793248945
+        go: 0.9137466307277629
+        _unknown_: 0.8573551263001485
+        _silence_: 0.5955056179775281
+    test:
+      accuracy: 0.8453716690042076
+      keyword_only_accuracy: 0.9415807560137457
+      far: 0.3932515337423313
+      frr: 0.058419243986254296
+      f1_per_class:
+        'yes': 0.9749702026221693
+        'no': 0.9113001215066828
+        up: 0.5854004252303331
+        down: 0.9070631970260223
+        left: 0.948905109489051
+        right: 0.9445129469790382
+        'on': 0.9209535759096612
+        'off': 0.9393939393939394
+        stop: 0.9453681710213777
+        go: 0.8974042027194067
+        _unknown_: 0.8590694538098449
+        _silence_: 0.5955631399317406
+    source_checkpoint: models/checkpoints/external/sparknet/kws_C_16.ckpt
+  sparknet_c8:
+    checkpoint: models/checkpoints/sparknet_c8_ported.pt
+    data_config: configs/data/speech_commands_v2_mfcc32.yaml
+    params: 2356
+    macs: 177336
+    val:
+      accuracy: 0.7290260366441659
+      keyword_only_accuracy: 0.8684850121523089
+      far: 0.6099865047233468
+      frr: 0.13151498784769106
+      f1_per_class:
+        'yes': 0.9015151515151515
+        'no': 0.8333333333333334
+        up: 0.4903129657228018
+        down: 0.8015075376884422
+        left: 0.8502994011976048
+        right: 0.8669201520912547
+        'on': 0.7474747474747475
+        'off': 0.8392857142857143
+        stop: 0.8948863636363636
+        go: 0.8443271767810027
+        _unknown_: 0.694468085106383
+        _silence_: 0.31869254341164455
+    test:
+      accuracy: 0.7343969144460029
+      keyword_only_accuracy: 0.8745704467353952
+      far: 0.5957055214723926
+      frr: 0.1254295532646048
+      f1_per_class:
+        'yes': 0.9289099526066351
+        'no': 0.8323281061519904
+        up: 0.5171299288946348
+        down: 0.8125
+        left: 0.8636363636363636
+        right: 0.8751486325802615
+        'on': 0.7505376344086021
+        'off': 0.8406961178045516
+        stop: 0.9046454767726161
+        go: 0.8273381294964028
+        _unknown_: 0.699537750385208
+        _silence_: 0.31386861313868614
+    source_checkpoint: models/checkpoints/external/sparknet/kws_C_8.ckpt
+  ds_cnn_xs:
+    checkpoint: outputs/full-run-20260912T063022Z/models/checkpoints/student/ds_cnn_xs_distilled_warm_12class.pt
+    data_config: configs/data/speech_commands_v2.yaml
+    params: 4096
+    macs: 3358320
+    val:
+      accuracy: 0.8511089681774349
+      keyword_only_accuracy: 0.8614636780988387
+      far: 0.1747638326585695
+      frr: 0.13853632190116122
+      f1_per_class:
+        'yes': 0.9331651954602774
+        'no': 0.8358556461001164
+        up: 0.8054421768707483
+        down: 0.8387096774193549
+        left: 0.871866295264624
+        right: 0.8880208333333334
+        'on': 0.8690807799442897
+        'off': 0.7951482479784366
+        stop: 0.8735019973368842
+        go: 0.7799113737075333
+        _unknown_: 0.7040816326530612
+        _silence_: 0.9912926992632284
+    test:
+      accuracy: 0.8364305750350631
+      keyword_only_accuracy: 0.8470790378006873
+      far: 0.18527607361963191
+      frr: 0.15292096219931273
+      f1_per_class:
+        'yes': 0.9263657957244655
+        'no': 0.8450704225352113
+        up: 0.8013392857142857
+        down: 0.8044554455445545
+        left: 0.8514619883040936
+        right: 0.8771498771498771
+        'on': 0.8545454545454545
+        'off': 0.756687898089172
+        stop: 0.8727272727272727
+        go: 0.7467362924281984
+        _unknown_: 0.683288409703504
+        _silence_: 0.9818840579710145
+checks:
+  harness_check:
+    description: XS test accuracy should be close to the recorded 0.8364.
+    recorded_xs_test_accuracy: 0.8364
+    measured_xs_test_accuracy: 0.8364305750350631
+    gap_points: 0.0030575035063096223
+    passed: true
+  port_check:
+    description: Paper reports 95.7% for C=16. Suspect the port or the front end if C=16 keyword-only
+      test accuracy is below 0.90.
+    threshold: 0.9
+    sparknet_c16_keyword_only_test_accuracy: 0.9415807560137457
+    passed: true
+  gate_a:
+    description: 'Proceed to Phase B if C=16 is clearly above XS under the same harness. Proposed bar:
+      >= 90% test accuracy.'
+    bar_test_accuracy: 0.9
+    sparknet_c16_test_accuracy: 0.8453716690042076
+    xs_test_accuracy: 0.8364305750350631
+    margin_points: 0.8941093969144442
+    meets_bar: false
+    note: Overall test accuracy misses the 90% bar because of synthesized silence, not class balance (FAR is
+      a rate, so balance does not move it). C=16 labels 451/815 test silence clips as 'up' (silence
+      false-accept 0.571 vs XS 0.002). On unknown words it is better than XS (false-accept 0.216 vs 0.368).
+      Excluding the silence row, test accuracy is 0.9149 vs XS 0.8096. A gain sweep shows C=16 keeps quiet
+      noise as silence (gain <= 0.001 always; 0.1 about 77%) but calls loud noise 'up' (gain 1.0 about 73%;
+      pink_noise.wav always). The released checkpoint never saw this project's gain 0.1-1.0 noise as
+      silence. Gate A cannot be decided from released checkpoints alone; see the check notes.
