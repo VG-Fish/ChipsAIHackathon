@@ -230,6 +230,8 @@ def test_pai_epoch_metrics_include_named_kd_losses_and_adapter_lr(monkeypatch):
         optimizer=optimizer,
         adapter_optimizer=adapter_optimizer,
         mode="p",
+        next_mode="n",
+        base_params_in_optimizer_count=0,
         restructured=True,
         model=model,
         seed=17,
@@ -243,6 +245,9 @@ def test_pai_epoch_metrics_include_named_kd_losses_and_adapter_lr(monkeypatch):
         "model": [0.003],
         "kd_adapter": [0.007],
     }
+    assert record["pai_mode"] == "p"
+    assert record["next_pai_mode"] == "n"
+    assert record["base_params_in_optimizer"] == 0
 
 
 def test_restructure_resets_optimizer_before_the_only_paired_save(
@@ -447,3 +452,90 @@ def test_standalone_cli_forwards_resume_options(
 
     assert captured["resume"] is expected_resume
     assert captured["resume_from"] == expected_resume_from
+
+
+def test_step_3c_check_separates_unmeasurable_from_violated():
+    """``-1`` means "could not read", not "the base is live".
+
+    The caller logs a step-3c violation on this number, and that log line is an
+    alert pattern for the run monitor, so a truthiness test here would turn an
+    unreadable optimizer into a false crash alert reporting "-1 base
+    parameters". The sentinel has to stay distinguishable from a real count.
+    """
+    model = torch.nn.Linear(4, 3)
+
+    # No param_groups at all, and param_groups without a "params" key: both are
+    # "unmeasured", and neither may be reported as a clean zero.
+    assert dendritic.base_params_in_optimizer(model, SimpleNamespace()) == -1
+    assert dendritic.base_params_in_optimizer(model, _Stateful("stub")) == -1
+    assert dendritic.base_params_in_optimizer(
+        model,
+        SimpleNamespace(param_groups=[{"params": []}, {"lr": 0.1}]),
+    ) == -1
+
+    # A foreign or stale tensor cannot safely be called a base parameter or a
+    # dendrite, so it also leaves the audit unmeasured rather than producing a
+    # false violation count.
+    foreign = torch.nn.Parameter(torch.ones(2))
+    assert dendritic.base_params_in_optimizer(
+        model,
+        SimpleNamespace(param_groups=[{"params": [foreign]}]),
+    ) == -1
+
+    # A real optimizer holding the base reports the true live count.
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    assert dendritic.base_params_in_optimizer(model, optimizer) == 15
+
+    # Count parameter identities, not repeated references in unusual wrappers.
+    duplicated = SimpleNamespace(
+        param_groups=[
+            {"params": list(model.parameters())},
+            {"params": list(model.parameters())},
+        ]
+    )
+    assert dendritic.base_params_in_optimizer(model, duplicated) == 15
+
+    # An optimizer PAI has stripped reports a genuine zero.
+    optimizer.param_groups = [{"params": []}]
+    assert dendritic.base_params_in_optimizer(model, optimizer) == 0
+
+
+def test_base_batchnorm_stats_are_pinned_without_severing_autograd():
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.base_bn = torch.nn.BatchNorm1d(3)
+            self.dendrite_bn = torch.nn.BatchNorm1d(3)
+
+        def forward(self, value):
+            return self.base_bn(value) + self.dendrite_bn(value)
+
+    model = Model().train()
+    before_base_mean = model.base_bn.running_mean.clone()
+    before_dendrite_mean = model.dendrite_bn.running_mean.clone()
+
+    assert dendritic.freeze_base_batchnorm_stats(model) == 1
+    assert not model.base_bn.training
+    assert model.dendrite_bn.training
+    assert model.base_bn.weight.requires_grad
+
+    model(torch.full((4, 3), 2.0)).sum().backward()
+
+    assert torch.equal(model.base_bn.running_mean, before_base_mean)
+    assert not torch.equal(model.dendrite_bn.running_mean, before_dendrite_mean)
+    assert model.base_bn.weight.grad is not None
+
+
+def test_cycle_rejects_the_known_bad_base_freeze_before_starting_work():
+    with pytest.raises(ValueError, match="enforce_base_weight_freeze must be false"):
+        dendritic.run_cycle(
+            "missing-checkpoint.pt",
+            {},
+            {},
+            {
+                "seed": 0,
+                "pruning": {"kind": "structured"},
+                "perforatedai": {"enforce_base_weight_freeze": True},
+            },
+            "unused-candidate",
+        )

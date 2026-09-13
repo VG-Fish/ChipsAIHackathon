@@ -438,3 +438,269 @@ read (guarded by the D fix but unexercised) and the first true PAI *resume*
 (guarded by the B and E fixes but likewise unexercised).
 
 ---
+
+## 5. PAI drops into `pdb` at the first dendrite switch (mode `n` -> `p`)
+
+**When:** 2026-09-12 19:56:42, exit code 1. Candidate `w18`, logged epoch 92,
+1h54m into the relaunched run (`outputs/full-run-20260912T063022Z`, invocation
+`1e43964ef188`). This is the first time any run has reached a dendrite switch.
+
+**How it got here:** PAI's patience counter (`n_epochs_to_switch: 25`) expired
+at logged epoch 92 with `last improved epoch 66`, `global_best = 0.8204`. The
+switch to dendrite mode (`p`) fired as designed, and the crash happened inside
+that first dendrite epoch.
+
+### Traceback
+
+```
+File "src/kws/optimize/dendritic.py", line 1563, in run_cycle
+    GPA.pai_tracker.add_validation_score(val_acc, model)
+File "perforatedai/tracker_perforatedai.py", line 3534, in add_validation_score
+File "perforatedbp/tracker_pbp.py", line 578, in check_best_pai_score_improvement
+File "perforatedbp/tracker_pbp.py", line 312, in best_pai_score_improved_this_epoch
+File "perforatedbp/tracker_pbp.py", line 361, in best_cascor_score_improved_this_epoch
+File "perforatedai/modules_perforatedai.py", line 490, in PAINeuronModule.__getattr__
+File "torch/nn/modules/module.py", line 1959, in __getattr__
+-> def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
+(Pdb)
+...
+bdb.BdbQuit
+```
+
+The process runs with `stdin=/dev/null`, so entering `pdb` is immediately fatal:
+`bdb.BdbQuit` propagates and the pipeline exits 1. The `stdin` choice is not the
+bug -- it converts a silent hang into a loud failure -- but it does mean any PAI
+`set_trace()` is unrecoverable.
+
+### The decisive diagnostic (printed immediately before the pdb)
+
+```
+Adding validation score 0.81967213
+You set GPA.pc.set_initial_correlation_batches() to be greater than an entire
+epoch 0 < 40. ... Start over or Load from 'latest' for candidate_w18.
+It was caught on layer .blocks.0
+If your epoch is larger than this number it means the layer is not being
+included in autograd backwards.
+```
+
+**The message is misleading.** Our `initial_correlation_batches: 40` is not
+larger than an epoch -- the train loader has 337 batches. The `0` in `0 < 40`
+is the *observed* count: the correlation-batch counter never incremented past
+zero. PAI's own second sentence is the real diagnosis -- "the layer is not being
+included in autograd backwards."
+
+Corroborating output, repeated every batch of the dendrite epoch:
+
+```
+skipping pb batch for .blocks.0
+skipping pb batch for .blocks.1
+skipping pb batch for .fc
+.blocks.0 is in backwards graph multiple times.
+Dendrite outs and neuron errors are currently stacked (336/0) times
+```
+
+`(336/0)` is the tell: 336 dendrite outputs recorded, **zero neuron errors**.
+The backward hooks that record neuron errors never fired for any tracked layer.
+
+### Leading hypothesis (NOT yet verified -- subagent investigating)
+
+Our own base-weight freeze is starving PAI's correlation machinery of gradients.
+
+- `dendritic.py:863` `apply_phase_freezing()` runs every epoch; on `mode == "p"`
+  it calls `enforce_base_weight_freeze(model)`.
+- `dendritic.py:833` `enforce_base_weight_freeze()` sets `requires_grad = False`
+  on **every** non-dendrite parameter. Its docstring calls this "belt and braces
+  over PAI's own freezing".
+- The loop comment at ~1500 states the intent plainly: *"PAI may change
+  requires_grad during the call above"* -- i.e. we deliberately override PAI.
+- `configs/train/dendritic_cycle1.yaml:64` `enforce_base_weight_freeze: true`.
+
+If PAI's cascade-correlation scoring needs gradients to *flow to* base neuron
+modules (to capture neuron errors via backward hooks) while simply not
+*updating* them, then `requires_grad=False` severs exactly that path. Autograd
+never reaches the base modules, hooks never fire, neuron-error count stays 0,
+the correlation counter stays 0, and PAI trips its guard.
+
+If this holds, it is a well-intentioned safety measure that silently disabled
+the library's core algorithm -- and note the shape: the docstring worried about
+PAI *under*-freezing in some future release, and defended against it by
+over-freezing now. Any fix must still preserve step 3c's real requirement (base
+weights must not move while dendrites are scored); satisfying that by excluding
+base params from the optimizer, or by zeroing their grads before `step()`, would
+keep the guarantee without cutting the autograd path.
+
+### Open questions for the investigation
+
+1. Does PAI itself set base `requires_grad=False` in dendrite mode, or keep it
+   `True`? This is the crux and must be read from PAI's real source (the package
+   is compiled Cython; original Python survives as comments in the generated
+   `.c` files, `inspect.getsource` fails).
+2. What attribute lookup in `best_cascor_score_improved_this_epoch`
+   (`perforatedbp/tracker_pbp.py:361`) misses `PAINeuronModule.__getattr__` and
+   falls through to torch's, and is the `pdb` entry gated by a config flag that
+   would make PAI raise instead of trap?
+
+**State of the run:** dead at 19:56:42. PAI's message says `Load from 'latest'
+for candidate_w18` is possible, so the 91 completed neuron-mode epochs need not
+be retrained -- and taking that path would finally exercise the PAI *resume*
+code guarded by entry 4's B and E fixes, which no run has reached either.
+
+### Root cause (confirmed from source + experiment)
+
+The hypothesis above was right about the culprit and **wrong about the premise**,
+and the wrong premise is the whole lesson.
+
+PAI **never** sets `requires_grad=False` on base parameters. Every
+`requires_grad_(False)` in `modules_perforatedai` is on `dendrites_to_top`. PAI
+holds the base still by **filtering it out of the optimizer**
+(`set_optimizer_instance` -> `setup_optimizer_pb`). Our code re-asserted a
+guarantee PAI never made, using a mechanism that destroys PAI's:
+
+```python
+# modules_perforatedai.py:14927 -- the hook that records neuron errors
+if out.requires_grad and (not self._fb_init_done or ...):
+    out.register_hook(lambda grad: filter_backward(grad, ...))
+```
+
+Freeze the base and `.blocks.0`'s output has no `grad_fn`, the hook never
+registers, `filter_backward` is never called, neuron errors stay 0 forever
+(`stacked (336/0)`), the correlation counter never leaves 0, and PAI trips its
+guard and calls `pdb.set_trace()`. `Best PBScores.csv` was written with a header
+and **zero data rows** -- independent confirmation that nothing was ever scored.
+
+The `requires_grad`-based optimizer filtering that does exist in PAI
+(`tracker_perforatedai.c:30729`) lives inside `setup_optimizer`, which is PAI's
+*Pattern 1*. We use *Pattern 2* (`set_optimizer_instance`), so it never applied
+to us. The old comment was written as if we were on Pattern 1.
+
+Also: the bottom two traceback frames are a **red herring**.
+`modules_perforatedai.py:490` is the `try:` arm of `__getattr__`, not a fallback.
+pdb read EOF, set `quitting=True`, and `BdbQuit` surfaced at the next trace
+dispatch -- which happened to be a `--Call--` on torch's `__getattr__`. The
+frame has nothing to do with the fault.
+
+### Fixes applied
+
+| # | Fix | File |
+|---|-----|------|
+| 1 | `enforce_base_weight_freeze: false` (+ code default flipped to `False`) | `dendritic_cycle1.yaml:66`, `dendritic.py` |
+| 2 | New `freeze_base_batchnorm_stats()` -- pins base BN via `.eval()`, never `requires_grad` | `dendritic.py` |
+| 3 | New `base_params_in_optimizer()` -- checks 3c the way PAI actually enforces it; logs, never raises; returns `-1` for "unmeasurable" | `dendritic.py` |
+| 4 | New `disarm_pai_debugger()` -- converts PAI's `pdb.set_trace()` into an exception at the real call site | `dendritic.py` |
+| 5 | Corrected three docstrings/comments carrying the false premise | `dendritic.py`, `dendritic_cycle1.yaml` |
+
+**Fix 2 closes a gap the investigation missed.** `keep_frozen_batchnorm_eval`
+only pins BatchNorm when its affine params have `requires_grad=False`. Simply
+removing the freeze would therefore have let base BN running statistics drift
+through the whole dendrite phase -- a real 3c violation by a path no optimizer
+filter covers. Measured drift without the pin: **3.9e-2 per forward pass**, so
+this was not hypothetical. Verified: BN pinned, `requires_grad` still `True`,
+output still has `grad_fn`, gradients still flow, drift exactly `0.0`.
+
+Fix 4 verified against a live PAI trap: the traceback now points at
+`utils_perforatedai.py:902` (the real call site) instead of a torch frame.
+`PYTHONBREAKPOINT=0` would not have worked -- PAI never calls `breakpoint()`.
+
+### Two self-inflicted relaunch failures (both mine, both fixed)
+
+1. `resume recipe mismatch for sparsity/prune_kd` -- editing the train config
+   changed the recipe fingerprint, correctly invalidating the 40 kept prune+KD
+   epochs. Coarse fingerprinting erring toward retraining is the safe direction;
+   accepted the 40-epoch cost rather than weaken the check mid-recovery.
+2. `manifest artifact is missing: .../pai.jsonl` -- I filtered the manifest
+   *before* moving that file. Same mistake as entry 4. Correct order is: move
+   everything first, then filter once. Did so; 62 -> 31 artifacts, two backups
+   in scratchpad.
+
+**Status:** FIXED and relaunched 20:30 into the same
+`--output-dir outputs/full-run-20260912T063022Z`. 193/193 tests pass. Candidate
+`w18` restarts from prune+KD epoch 1 (~40 epochs) before re-entering the
+dendrite cycle. Deliberately a clean restart rather than `Load from 'latest'`:
+PAI had already recorded `switch_1` with zero scores, and resuming risked the
+tracker counting a consumed dendrite try against `max_dendrite_tries: 2`.
+Crash debris preserved in scratchpad `crash-debris-20260912T1956Z/`.
+Pre-crash run reached val **0.8204** at epoch 67, up from 0.7909 at epoch 1.
+
+**Still unexercised:** `read_pai_architecture_results` and the first true PAI
+resume. The dendrite scoring path itself is now the immediate test.
+
+### 5b. Audit of the entry-5 fix (20:45) — core fix confirmed, two defects in the new check
+
+Re-reviewed the fix rather than trusting it. The substantive fix is **correct**,
+and I verified it by experiment instead of by reading source, on a real
+PAI-wrapped width-18 model driven through a real switch into mode `p`:
+
+| Property | Measured |
+| --- | --- |
+| base parameter drift over a full dendrite-mode epoch | **0.0** (0 of 31 tensors moved) |
+| base tensors receiving nonzero gradient | **17 / 31** (PAI's hook is alive) |
+| base parameters in the optimizer, mode `p` | **0** |
+| base BatchNorm pinned / dendrite BatchNorm left training | **9 / 8**, correct both pre- and post-switch |
+| `pdb.set_trace` trap | raises at the call site; PAI holds no private alias that would bypass the patch |
+
+This also settles the mechanism, which the entry-5 writeup asserted but had not
+demonstrated: `_make_optimizer_and_scheduler` builds `AdamW` over
+`list(model.parameters())` -- *all* parameters -- and `set_optimizer_instance`
+then strips the base out of that optimizer **in place**. The base therefore
+keeps `requires_grad=True` (so PAI's neuron-error hook registers) while being
+unable to move. Both halves are now measured, not assumed.
+
+Two defects **in the new `base_params_in_optimizer` check itself**:
+
+1. **It read the wrong optimizer.** The call sat in the `phase_changed` block,
+   which runs *before* `if restructured:` rebuilds the optimizer. At a switch
+   epoch it therefore measured the previous phase's optimizer -- which
+   legitimately still holds the whole base -- against the new mode. Measured in
+   production order: **1542** live base parameters. Measured after the rebuild:
+   **0**. The check was guaranteed to report a violation at exactly the one
+   epoch it exists to validate. Moved the measurement below the rebuild.
+
+2. **The `-1` "unmeasurable" sentinel is truthy.** The guard was
+   `if mode == "p" and base_live:`, so an unreadable optimizer would log
+   `Step 3c violated: -1`. Now `base_live > 0`, with a regression test
+   (`test_step_3c_check_separates_unmeasurable_from_violated`) pinning the
+   three-way contract: `-1` unmeasured, `0` clean, `>0` violated.
+
+Neither defect could corrupt training -- the check only logs -- but both would
+have produced a false alert, and `Step 3c violated` is an alert pattern for the
+run monitor. A false alarm there triggers the crash procedure against a healthy
+multi-hour run, which is how a diagnostic becomes worse than no diagnostic.
+
+**Consequence for the run in flight:** process 21501 imported the pre-fix module
+at 20:30, so it is still running defect 1. It **will** log
+`Step 3c violated: <~1542>` at its first dendrite switch and the monitor **will**
+raise an `[ALERT]`. That specific line, in the same epoch as
+`PAI restructured the network`, with a count equal to the base parameter count,
+is this known false positive and **is not grounds to stop the run**. A real
+violation looks different: a nonzero count on a *non*-switch epoch, or one that
+persists across subsequent dendrite-mode epochs. Not restarting to pick up the
+fix -- the defect is log-only and a restart would cost the run.
+
+194/194 tests pass.
+
+---
+
+### 5c. Final audit of the entry-5 changes
+
+The training fix remained sound, but the audit found three residual defects in
+its safeguards:
+
+1. `enforce_base_weight_freeze: true` was still accepted even though it is a
+   known-invalid PAI configuration. It now fails before checkpoint loading,
+   dataset construction, or prune/KD training can consume time.
+2. The optimizer audit ran only when a phase changed. A process resumed directly
+   into dendrite mode, or an optimizer mutated later in that phase, therefore
+   had no per-epoch check. Every epoch now records and validates the optimizer
+   that will actually execute it; transition-time validation remains in the
+   phase trail for the paired restart boundary.
+3. A transition epoch's metric used the post-validation (next) PAI mode while
+   its loss and learning-rate fields described the mode that just trained. The
+   record now separates `pai_mode` from `next_pai_mode` and includes the live
+   base-parameter count for the executed optimizer.
+
+The optimizer reader was also hardened so malformed/foreign parameter groups
+remain `-1` (unmeasured), and repeated parameter references are not double
+counted. Direct regression coverage now verifies that base BatchNorm statistics
+stay fixed while base affine gradients still flow. **196/196 tests pass.**
+
+---

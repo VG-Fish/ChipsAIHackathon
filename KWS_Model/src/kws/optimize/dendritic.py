@@ -3,11 +3,11 @@
 One candidate enters here already pruned and KD-fine-tuned (steps 3a-3b) and
 leaves with a recorded accuracy and deployment cost. In between:
 
-- **3c, perforation.** PerforatedAI freezes the base weights, trains candidate
-  dendritic residual nodes against the residual correlation, then selects the
-  useful ones and freezes them into the network. The phase trail this module
-  records makes that freeze/select/freeze cycle auditable after the fact rather
-  than taking the library's word for it.
+- **3c, perforation.** PerforatedAI keeps the base weights out of its optimizer,
+  trains candidate dendritic residual nodes against the residual correlation,
+  then selects the useful ones and freezes them into the network. The phase
+  trail and per-epoch optimizer audit make that hold/select/freeze cycle
+  inspectable after the fact.
 - **3d, resume.** The dendrites are fixed; the base student weights are not yet
   adapted to them. So the clean deployment graph resumes KD fine-tuning on its
   active parameters, with the same fixed teacher used everywhere else.
@@ -24,6 +24,7 @@ import hashlib
 import importlib
 import os
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import monotonic
@@ -56,7 +57,6 @@ from kws.optimize.prune import prune_ds_cnn
 from kws.train import (
     build_lr_scheduler,
     evaluate_loss_acc,
-    keep_frozen_batchnorm_eval,
     resolve_manifest_run_id,
     run_finetune,
     set_train_mode_preserving_frozen_batchnorm,
@@ -345,11 +345,18 @@ def _pai_epoch_record(
     optimizer: torch.optim.Optimizer,
     adapter_optimizer: torch.optim.Optimizer | None,
     mode: str,
+    next_mode: str,
+    base_params_in_optimizer_count: int,
     restructured: bool,
     model: nn.Module,
     seed: int,
 ) -> dict:
-    """Build the canonical PAI epoch record, including all KD components."""
+    """Build the canonical PAI epoch record, including all KD components.
+
+    ``mode`` and the optimizer fields describe the epoch that just trained.
+    PAI can switch phase during validation, so ``next_mode`` separately records
+    the phase that will train on the next iteration.
+    """
     model_lrs = [group["lr"] for group in optimizer.param_groups]
     adapter_lrs = (
         [group["lr"] for group in adapter_optimizer.param_groups]
@@ -382,6 +389,8 @@ def _pai_epoch_record(
         },
         "seed": seed,
         "pai_mode": mode,
+        "next_pai_mode": next_mode,
+        "base_params_in_optimizer": base_params_in_optimizer_count,
         "restructured": restructured,
         "parameter_count": UPA.count_params(model),
         **describe_learning_phase(model),
@@ -811,9 +820,11 @@ def current_pai_mode(default: str = "?") -> str:
 def describe_learning_phase(model: nn.Module) -> dict:
     """Which parameters are frozen right now, split into base vs dendritic.
 
-    Step 3c requires the base weights to be frozen while dendrites train. PAI
-    does that freezing itself; this reports what actually happened so the claim
-    is checkable in the run record instead of assumed.
+    Reports ``requires_grad``, which is NOT how step 3c is enforced. PAI holds
+    the base still by keeping it out of the optimizer, so during the dendrite
+    phase the base reads as "trainable" here and that is correct and expected.
+    ``base_params_in_optimizer`` is the function that actually checks 3c; this
+    one is a description of the graph, not evidence of the guarantee.
     """
     groups = {
         "base": {"trainable": 0, "frozen": 0},
@@ -833,10 +844,16 @@ def describe_learning_phase(model: nn.Module) -> dict:
 def enforce_base_weight_freeze(model: nn.Module) -> int:
     """Freeze every non-dendritic parameter; return how many were still live.
 
-    Belt and braces over PAI's own freezing: if a future release leaves a base
-    tensor trainable during the dendrite phase, the dendrites would learn
-    against a moving target and the correlation scores that select them would
-    be measuring the wrong thing.
+    DANGEROUS during PAI's dendrite phase -- retained as a migration/testing
+    helper, but no longer called by the training pipeline.
+
+    The docstring here used to read "belt and braces over PAI's own freezing".
+    That was wrong on the facts: PAI never sets ``requires_grad=False`` on base
+    parameters, it filters them out of the optimizer instead. Freezing them
+    here therefore does not reinforce PAI, it defeats it -- PAI gates its
+    neuron-error hook on ``out.requires_grad``, so a frozen base means no
+    correlation signal, no dendrite scores, and eventually ``pdb.set_trace()``.
+    See ERRORS.md entry 5. Use ``freeze_base_batchnorm_stats`` instead.
     """
     frozen = 0
     for name, parameter in model.named_parameters():
@@ -861,13 +878,12 @@ def restore_base_weight_training(model: nn.Module) -> int:
 
 
 def apply_phase_freezing(model: nn.Module) -> str:
-    """Set requires_grad to match PerforatedAI's current phase.
+    """Reproduce the legacy ``requires_grad`` phase handling when requested.
 
-    Neuron mode trains the base; dendrite mode holds it still while candidates
-    are scored. PAI sets this itself -- re-asserting it each epoch is what makes
-    step 3c's "freeze the relevant base weights" a property of this pipeline
-    rather than an assumption about the library. An unreadable mode changes
-    nothing, so a PAI internals change degrades to the library's own behaviour.
+    This is not PAI's own behavior: PAI needs base autograd during dendrite mode
+    and holds the base still by removing it from the optimizer. The helper is
+    retained only for migration tests; ``run_cycle`` rejects the old setting
+    before any training starts. An unreadable mode changes nothing.
     """
     mode = current_pai_mode()
     if mode == "p":
@@ -875,6 +891,85 @@ def apply_phase_freezing(model: nn.Module) -> str:
     elif mode == "n":
         restore_base_weight_training(model)
     return mode
+
+
+def freeze_base_batchnorm_stats(model: nn.Module) -> int:
+    """Pin base BatchNorm running statistics during PAI's dendrite phase.
+
+    Step 3c needs the base network to be genuinely still while candidate
+    dendrites are scored. PAI keeps base *weights* still by filtering them out
+    of the optimizer (``set_optimizer_instance`` -> ``setup_optimizer_pb``), but
+    BatchNorm's running mean and variance are updated inside ``forward()``, not
+    by the optimizer, so nothing PAI does holds them.
+
+    They must not be pinned the way the rest of the base is. Setting
+    ``requires_grad=False`` would pin them via ``keep_frozen_batchnorm_eval``,
+    and that is exactly what broke the run in ERRORS.md entry 5: PAI registers
+    its neuron-error hook as ``if out.requires_grad: out.register_hook(...)``
+    (``modules_perforatedai.py:14927``), so freezing the base severs the very
+    signal the dendrite phase exists to measure. Calling ``.eval()`` pins the
+    statistics while leaving the autograd path -- and PAI's hook -- intact.
+    """
+    pinned = 0
+    for module_name, module in model.named_modules():
+        if not isinstance(module, nn.modules.batchnorm._BatchNorm):
+            continue
+        # A dendrite's own BatchNorm is part of what is being trained, so it
+        # keeps its statistics live. The dummy ".weight" leaf lets the shared
+        # classifier work on module paths and on affine=False layers alike.
+        if _is_dendrite_parameter(f"{module_name}.weight", model):
+            continue
+        module.eval()
+        pinned += 1
+    return pinned
+
+
+def base_params_in_optimizer(model: nn.Module, optimizer) -> int:
+    """Count base parameters PAI left in the optimizer; 0 is step 3c holding.
+
+    This is the honest check for "the base does not move". The old check read
+    ``requires_grad``, which measured our own freeze rather than PAI's
+    behaviour -- and kept reporting success right up to the crash it caused.
+
+    Returns ``-1`` when the optimizer does not expose parameter groups we can
+    read. This is evidence-gathering, not control flow: an unfamiliar optimizer
+    must degrade to "unmeasured" rather than raise and destroy a multi-hour run.
+    A sentinel is used instead of 0 so an unmeasurable phase cannot be mistaken
+    for a verified-clean one in the run record.
+    """
+    groups = getattr(optimizer, "param_groups", None)
+    if not isinstance(groups, (list, tuple)):
+        return -1
+    base_sizes = {
+        id(parameter): parameter.numel()
+        for name, parameter in model.named_parameters()
+        if not _is_dendrite_parameter(name, model)
+    }
+    dendrite_ids = {
+        id(parameter)
+        for name, parameter in model.named_parameters()
+        if _is_dendrite_parameter(name, model)
+    }
+    known_ids = base_sizes.keys() | dendrite_ids
+    live = 0
+    seen: set[int] = set()
+    for group in groups:
+        if not isinstance(group, Mapping) or "params" not in group:
+            return -1
+        params = group["params"]
+        try:
+            iterator = iter(params)
+        except TypeError:
+            return -1
+        for parameter in iterator:
+            parameter_id = id(parameter)
+            if parameter_id in seen:
+                continue
+            seen.add(parameter_id)
+            if parameter_id not in known_ids:
+                return -1
+            live += base_sizes.get(parameter_id, 0)
+    return live
 
 
 def freeze_selected_dendrites(model: nn.Module) -> int:
@@ -1094,8 +1189,38 @@ def _clean_feature_dim(model: nn.Module, input_shape: tuple[int, int]) -> int:
         ).shape[1]
 
 
+def disarm_pai_debugger() -> None:
+    """Turn PAI's ``pdb.set_trace()`` traps into exceptions that point at fault.
+
+    PAI calls ``pdb.set_trace()`` on several internal error paths. This pipeline
+    runs headless with ``stdin=/dev/null``, so a trap pauses nothing: pdb reads
+    EOF, sets ``quitting=True``, and raises ``BdbQuit`` at the *next* trace
+    dispatch. The traceback then points at whatever frame the dispatcher landed
+    in -- in ERRORS.md entry 5 that was ``torch/nn/modules/module.py:1959``,
+    which has nothing to do with the fault and sent the first investigation off
+    down a dead end.
+
+    Replacing the hook makes the failure raise at the call site, keeps PAI's own
+    diagnostic (printed immediately before the trap) adjacent to the traceback,
+    and fails fast instead of after an epoch of silently recording nothing.
+    ``PYTHONBREAKPOINT=0`` does not help here -- PAI never calls ``breakpoint()``.
+    """
+    import pdb
+
+    def _raise_instead_of_trace(*_args, **_kwargs):
+        raise RuntimeError(
+            "PerforatedAI entered its interactive debugger. This pipeline is "
+            "headless, so the trap was converted into this exception. PAI's own "
+            "diagnostic is printed immediately above and is the real message. "
+            "See KWS_Model/ERRORS.md entry 5 for the known instance."
+        )
+
+    pdb.set_trace = _raise_instead_of_trace
+
+
 def configure_perforatedai(config: dict, device: torch.device) -> None:
     """Apply the paper's size-focused, correlation-based PAI settings."""
+    disarm_pai_debugger()
     testing = config["testing_dendrite_capacity"]
     conversion = config["conversion"]
     if conversion != "blocks_and_linear":
@@ -1220,6 +1345,13 @@ def run_cycle(
         raise ValueError(
             "The dendritic width sweep supports structured pruning only; "
             f"use kws.optimize.prune for {pruning_kind!r}"
+        )
+    pai_cfg = train_cfg["perforatedai"]
+    if bool(pai_cfg.get("enforce_base_weight_freeze", False)):
+        raise ValueError(
+            "perforatedai.enforce_base_weight_freeze must be false: PAI needs "
+            "base autograd to score dendrites and holds the weights still by "
+            "filtering them out of its optimizer"
         )
     device = get_device()
     base, checkpoint, model_cfg = build_cycle_base(
@@ -1391,7 +1523,6 @@ def run_cycle(
         datasets[VAL], train_cfg, shuffle=False, generator=val_generator
     )
 
-    pai_cfg = train_cfg["perforatedai"]
     configure_perforatedai(pai_cfg, device)
     # PAI treats save_name as a filename prefix and explicitly rejects path
     # separators.  The run layout owns the directory; PAI receives only the
@@ -1487,9 +1618,15 @@ def run_cycle(
             int(pai_state.get("completed_epoch", 0)),
         )
 
-    freeze_base = bool(pai_cfg.get("enforce_base_weight_freeze", True))
+    # PAI filters base weights out of its optimizer, but BatchNorm running
+    # statistics need a separate forward-pass guard during dendrite mode.
+    freeze_base_bn = bool(
+        pai_cfg.get("freeze_base_batchnorm_in_dendrite_phase", True)
+    )
     phase_trail: list[dict] = (
-        phase_trail if pai_state is not None else [{"epoch": 0, **describe_learning_phase(model)}]
+        phase_trail
+        if pai_state is not None
+        else [{"epoch": 0, **describe_learning_phase(model)}]
     )
     last_mode = phase_trail[-1]["mode"]
 
@@ -1499,15 +1636,25 @@ def run_cycle(
         epoch += 1
         epoch_started = monotonic()
         set_train_mode_preserving_frozen_batchnorm(model)
-        if freeze_base:
-            # Step 3c: the base weights stay fixed while candidate dendrites
-            # are scored, so the correlation that selects them is measured
-            # against a network that is not simultaneously moving -- and they
-            # are handed back the moment neuron training resumes.
-            apply_phase_freezing(model)
-            # PAI may change requires_grad during the call above. Re-apply the
-            # BatchNorm rule after that phase transition as well.
-            keep_frozen_batchnorm_eval(model)
+        phase_mode = current_pai_mode()
+        # Audit the optimizer that will actually execute this epoch. Checking
+        # only after a phase transition misses a resumed dendrite phase and any
+        # later mutation of PAI's optimizer groups.
+        epoch_base_live = base_params_in_optimizer(model, optimizer)
+        if phase_mode == "p" and epoch_base_live > 0:
+            logger.error(
+                "Step 3c violated at epoch %d: %d base parameters are still "
+                "in the optimizer during dendrite mode; dendrite scores are "
+                "being measured against a moving base",
+                epoch + 1,
+                epoch_base_live,
+            )
+        if freeze_base_bn and phase_mode == "p":
+            # Step 3c, the part no optimizer filter can cover: BatchNorm
+            # statistics move in forward(), so pin them for the dendrite phase.
+            # This deliberately does NOT touch requires_grad, so PAI's
+            # neuron-error hook still registers.
+            freeze_base_batchnorm_stats(model)
         if kd is not None:
             kd.train()
         running_losses = {"total": 0.0}
@@ -1571,6 +1718,8 @@ def run_cycle(
                 "restructured": restructured,
                 **describe_learning_phase(model),
             }
+            # The 3c measurement deliberately does NOT happen here; see the
+            # block after the optimizer rebuild below.
             phase_trail.append(phase)
             last_mode = mode
 
@@ -1590,7 +1739,9 @@ def run_cycle(
                     val_accuracy=val_acc,
                     optimizer=optimizer,
                     adapter_optimizer=adapter_optimizer,
-                    mode=mode,
+                    mode=phase_mode,
+                    next_mode=mode,
+                    base_params_in_optimizer_count=epoch_base_live,
                     restructured=restructured,
                     model=model,
                     seed=int(train_cfg["seed"]),
@@ -1607,6 +1758,35 @@ def run_cycle(
             ) = _make_optimizer_and_scheduler(
                 model, train_cfg, len(train_loader), kd=kd
             )
+
+        if phase_changed:
+            # Step 3c's real evidence, and it can only be read *here*. PAI holds
+            # the base still by excluding it from the optimizer (the parameters
+            # keep requires_grad=True, so the requires_grad reading recorded
+            # above is expected to show the base as "trainable" and is not a
+            # check). The optimizer that enforces the phase just entered is the
+            # one rebuilt immediately above: set_optimizer_instance strips the
+            # base out of it in place.
+            #
+            # Measuring before that rebuild reads the *previous* phase's
+            # optimizer, which legitimately still holds the whole base, and so
+            # reports a violation at precisely the switch epoch this check
+            # exists to validate. Measured that way a width-18 candidate reports
+            # 1542 live base parameters; measured here it reports 0.
+            #
+            # Logged rather than raised: a false alarm must not kill a
+            # multi-hour run, and the run record carries the number either way.
+            base_live = base_params_in_optimizer(model, optimizer)
+            phase_trail[-1]["base_params_in_optimizer"] = base_live
+            # base_live is -1 when the optimizer exposes no readable parameter
+            # groups, which is "unmeasured", not "violated" -- hence `> 0`.
+            if mode == "p" and base_live > 0:
+                logger.error(
+                    "Step 3c violated: %d base parameters are still in the "
+                    "optimizer during dendrite mode; dendrite scores are being "
+                    "measured against a moving base",
+                    base_live,
+                )
 
         # Keep the vendor restart and the KWS sidecar at the same validation
         # boundary. This is deliberately after any graph restructure and

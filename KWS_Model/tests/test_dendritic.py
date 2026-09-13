@@ -163,7 +163,7 @@ def test_learning_phase_splits_base_from_dendritic_parameters():
     assert phase["base"]["frozen"] == 0
 
 
-def test_enforcing_the_freeze_stops_base_weights_and_leaves_dendrites_alone():
+def test_legacy_freeze_helper_stops_base_weights_and_leaves_dendrites_alone():
     from kws.optimize.dendritic import describe_learning_phase, enforce_base_weight_freeze
 
     model = _fake_perforated_model()
@@ -173,11 +173,12 @@ def test_enforcing_the_freeze_stops_base_weights_and_leaves_dendrites_alone():
     phase = describe_learning_phase(model)
     assert phase["base"]["trainable"] == 0
     assert phase["base"]["frozen"] == 20
-    # The dendrites are the only thing still learning, which is the point of 3c.
+    # This pins the legacy helper's mechanical behavior. The PAI pipeline must
+    # not use it because dendrite scoring still needs base autograd.
     assert phase["dendrite"]["trainable"] == 20
 
 
-def test_enforcing_the_freeze_twice_reports_nothing_left_to_freeze():
+def test_legacy_freeze_helper_twice_reports_nothing_left_to_freeze():
     from kws.optimize.dendritic import enforce_base_weight_freeze
 
     model = _fake_perforated_model()
@@ -227,7 +228,7 @@ def test_clean_pai_branch_classification_uses_the_module_length():
     assert not _is_dendrite_parameter("block.layer_array.2.weight", model)
 
 
-def test_the_freeze_is_symmetric_so_neuron_mode_can_train_again():
+def test_legacy_freeze_helper_is_symmetric():
     from kws.optimize.dendritic import (
         describe_learning_phase,
         enforce_base_weight_freeze,

@@ -61,6 +61,23 @@ perforatedai:
   forward_function: tanh
   conversion: blocks_and_linear
   # Step 3c requires the base weights to hold still while candidate dendrites
-  # are scored. PAI freezes them itself; this re-asserts it every epoch so a
-  # library change cannot quietly invalidate the correlation scores.
-  enforce_base_weight_freeze: true
+  # are scored.
+  #
+  # This MUST stay false. The original comment here claimed "PAI freezes them
+  # itself; this re-asserts it" -- that premise was false and cost a 2h run.
+  # PAI never sets requires_grad=False on base parameters (every
+  # requires_grad_(False) in modules_perforatedai is on dendrites_to_top); it
+  # keeps the base out of the optimizer instead, via set_optimizer_instance ->
+  # setup_optimizer_pb.  Base parameters therefore must KEEP requires_grad=True
+  # during the dendrite phase, because PAI registers its neuron-error hook as
+  #     if out.requires_grad and (...): out.register_hook(filter_backward)
+  # (modules_perforatedai.py:14927).  Freezing the base leaves .blocks.0's
+  # output with no grad_fn, the hook never registers, no neuron errors are ever
+  # recorded, and PAI's correlation counter sits at 0 until it trips its guard
+  # and calls pdb.set_trace().  See ERRORS.md entry 5.
+  enforce_base_weight_freeze: false
+  # The base still must not drift.  Gradients are handled by PAI's optimizer
+  # filter, but BatchNorm running statistics update in forward() and no
+  # optimizer filter can stop them, so they are pinned separately -- see
+  # freeze_base_batchnorm_stats in dendritic.py.
+  freeze_base_batchnorm_in_dendrite_phase: true
