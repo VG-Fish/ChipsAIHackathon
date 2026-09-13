@@ -44,6 +44,13 @@ uv run --env-file .env python -m kws.pipeline --stages sparsity
 uv run --env-file .env python -m kws.pipeline --stages cluster,quantize,benchmark
 ```
 
+PerforatedAI/PerforatedBP validates its license while its modules are imported.
+Run every PAI-dependent command from this `KWS_Model` directory with the
+`uv run --env-file .env ...` form above. A direct `.venv/bin/python` invocation
+from a temporary working directory bypasses the configured run environment and
+can make the package fall back to an interactive `email:` prompt, which cannot
+work in a headless pipeline or test process.
+
 Every output-producing command also accepts `--output-dir PATH`. `PATH` is the
 exact run root (it is not wrapped in a timestamp), so invoking the command
 again with the same path is how a compatible phase resumes. The pipeline may

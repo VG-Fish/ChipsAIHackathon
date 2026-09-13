@@ -2,10 +2,9 @@
 # run the perforation/dendrite phase, resume KD fine-tuning, and record cost.
 #
 # Each candidate starts from the warm-distilled XS checkpoint and is
-# structurally pruned to the width the sweep is testing. Both complete
-# depthwise-separable blocks and the classifier are perforated; the stem is
-# left alone. PAI's capacity check measured one deployed dendrite on the
-# width-18 base at 2,946 parameters.
+# structurally pruned to the width the sweep is testing. The observed PB
+# correlations were weak in the convolutional blocks and strongest at the
+# classifier, so cycle 1 now perforates only the exact `.fc` module.
 augment: true
 epochs: 40
 # The PAI loop is dynamically terminated and recorded runs take longer than
@@ -59,7 +58,12 @@ perforatedai:
   initial_correlation_batches: 40
   max_dendrite_tries: 2
   forward_function: tanh
-  conversion: blocks_and_linear
+  conversion: fc_only
+  # PAI rebuilds the optimizer after incorporating a selected dendrite. Keep
+  # the same AdamW/cosine recipe but restart at one quarter of the original
+  # peak LR so the newly enlarged graph adapts without the previous 0.001
+  # spike. Candidate-dendrite training still uses the normal LR.
+  post_integration_lr_multiplier: 0.25
   # Step 3c requires the base weights to hold still while candidate dendrites
   # are scored.
   #

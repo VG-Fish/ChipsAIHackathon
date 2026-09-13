@@ -143,7 +143,10 @@ def measure_peak_activation_bytes(
     branch_handles = []
     for parent in model.modules():
         layer_array = getattr(parent, "layer_array", None)
-        if not isinstance(layer_array, nn.ModuleList):
+        # PAI's training graph uses ModuleList, while 3.2.8's clean export
+        # stores the same ordered branches in Sequential.  Both wrappers retain
+        # every earlier branch output until the residual sum is complete.
+        if not isinstance(layer_array, (nn.ModuleList, nn.Sequential)):
             continue
         branch_sizes: list[int] = []
 

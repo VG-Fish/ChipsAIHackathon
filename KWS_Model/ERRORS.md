@@ -12,6 +12,176 @@ too, marked OPEN until they are fixed.
 
 ---
 
+## 9. Epoch-301 `.fc` cleanup rejected PAI's real branch container and missed its terminal integration
+
+**Date:** 2026-09-13
+**Status:** RESOLVED; THE SAVED EPOCH-301 PAI/KWS PAIR IS RECOVERABLE
+
+### Production failure
+
+Invocation `c94ed2f30330` reached PAI's normal terminal condition at epoch 301
+with `conversion: fc_only`. PAI logged the complete final transition and
+integration:
+
+```text
+Module .fc calling set mode p : tensor([1.], device='mps:0')
+Module .fc calling set mode n : tensor([2.], device='mps:0')
+Final dendrites successfully integrated! Total integrated: 1
+```
+
+The KWS wrapper then logged the wrong optimizer policy and failed while
+repeating PAI's final cleanup:
+
+```text
+PAI restructured the network; resetting optimizer phase with LR multiplier 1.0000
+RuntimeError: PAI cleanup module 'fc' has no two-branch layer_array
+```
+
+No pipeline restart was attempted. The failure happened after the epoch-301
+native/KWS restart pair was committed and before step 3d KD resume, clustering,
+quantization, or benchmarking.
+
+### Root cause 1: the cleanup graph was valid, but the type check was not
+
+`_restore_single_dendrite_skip_weights()` required `layer_array` to be an
+`nn.ModuleList`. That reflected the PAI *training* wrapper, not its deployed
+wrapper. In installed PerforatedAI 3.2.8, `prepare_final_model()` calls
+`blockwise_network()` before `clean_perforatedai.refresh_net()`, and the real
+clean `.fc` is a `PAIModulePyThread` whose two registered branches are held in
+an **`nn.Sequential`**.
+
+The exception text therefore reported a missing two-branch graph even though
+the actual object had exactly two branches. Direct inspection of the saved
+artifacts and a reconstruction from the paired sidecar confirmed:
+
+```text
+clean.fc type:         PAIModulePyThread
+clean.fc.layer_array:  nn.Sequential
+branch count:          2
+```
+
+The native `latest_pai.pt` and vendor-written `final_clean_pai.pt` both contain
+`fc.layer_array.0.*` and `fc.layer_array.1.*`. The live epoch-301 sidecar also
+contains the learned `fc.dendrites_to_top.0` coefficient (shape `[1, 12]`).
+PAI's clean-wrapper constructor intentionally omits `skip_weights` when there
+is one integrated dendrite, so that coefficient still has to be restored;
+silently skipping the module would have produced an inference checkpoint with
+the wrong forward function.
+
+The fix accepts both registered ordered containers PAI uses (`nn.ModuleList`
+and `nn.Sequential`) while retaining the branch-count and module-presence
+guards. Clean-graph dendrite/base classification now recognizes both types as
+well. A production-state reconstruction in a temporary directory restored
+exactly `fc.skip_weights.0` and matched the live PAI model exactly on a random
+four-example batch:
+
+```text
+max absolute output difference: 0.0
+torch.allclose(...):             True
+```
+
+No file under the saved production run was changed by that check.
+
+Independent review found the same stale `ModuleList`-only assumption in the
+step-3e activation-memory profiler. It would not have blocked recovery, but it
+could have undercounted the live residual-branch activation set after this real
+`Sequential` cleanup and therefore distorted one Pareto cost axis. The profiler
+now accepts both ordered containers, with a parameterized liveness regression
+covering each representation.
+
+### Root cause 2: pre/post mode sampling cannot see PAI's terminal `p` phase
+
+The LR selector inferred an integration only from externally sampled
+`previous_mode == "p" and next_mode == "n"`. At the configured one-dendrite
+maximum, PAI performs `n -> p -> n` entirely inside one
+`add_validation_score()` call. Both samples were consequently `n`, even though
+the dendrite was integrated, and `_restructure_lr_multiplier()` returned 1.0
+instead of the configured 0.25.
+
+This is visible in the durable phase trail: ordinary externally visible
+integrations at epochs 142 and 213 recorded the requested 0.25 multiplier,
+while terminal epoch 301 alone recorded 1.0. The training loss and score were
+not the cause; this was solely a transition-observation defect.
+
+The loop now samples PAI's monotonic `num_dendrites_integrated` counter before
+and after `add_validation_score()`. A counter increase applies the gentle
+restart even when the sampled modes are both `n`; the old `p -> n` check remains
+as a compatibility fallback if that private counter is unavailable. The phase
+trail records the before/after counters and the derived integration decision
+for future audit.
+
+### Root cause 3: the sweep mistook PAI's vendor export for KWS completion
+
+PAI writes `final_clean_pai.pt` inside `add_validation_score()`, before the KWS
+export shim runs and before KD resume, profiling, or `cycle_metadata.yaml`.
+`run_pruning_search()` nevertheless used existence of that vendor file alone
+to select its completed-candidate reuse path. Restarting after this exact crash
+would therefore have tried `_load_completed_result()` and failed on the absent
+cycle metadata instead of reaching the valid sidecar resume.
+
+Completed-candidate selection now requires both `final_clean_pai.pt` and
+`cycle_metadata.yaml`. A vendor final file without KWS metadata remains in the
+partial-candidate branch, where the paired sidecar selects normal recovery.
+This distinction is covered directly and requires no artifact move or delete.
+
+### Recovery of invocation `c94ed2f30330`
+
+The existing recovery pair is internally valid and should be reused:
+
+```text
+KWS sidecar completed_epoch: 301
+KWS sidecar next_epoch:      302
+run_id:                      9e163d95fbca4f80b2c7536151ce36e4
+native latest SHA-256:       6c50b17fb71be9ef17822112861578aac45426f0e32637e4bcdaf69de877dcd2
+tracker mode:                n
+num_dendrites_added:         1
+num_dendrites_integrated:    1
+configured max_dendrites:    1
+```
+
+`_load_pai_sidecar()` verified the path, schema, run ID, and native digest. The
+sidecar retains the full live graph and learned top coefficient. Because its
+tracker is already terminal, resume now retries export directly rather than
+training an unrequested epoch 302. This also prevents the historically saved
+1.0 optimizer reset from taking a step; the bad reset occurred after epoch 301
+and before the paired save, but no batch ever executed with it.
+
+The vendor-written `final_clean_pai.pt` in the failed run is not by itself the
+finished KWS deployment artifact because it lacks the restored skip
+coefficient. It must not be treated as proof that steps 3d-3f completed. The
+paired epoch-301 live state is the authoritative recovery source, and the
+normal resume path will replace the clean artifact atomically after applying
+the corrected export.
+
+### Regression coverage and verification
+
+Coverage now includes:
+
+1. restoration into PAI's actual `nn.Sequential` clean-branch shape;
+2. preservation of legacy `nn.ModuleList` support;
+3. an internal terminal `n -> p -> n` simulation that increments only the
+   integration counter and proves the reset uses 0.25 before the paired save;
+4. terminal-boundary detection for both the configured maximum and PAI's
+   `doing_pai=False` completion path;
+5. classification of a vendor-only final artifact as resumable rather than a
+   completed KWS cycle;
+6. reconstruction and parity export from the exact production state in an
+   isolated temporary directory; and
+7. identical residual activation-liveness accounting for clean `Sequential`
+   and training `ModuleList` branch containers.
+
+```text
+uv run --env-file .env python -m pytest \
+  tests/test_dendritic.py tests/test_dendritic_resume_regressions.py \
+  tests/test_prune_loop.py tests/test_profile.py -q
+```
+
+All **62/62** focused tests pass. `python -m compileall -q src tests` and
+`git diff --check` also pass. Per the PerforatedAI debugging protocol, no
+training script or pipeline was started during diagnosis.
+
+---
+
 ## 2026-09-12 — OPEN — duplicate `val_acc` key in the metrics JSONL
 
 **Run:** `outputs/full-run-20260912T063022Z` (stage 1 in progress; not a failure —
@@ -702,5 +872,201 @@ The optimizer reader was also hardened so malformed/foreign parameter groups
 remain `-1` (unmeasured), and repeated parameter references are not double
 counted. Direct regression coverage now verifies that base BatchNorm statistics
 stay fixed while base affine gradients still flow. **196/196 tests pass.**
+
+---
+
+## 6. Headless selector smoke check prompted for a PAI license and raised `EOFError`
+
+**Date:** 2026-09-13
+**Status:** RESOLVED AS AN INVOCATION/DIAGNOSTIC DEFECT; THE LIVE PIPELINE NEVER FAILED
+
+### Symptom
+
+A one-off smoke check intended to inspect the proposed `.fc`-only selector was
+started from a temporary working directory with the virtual environment's
+interpreter directly. During import it printed a PerforatedAI license message,
+fell back to an `email:` prompt, and then raised:
+
+```text
+EOFError: EOF when reading a line
+```
+
+No training epoch or selector code ran. The existing six-step pipeline process
+continued normally, so it was neither stopped nor restarted for this event.
+
+### Root cause
+
+This check bypassed both parts of the repository's documented PAI invocation
+contract:
+
+1. it used `.venv/bin/python` rather than `uv run --env-file .env ...`; and
+2. it changed the working directory from `KWS_Model` to a temporary directory.
+
+The proprietary `perforatedbp` extension validates its license during module
+import, before `configure_perforatedai()` handles the conversion selector. With
+the configured run environment absent, its fallback is an interactive prompt.
+The smoke process was headless, so `input()` immediately encountered EOF.
+
+This was **not** evidence that `.fc` selection is invalid, and it was not a
+training, resume, checkpoint, graph, or model defect. In particular, the
+failure occurred before any call to `set_modules_to_perforate()`.
+
+### Diagnostic hardening
+
+| Change | File |
+| --- | --- |
+| Added `import_pai_module()`, which preserves the original `EOFError` as the exception cause but raises an actionable `RuntimeError` explaining the supported root/env-aware invocation | `src/kws/optimize/pai_import.py` |
+| Routed every compiled PAI import through that boundary, including the two dendritic startup imports and the downstream candidate reload | `src/kws/optimize/dendritic.py`, `src/kws/pipeline.py` |
+| Documented that PAI-dependent commands must run from `KWS_Model` with `uv run --env-file .env ...` | `README.md` |
+| Added isolated tests for the success path, the headless-license-prompt path, and preservation of unrelated import failures; tests substitute the import function and never inspect credentials or contact the licensing service | `tests/test_pai_import.py` |
+
+The wrapper deliberately catches only `EOFError`. Import errors, ABI failures,
+and actual PAI defects retain their original exception types instead of being
+misreported as credential problems. No credential value or `.env` content was
+read, logged, or added to an artifact.
+
+### Verification
+
+```text
+uv run --env-file .env python -m pytest tests/test_pai_import.py tests/test_dendritic.py \
+  tests/test_dendritic_resume_regressions.py tests/test_pipeline.py
+```
+
+All 45 focused tests pass. The same env-aware invocation also imports both PAI
+compiled modules and `kws.pipeline` successfully.
+
+The supported operational rule for future selector probes is the same one used
+by production runs:
+
+```text
+cd KWS_Model
+uv run --env-file .env python -m <module-or-smoke-check>
+```
+
+---
+
+## 7. Legacy/minimal dendritic configs raised `KeyError: 'conversion'`
+
+**Date:** 2026-09-13
+**Status:** RESOLVED
+
+### Symptom
+
+The focused resume regression
+`test_restructure_resets_optimizer_before_the_only_paired_save` failed before
+it reached the optimizer-reset behavior it is designed to exercise:
+
+```text
+KeyError: 'conversion'
+```
+
+The exception came from `run_cycle()` while estimating the candidate's
+deployed parameter count. The regression's deliberately minimal
+`perforatedai` mapping contains only `enforce_base_weight_freeze`, matching the
+shape accepted before the `.fc`-only selector was added.
+
+### Root cause
+
+The selector change added a required positional conversion argument to the
+parameter estimator call and obtained it with `pai_cfg["conversion"]`. That
+made the new key mandatory even though the only historical behavior was
+`blocks_and_linear`, and other new PAI settings such as the post-integration LR
+multiplier already use backward-compatible defaults. The configuration path
+inside `configure_perforatedai()` had the same unconditional lookup, so fixing
+only the logging call would have moved the same failure later in a real legacy
+run.
+
+This was a regression in configuration compatibility. It did not indicate a
+training-data, checkpoint, graph, optimizer, or PerforatedAI runtime failure,
+and no pipeline was restarted from this failed unit test.
+
+Once that lookup was corrected, the same heavily mocked regression reached the
+new restart-audit assignment and exposed `KeyError: 'lr'`. Unlike conversion,
+`lr` was already mandatory for every real run through
+`_make_optimizer_and_scheduler()`; the test had omitted it only because that
+constructor is replaced by a stub. The fixture now supplies `lr: 0.001`, making
+its mock configuration faithful to the production contract while leaving
+runtime behavior unchanged.
+
+### Fix
+
+Both consumers now interpret an omitted conversion as
+`blocks_and_linear`, which is exactly the pre-change behavior:
+
+```python
+pai_cfg.get("conversion", "blocks_and_linear")
+```
+
+Explicit `conversion: fc_only` remains unchanged and continues to target only
+`.fc`. Unsupported explicit values still fail validation. The optimizer-reset
+regression retains its intentionally minimal configuration, and its estimator
+stub now accepts the optional conversion argument so the test continues to
+verify the production call contract as well as the optimizer/save ordering.
+
+### Verification
+
+Run the original failing regression plus the focused dendritic suites:
+
+```text
+uv run --env-file .env python -m pytest \
+  tests/test_dendritic_resume_regressions.py::test_restructure_resets_optimizer_before_the_only_paired_save \
+  tests/test_dendritic.py tests/test_dendritic_resume_regressions.py
+```
+
+The original failing regression passes, and the two focused dendritic suites
+pass **36/36** tests. Coverage now asserts both `run_cycle()`'s default and the
+historical module selector applied by `configure_perforatedai()` when the key
+is omitted.
+
+---
+
+## 8. Prune/KD reuse did not prove `best.pt` and `latest.pt` were one pair
+
+**Date:** 2026-09-13
+**Status:** RESOLVED DURING INDEPENDENT REVIEW
+
+### Symptom
+
+The phase-local step-3a/3b reuse helper checked the recipe, run ID, completion
+boundary, model configuration, pruning recipe, and teacher provenance, but it
+validated the best and latest checkpoint files independently. Two individually
+plausible files could therefore pass even when `best.pt` was stale and did not
+contain the durable best model recorded by `latest.pt`.
+
+No production run raised an exception from this defect. It was found by review
+before restarting the `.fc`-only experiment. The completed width-18 checkpoint
+pair was also checked directly and contains identical best-state tensors, so
+the stricter validation does not prevent the requested step-3c restart.
+
+### Root cause
+
+`train_model()` commits `best.pt` and `latest.pt` with separate atomic writes.
+That protects each file from partial bytes, but it cannot make the two-file
+update transactional. An interruption between writes, or a copied/stale file,
+can leave metadata that looks compatible while the model tensors differ. The
+reuse helper's comment said both files attested the same phase, but there was
+no cross-file state check enforcing that claim.
+
+### Fix
+
+The reuse boundary now requires both of the following:
+
+1. `best.pt`'s validation accuracy equals `latest.pt`'s durable best metric;
+2. every key and tensor in `best.pt["model_state_dict"]` exactly equals the
+   corresponding tensor in `latest.pt["best_model_state_dict"]`.
+
+A focused regression constructs a pair with matching metadata and metrics but
+different tensors and verifies it is rejected. The real completed width-18
+pair passes the same tensor-identity check.
+
+### Verification
+
+```text
+uv run --env-file .env python -m pytest tests/test_pai_import.py \
+  tests/test_dendritic.py tests/test_dendritic_resume_regressions.py \
+  tests/test_pipeline.py
+uv run --env-file .env python -m compileall -q src tests
+git diff --check
+```
 
 ---

@@ -416,6 +416,19 @@ def _write_summary(path: Path, summary: dict) -> None:
     temporary.replace(path)
 
 
+def _has_completed_cycle(run_dir: Path) -> bool:
+    """Return whether KWS, rather than PAI alone, completed the candidate.
+
+    PAI writes ``final_clean_pai.pt`` before KWS restores its one-dendrite
+    coefficient, runs resume KD, profiles the graph, and commits cycle
+    metadata.  The vendor file alone is therefore a resumable terminal
+    boundary, not a completed framework candidate.
+    """
+    return (run_dir / "final_clean_pai.pt").is_file() and (
+        run_dir / "cycle_metadata.yaml"
+    ).is_file()
+
+
 def run_pruning_search(
     checkpoint_path: str,
     data_cfg: dict,
@@ -525,9 +538,7 @@ def run_pruning_search(
         completed_run = None
         if index == 0 and reuse_run:
             completed_run = reuse_run
-        elif reuse_completed_candidates and (
-            Path(save_name) / "final_clean_pai.pt"
-        ).exists():
+        elif reuse_completed_candidates and _has_completed_cycle(Path(save_name)):
             completed_run = save_name
 
         if completed_run:

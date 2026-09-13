@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
-import importlib
 from pathlib import Path
 from typing import Any, cast
 
@@ -55,6 +54,7 @@ from kws.optimize.kd import (
     file_sha256,
     supports_pooled_features,
 )
+from kws.optimize.pai_import import import_pai_module
 from kws.optimize.quantize_qat import quantize_aware_distill_model
 from kws.train import (
     train as train_from_scratch,
@@ -560,7 +560,7 @@ def load_candidate_model(
     run's recorded metadata, re-perforated to the same shape, and loaded from
     the run's own clean checkpoint.
     """
-    UPA: Any = importlib.import_module("perforatedai.utils_perforatedai")
+    UPA: Any = import_pai_module("perforatedai.utils_perforatedai")
 
     from kws.optimize.dendritic import (
         build_cycle_base,

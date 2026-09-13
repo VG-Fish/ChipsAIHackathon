@@ -58,6 +58,194 @@ def test_explicit_resume_requires_the_selected_sidecar(tmp_path):
         )
 
 
+def test_completed_prune_kd_is_reused_when_only_pai_recipe_changes(tmp_path):
+    source = tmp_path / "student.pt"
+    teacher = tmp_path / "teacher.pt"
+    source.write_bytes(b"student")
+    teacher.write_bytes(b"teacher")
+    best_path = tmp_path / "best.pt"
+    latest_path = tmp_path / "latest.pt"
+    run_id = "run-123"
+    model_cfg = {"name": "candidate_w18", "block_channels": [18, 18]}
+    old_train = {
+        "epochs": 40,
+        "lr": 0.001,
+        "seed": 0,
+        "pruning": {"kind": "structured", "keep_ratio": 0.45},
+        "distillation": {"temperature": 1.0},
+        "perforatedai": {"conversion": "blocks_and_linear"},
+        "dendritic_schedule_epochs": 130,
+    }
+    new_train = {
+        **old_train,
+        "perforatedai": {
+            "conversion": "fc_only",
+            "post_integration_lr_multiplier": 0.25,
+        },
+    }
+    torch.save(
+        {
+            "run_id": run_id,
+            "stage": "sparsity",
+            "phase": "prune_kd",
+            "target_epochs": 40,
+            "completed_epoch": 40,
+            "best_metric_value": 0.81,
+            "best_model_state_dict": {"weight": torch.ones(1)},
+            "recipe": {
+                "source_checkpoint": str(source),
+                "teacher_checkpoint": str(teacher),
+                "train": old_train,
+                "pruning": old_train["pruning"],
+            },
+        },
+        latest_path,
+    )
+    torch.save(
+        {
+            "run_id": run_id,
+            "stage": "pruned_kd_finetune",
+            "model_cfg": model_cfg,
+            "sparsity": old_train["pruning"],
+            "distillation": {
+                "teacher_checkpoint": str(teacher),
+                "teacher_sha256": dendritic.file_sha256(str(teacher)),
+            },
+            "val_acc": 0.81,
+            "model_state_dict": {"weight": torch.ones(1)},
+        },
+        best_path,
+    )
+
+    reused = dendritic._load_reusable_prune_finetune_checkpoint(
+        best_path,
+        latest_path,
+        checkpoint_path=str(source),
+        teacher_checkpoint=str(teacher),
+        model_cfg=model_cfg,
+        train_cfg=new_train,
+        expected_run_id=run_id,
+    )
+
+    assert reused is not None
+    assert reused["val_acc"] == 0.81
+
+
+def test_completed_prune_kd_is_not_reused_after_phase_local_change(tmp_path):
+    source = tmp_path / "student.pt"
+    teacher = tmp_path / "teacher.pt"
+    source.write_bytes(b"student")
+    teacher.write_bytes(b"teacher")
+    best_path = tmp_path / "best.pt"
+    latest_path = tmp_path / "latest.pt"
+    model_cfg = {"name": "candidate", "block_channels": [18, 18]}
+    recorded_train = {
+        "epochs": 40,
+        "lr": 0.001,
+        "pruning": {"kind": "structured", "keep_ratio": 0.45},
+    }
+    torch.save(
+        {
+            "stage": "sparsity",
+            "phase": "prune_kd",
+            "target_epochs": 40,
+            "completed_epoch": 40,
+            "recipe": {
+                "source_checkpoint": str(source),
+                "teacher_checkpoint": str(teacher),
+                "train": recorded_train,
+                "pruning": recorded_train["pruning"],
+            },
+        },
+        latest_path,
+    )
+    torch.save(
+        {
+            "stage": "pruned_kd_finetune",
+            "model_cfg": model_cfg,
+            "sparsity": recorded_train["pruning"],
+            "distillation": {
+                "teacher_checkpoint": str(teacher),
+                "teacher_sha256": dendritic.file_sha256(str(teacher)),
+            },
+            "val_acc": 0.81,
+            "model_state_dict": {"weight": torch.ones(1)},
+        },
+        best_path,
+    )
+
+    changed = {**recorded_train, "lr": 0.0005}
+    assert dendritic._load_reusable_prune_finetune_checkpoint(
+        best_path,
+        latest_path,
+        checkpoint_path=str(source),
+        teacher_checkpoint=str(teacher),
+        model_cfg=model_cfg,
+        train_cfg=changed,
+        expected_run_id=None,
+    ) is None
+
+
+def test_completed_prune_kd_rejects_mismatched_best_and_latest_pair(tmp_path):
+    source = tmp_path / "student.pt"
+    teacher = tmp_path / "teacher.pt"
+    source.write_bytes(b"student")
+    teacher.write_bytes(b"teacher")
+    best_path = tmp_path / "best.pt"
+    latest_path = tmp_path / "latest.pt"
+    run_id = "run-123"
+    model_cfg = {"name": "candidate", "block_channels": [18, 18]}
+    train_cfg = {
+        "epochs": 40,
+        "lr": 0.001,
+        "pruning": {"kind": "structured", "keep_ratio": 0.45},
+    }
+    torch.save(
+        {
+            "run_id": run_id,
+            "stage": "sparsity",
+            "phase": "prune_kd",
+            "target_epochs": 40,
+            "completed_epoch": 40,
+            "best_metric_value": 0.81,
+            "best_model_state_dict": {"weight": torch.zeros(1)},
+            "recipe": {
+                "source_checkpoint": str(source),
+                "teacher_checkpoint": str(teacher),
+                "train": train_cfg,
+                "pruning": train_cfg["pruning"],
+            },
+        },
+        latest_path,
+    )
+    torch.save(
+        {
+            "run_id": run_id,
+            "stage": "pruned_kd_finetune",
+            "model_cfg": model_cfg,
+            "sparsity": train_cfg["pruning"],
+            "distillation": {
+                "teacher_checkpoint": str(teacher),
+                "teacher_sha256": dendritic.file_sha256(str(teacher)),
+            },
+            "val_acc": 0.81,
+            # This stale state does not match latest.pt's durable best.
+            "model_state_dict": {"weight": torch.ones(1)},
+        },
+        best_path,
+    )
+
+    assert dendritic._load_reusable_prune_finetune_checkpoint(
+        best_path,
+        latest_path,
+        checkpoint_path=str(source),
+        teacher_checkpoint=str(teacher),
+        model_cfg=model_cfg,
+        train_cfg=train_cfg,
+        expected_run_id=run_id,
+    ) is None
+
+
 def test_pai_pair_save_persists_kd_state_and_requires_matching_native_digest(
     tmp_path, monkeypatch
 ):
@@ -298,9 +486,13 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
     dataset = [(torch.ones(2), torch.tensor(0))]
     train_cfg = {
         "seed": 3,
+        "lr": 0.001,
         "pruning": {"kind": "structured", "keep_ratio": 1.0},
         "augment": False,
-        "perforatedai": {"enforce_base_weight_freeze": False},
+        "perforatedai": {
+            "enforce_base_weight_freeze": False,
+            "post_integration_lr_multiplier": 0.25,
+        },
         "label_smoothing": 0.0,
         "objective": "accuracy",
         "deployment": {
@@ -309,11 +501,16 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
             "latency_iterations": 1,
         },
     }
-    tracker = SimpleNamespace(
-        member_vars={"mode": "n"},
-        add_extra_score=lambda *_args: None,
-        add_validation_score=lambda _score, value: (value, True, True),
-    )
+    tracker = SimpleNamespace(member_vars={"mode": "n", "num_dendrites_integrated": 0})
+    tracker.add_extra_score = lambda *_args: None
+
+    def finish_with_internal_p_to_n_transition(_score, value):
+        # PAI's terminal path enters p and returns to n within this call.  The
+        # integration counter is the only externally observable transition.
+        tracker.member_vars["num_dendrites_integrated"] = 1
+        return value, True, True
+
+    tracker.add_validation_score = finish_with_internal_p_to_n_transition
     monkeypatch.setattr(dendritic.GPA, "pai_tracker", tracker)
     monkeypatch.setattr(dendritic, "get_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(
@@ -322,7 +519,13 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
         lambda *_args, **_kwargs: (model, checkpoint, model_cfg),
     )
     monkeypatch.setattr(dendritic, "cycle_fingerprint", lambda *_args: "recipe")
-    monkeypatch.setattr(dendritic, "estimate_one_dendrite_params", lambda _model: 2)
+    estimated_conversions = []
+
+    def estimate_params(_model, conversion="blocks_and_linear"):
+        estimated_conversions.append(conversion)
+        return 2
+
+    monkeypatch.setattr(dendritic, "estimate_one_dendrite_params", estimate_params)
     monkeypatch.setattr(
         dendritic,
         "build_datasets",
@@ -353,9 +556,13 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
             (reset_optimizer, _Stateful("reset-scheduler"), None, None),
         ]
     )
-    monkeypatch.setattr(
-        dendritic, "_make_optimizer_and_scheduler", lambda *_args, **_kwargs: next(optimizers)
-    )
+    optimizer_lr_multipliers = []
+
+    def make_optimizer(*_args, **kwargs):
+        optimizer_lr_multipliers.append(kwargs.get("lr_multiplier", 1.0))
+        return next(optimizers)
+
+    monkeypatch.setattr(dendritic, "_make_optimizer_and_scheduler", make_optimizer)
     paired_optimizers = []
     monkeypatch.setattr(
         dendritic,
@@ -393,6 +600,8 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
     )
 
     assert paired_optimizers == [reset_optimizer]
+    assert optimizer_lr_multipliers == [1.0, 0.25]
+    assert estimated_conversions == ["blocks_and_linear"]
 
 
 def test_post_pai_kd_materializes_best_checkpoint_when_zero_does_not_improve(

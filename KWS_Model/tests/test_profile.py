@@ -62,6 +62,29 @@ def test_peak_activation_is_the_largest_adjacent_pair_not_the_sum():
     assert peak == 40 * 98 + 8
 
 
+@pytest.mark.parametrize("container_type", [nn.ModuleList, nn.Sequential])
+def test_peak_activation_counts_both_pai_branch_container_types(container_type):
+    class Residual(nn.Module):
+        def __init__(self):
+            super().__init__()
+            branches = [nn.Identity(), nn.Identity()]
+            self.layer_array = (
+                container_type(*branches)
+                if container_type is nn.Sequential
+                else container_type(branches)
+            )
+
+        def forward(self, value):
+            branches = [branch(value) for branch in self.layer_array]
+            return branches[0] + branches[1]
+
+    # The wrapper retains its 4x4 input and both 4x4 branch outputs while
+    # combining them. Identities are otherwise excluded as non-allocating.
+    assert measure_peak_activation_bytes(
+        Residual(), (4, 4), bytes_per_activation=1
+    ) == 3 * 4 * 4
+
+
 def test_profile_reports_every_axis_the_frontier_compares():
     model = DSCNN(input_shape=(40, 98), num_classes=6, initial_channels=18,
                   initial_kernel=5, initial_stride=2, block_channels=[18, 18], dropout=0.2)

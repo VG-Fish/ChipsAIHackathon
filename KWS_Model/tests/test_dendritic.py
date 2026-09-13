@@ -1,6 +1,8 @@
+from types import SimpleNamespace
+from typing import cast
+
 import torch
 import yaml
-from typing import cast
 
 from kws.models.ds_cnn import build_ds_cnn
 from kws.optimize.dendritic import (
@@ -47,6 +49,7 @@ def test_cycle1_base_hits_expected_size_and_widths(tmp_path):
     assert model_cfg["block_channels"] == [18, 18]
     assert sum(parameter.numel() for parameter in model.parameters()) == 1716
     assert estimate_one_dendrite_params(model) == 2946
+    assert estimate_one_dendrite_params(model, "fc_only") == 1830
 
     model.eval()
     with torch.no_grad():
@@ -113,6 +116,31 @@ def test_restore_single_dendrite_skip_weights():
 
     assert restored == 1
     assert torch.equal(clean_module.skip_weights[0], weights["blocks.0"][0])
+    assert not clean_module.skip_weights[0].requires_grad
+
+
+def test_restore_single_dendrite_skip_weights_from_pai_sequential_cleanup():
+    """PAI 3.2.8 emits nn.Sequential, not ModuleList, for clean branches."""
+
+    class CleanModule(torch.nn.Module):
+        layer_array: torch.nn.Sequential
+        skip_weights: torch.nn.ParameterList
+
+        def __init__(self):
+            super().__init__()
+            self.layer_array = torch.nn.Sequential(
+                torch.nn.Identity(), torch.nn.Identity()
+            )
+
+    model = torch.nn.Module()
+    model.fc = CleanModule()
+    weights = {"fc": [torch.tensor([[0.25, -0.5]])]}
+
+    restored = _restore_single_dendrite_skip_weights(model, weights)
+    clean_module = cast(CleanModule, model.fc)
+
+    assert restored == 1
+    assert torch.equal(clean_module.skip_weights[0], weights["fc"][0])
     assert not clean_module.skip_weights[0].requires_grad
 
 
@@ -282,8 +310,10 @@ def test_pai_optimizer_keeps_kd_adapter_outside_pai_parameter_filter(monkeypatch
         "dendritic_schedule_epochs": 2,
     }
 
-    optimizer, _, adapter_optimizer, _ = dendritic._make_optimizer_and_scheduler(
-        model, train_cfg, loader_length=4, kd=kd
+    optimizer, scheduler, adapter_optimizer, adapter_scheduler = (
+        dendritic._make_optimizer_and_scheduler(
+            model, train_cfg, loader_length=4, kd=kd, lr_multiplier=0.25
+        )
     )
 
     model_parameter_ids = {id(parameter) for parameter in model.parameters()}
@@ -302,3 +332,129 @@ def test_pai_optimizer_keeps_kd_adapter_outside_pai_parameter_filter(monkeypatch
     assert tracker.optimizer is optimizer
     assert pai_parameter_ids == model_parameter_ids
     assert adapter_optimizer_ids == adapter_parameter_ids
+    assert scheduler.base_lrs == [0.00025]
+    assert adapter_scheduler.base_lrs == [0.00025]
+
+
+def test_fc_only_configuration_targets_exact_classifier(monkeypatch):
+    from kws.optimize import dendritic
+
+    class FakePAIConfig:
+        def __init__(self):
+            self.values = {}
+
+        def __getattr__(self, name):
+            if not name.startswith("set_"):
+                raise AttributeError(name)
+
+            def setter(value):
+                self.values[name.removeprefix("set_")] = value
+
+            return setter
+
+    pc = FakePAIConfig()
+    monkeypatch.setattr(dendritic, "GPA", SimpleNamespace(pc=pc))
+    monkeypatch.setattr(dendritic, "disarm_pai_debugger", lambda: None)
+
+    dendritic.configure_perforatedai(
+        {
+            "testing_dendrite_capacity": False,
+            "conversion": "fc_only",
+            "max_dendrites": 1,
+            "n_epochs_to_switch": 25,
+            "improvement_threshold": [0.001, 0.0001, 0.0],
+            "candidate_weight_initialization_multiplier": 0.01,
+            "initial_correlation_batches": 40,
+            "max_dendrite_tries": 2,
+            "forward_function": "tanh",
+        },
+        torch.device("cpu"),
+    )
+
+    assert pc.values["module_ids_to_perforate"] == [".fc"]
+    assert pc.values["modules_to_perforate"] == []
+    assert pc.values["module_names_to_perforate"] == []
+    assert pc.values["modules_to_track"] == [
+        dendritic.DSConvBlock,
+        torch.nn.Conv2d,
+        torch.nn.BatchNorm2d,
+    ]
+
+
+def test_configuration_without_conversion_uses_historical_selector(monkeypatch):
+    from kws.optimize import dendritic
+
+    class FakePAIConfig:
+        def __init__(self):
+            self.values = {}
+
+        def __getattr__(self, name):
+            if not name.startswith("set_"):
+                raise AttributeError(name)
+
+            def setter(value):
+                self.values[name.removeprefix("set_")] = value
+
+            return setter
+
+    pc = FakePAIConfig()
+    monkeypatch.setattr(dendritic, "GPA", SimpleNamespace(pc=pc))
+    monkeypatch.setattr(dendritic, "disarm_pai_debugger", lambda: None)
+
+    dendritic.configure_perforatedai(
+        {
+            "testing_dendrite_capacity": False,
+            "max_dendrites": 1,
+            "n_epochs_to_switch": 25,
+            "improvement_threshold": [0.001, 0.0001, 0.0],
+            "candidate_weight_initialization_multiplier": 0.01,
+            "initial_correlation_batches": 40,
+            "max_dendrite_tries": 2,
+            "forward_function": "tanh",
+        },
+        torch.device("cpu"),
+    )
+
+    assert pc.values["module_ids_to_perforate"] == []
+    assert pc.values["modules_to_perforate"] == [
+        dendritic.DSConvBlock,
+        torch.nn.Linear,
+    ]
+    assert pc.values["modules_to_track"] == [
+        torch.nn.Conv2d,
+        torch.nn.BatchNorm2d,
+    ]
+
+
+def test_gentle_restart_applies_only_after_dendrite_integration():
+    from kws.optimize.dendritic import _restructure_lr_multiplier
+
+    assert _restructure_lr_multiplier("p", "n", 0.25) == 0.25
+    # At the terminal dendrite limit PAI performs n -> p -> n inside one
+    # add_validation_score call, so both externally sampled modes are n.
+    assert (
+        _restructure_lr_multiplier(
+            "n", "n", 0.25, dendrite_integrated=True
+        )
+        == 0.25
+    )
+    assert _restructure_lr_multiplier("n", "p", 0.25) == 1.0
+    assert _restructure_lr_multiplier("n", "n", 0.25) == 1.0
+
+
+def test_completed_pai_tracker_boundary_is_export_only(monkeypatch):
+    from kws.optimize import dendritic
+
+    tracker = SimpleNamespace(
+        member_vars={
+            "doing_pai": True,
+            "num_dendrites_integrated": 1,
+        }
+    )
+    monkeypatch.setattr(dendritic.GPA, "pai_tracker", tracker)
+
+    assert dendritic.pai_tracker_at_terminal_boundary(1)
+    assert not dendritic.pai_tracker_at_terminal_boundary(2)
+
+    tracker.member_vars["doing_pai"] = False
+    assert dendritic.pai_tracker_at_terminal_boundary(2)

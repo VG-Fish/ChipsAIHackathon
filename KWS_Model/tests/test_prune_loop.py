@@ -10,6 +10,7 @@ from kws.optimize.dendritic import (
 )
 from kws.optimize.dendritic_prune_loop import (
     ParetoSearch,
+    _has_completed_cycle,
     _load_completed_result,
     _target_model_cfg,
     candidate_costs,
@@ -123,6 +124,17 @@ def test_widths_descend_to_the_configured_minimum():
     assert candidate_widths(18, 13, 3) == [18, 15, 13]
     with pytest.raises(ValueError):
         candidate_widths(4, 8, 1)
+
+
+def test_vendor_final_artifact_alone_is_a_resumable_not_completed_cycle(tmp_path):
+    run_dir = tmp_path / "candidate_w18"
+    run_dir.mkdir()
+    (run_dir / "final_clean_pai.pt").write_bytes(b"vendor clean state")
+
+    assert not _has_completed_cycle(run_dir)
+
+    (run_dir / "cycle_metadata.yaml").write_text("status: complete\n")
+    assert _has_completed_cycle(run_dir)
 
 
 def test_completed_run_reuse_requires_framework_provenance_and_keeps_resume_score(
