@@ -200,6 +200,37 @@ def test_restore_loads_kd_adapter_before_its_optimizer_and_loads_model_strictly(
     assert events.index("kd-strict-True") < events.index("adapter-optimizer")
 
 
+def test_restore_pai_tracker_uses_the_sidecars_committed_tracker_string(monkeypatch):
+    committed = (
+        "num_epochs_run,98\n"
+        "epoch_last_improved,91\n"
+        "accuracies,\n"
+        "0.8,0.81\n"
+    )
+    restored: list[str] = []
+    tracker = SimpleNamespace(from_string=restored.append)
+    monkeypatch.setattr(dendritic.GPA, "pai_tracker", tracker)
+
+    dendritic._restore_pai_tracker_state(
+        {
+            "tracker_string": torch.tensor(
+                list(committed.encode("utf-8")), dtype=torch.uint8
+            )
+        }
+    )
+
+    assert restored == [committed]
+
+
+def test_restore_pai_tracker_rejects_a_missing_tracker_string(monkeypatch):
+    monkeypatch.setattr(
+        dendritic.GPA, "pai_tracker", SimpleNamespace(from_string=lambda _value: None)
+    )
+
+    with pytest.raises(ValueError, match="missing its tracker_string"):
+        dendritic._restore_pai_tracker_state({})
+
+
 def test_pai_epoch_metrics_include_named_kd_losses_and_adapter_lr(monkeypatch):
     model = torch.nn.Linear(2, 2)
     optimizer = _Stateful("model")

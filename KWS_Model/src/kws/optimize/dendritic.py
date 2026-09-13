@@ -288,6 +288,39 @@ def _load_pai_sidecar(
     return state
 
 
+def _restore_pai_tracker_state(model_state: Mapping[str, Any]) -> None:
+    """Restore PAI's exact committed tracker after its native load advances it.
+
+    ``UPA.load_system(..., load_from_restart=True)`` reconstructs the tracker
+    from the native model's ``tracker_string`` and then starts another PAI
+    epoch.  The KWS loop already saves that string *after* the completed epoch,
+    so the extra advance makes ``epoch_last_improved`` one larger than the
+    restored accuracy arrays.  PAI's native graph renderer then indexes past
+    the end of ``accuracies`` on the first resumed validation.
+
+    The project sidecar contains the exact model state attested at the durable
+    metric boundary, including ``tracker_string``.  Reloading that string after
+    the native graph/model reconstruction removes only the spurious advance;
+    optimizer and scheduler state are restored separately below.
+    """
+    serialized = model_state.get("tracker_string")
+    if not isinstance(serialized, torch.Tensor) or serialized.ndim != 1:
+        raise ValueError(
+            "PAI resume sidecar model state is missing its tracker_string tensor"
+        )
+    try:
+        tracker_text = bytes(
+            serialized.detach().to(device="cpu", dtype=torch.uint8).tolist()
+        ).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError("PAI resume sidecar has an invalid tracker_string") from error
+
+    restore = getattr(GPA.pai_tracker, "from_string", None)
+    if not callable(restore):
+        raise RuntimeError("installed PerforatedAI cannot restore tracker state")
+    restore(tracker_text)
+
+
 def _restore_pai_training_state(
     state: dict,
     *,
@@ -1552,6 +1585,7 @@ def run_cycle(
             )
             if restored is not None:
                 model = restored.to(device)
+            _restore_pai_tracker_state(pai_state["model_state_dict"])
             logger.info("Loaded paired PAI restart state for %s", run_dir)
     logger.info("PAI-wrapped initial parameter count: %d", UPA.count_params(model))
 
