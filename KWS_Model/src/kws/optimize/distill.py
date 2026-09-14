@@ -175,6 +175,10 @@ def distill(
         student_checkpoint,
     )
 
+    # Keep model initialization independent of teacher construction and
+    # feature-shape probing.  This makes the supervised control and the KD
+    # run genuinely matched when they use the same seed and architecture.
+    set_seed(train_cfg["seed"])
     student = build_model(student_model_cfg, input_shape, num_classes).to(device)
     if student_checkpoint is not None:
         initial = torch.load(student_checkpoint, map_location=device, weights_only=False)
@@ -217,6 +221,7 @@ def distill(
         train_cfg["label_smoothing"],
         device,
         student_feature_dim=student_fc.in_features,
+        anneal=(train_cfg.get("distillation") or {}).get("anneal"),
     )
     if layout is not None:
         layout.ensure_tree()

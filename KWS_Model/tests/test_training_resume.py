@@ -231,6 +231,13 @@ def test_response_kd_diagnostics_survive_exact_resume(tmp_path):
         model = TinyClassifier()
         kd = DistillationCriterion(
             cast(Any, TinyTeacher()), weights, 0.1, torch.device("cpu"),
+            anneal={
+                "type": "linear",
+                "start_epoch": 0,
+                "end_epoch": 2,
+                "response_weight_start": 0.0,
+                "response_weight_end": 0.5,
+            },
         )
         train_loader, val_loader = _loaders(7)
 
@@ -243,7 +250,17 @@ def test_response_kd_diagnostics_survive_exact_resume(tmp_path):
             {**_cfg(), "label_smoothing": 0.1}, kd=kd,
             recorder=MetricsRecorder(path.with_suffix(".jsonl"), stage="student", phase="distill"),
             latest_path=path, resume_state=resume_state,
-            stage="student", phase="distill", recipe={"kd": weights.as_dict()},
+            stage="student", phase="distill",
+            recipe={
+                "kd": weights.as_dict(),
+                "anneal": {
+                    "type": "linear",
+                    "start_epoch": 0,
+                    "end_epoch": 2,
+                    "response_weight_start": 0.0,
+                    "response_weight_end": 0.5,
+                },
+            },
             on_epoch_end=on_epoch_end,
         )
         return model, result

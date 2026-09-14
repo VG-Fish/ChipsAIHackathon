@@ -1,0 +1,9 @@
+# SparkNet C=12 with a paper-faithful 40-channel stochastic gate.
+# The gate-width comparison keeps the convolutional backbone and all training
+# settings fixed relative to sparknet_c12.yaml.  On (40, 101) log-mel input it
+# has 3,800 parameters and about 305,500 MACs, still below the XS budget.
+family: sparknet
+name: sparknet_c12_g40
+channels: 12
+gate_channels: 40
+sparsity_weight: 0.01

@@ -6,6 +6,8 @@ from typing import Any, cast
 from kws.models.ds_cnn import DSCNN
 from kws.optimize.kd import (
     DistillationCriterion,
+    FrozenTeacher,
+    KDAnnealing,
     KDWeights,
     distillation_diagnostics,
     distillation_losses,
@@ -21,6 +23,76 @@ def test_weights_must_form_a_convex_mix():
         KDWeights(feature_weight=-0.1, response_weight=0.5, classification_weight=0.6)
     with pytest.raises(ValueError):
         KDWeights(temperature=0.0)
+
+
+def test_linear_kd_annealing_preserves_convex_weights():
+    base = KDWeights(feature_weight=0.0, response_weight=0.5, classification_weight=0.5)
+    schedule = KDAnnealing.from_config(
+        {
+            "type": "linear",
+            "start_epoch": 0,
+            "end_epoch": 40,
+            "response_weight_start": 0.0,
+            "response_weight_end": 0.5,
+        },
+        base,
+    )
+    assert schedule is not None
+    assert schedule.weights(base, 0).as_dict() == {
+        "temperature": 1.0,
+        "feature_weight": 0.0,
+        "response_weight": 0.0,
+        "classification_weight": 1.0,
+    }
+    midpoint = schedule.weights(base, 20)
+    assert midpoint.response_weight == pytest.approx(0.25)
+    assert midpoint.classification_weight == pytest.approx(0.75)
+    endpoint = schedule.weights(base, 40)
+    assert endpoint.as_dict() == base.as_dict()
+    assert schedule.weights(base, 100).as_dict() == base.as_dict()
+
+
+def test_kd_annealing_rejects_unknown_or_invalid_options():
+    base = KDWeights(feature_weight=0.0, response_weight=0.5, classification_weight=0.5)
+    with pytest.raises(ValueError, match="unknown distillation.anneal"):
+        KDAnnealing.from_config({"wat": 1}, base)
+    with pytest.raises(ValueError, match="end_epoch"):
+        KDAnnealing.from_config({"start_epoch": 3, "end_epoch": 2}, base)
+    with pytest.raises(ValueError, match="response_weight_start"):
+        KDAnnealing.from_config({"response_weight_start": 1.1}, base)
+
+
+def test_teacher_construction_does_not_consume_student_initialization_rng(tmp_path):
+    from kws.models.ds_cnn import build_ds_cnn
+
+    model_cfg = {
+        "name": "tiny_teacher",
+        "initial_channels": 2,
+        "initial_kernel": 3,
+        "initial_stride": 1,
+        "block_channels": [2],
+        "dropout": 0.0,
+    }
+    torch.manual_seed(7)
+    source = build_ds_cnn(model_cfg, (8, 8), 2)
+    checkpoint = tmp_path / "teacher.pt"
+    torch.save(
+        {
+            "model_cfg": model_cfg,
+            "input_shape": (8, 8),
+            "num_classes": 2,
+            "num_keywords": 1,
+            "model_state_dict": source.state_dict(),
+        },
+        checkpoint,
+    )
+
+    torch.manual_seed(123)
+    expected = torch.rand(1)
+    torch.manual_seed(123)
+    FrozenTeacher(checkpoint, torch.device("cpu"))
+    actual = torch.rand(1)
+    torch.testing.assert_close(actual, expected)
 
 
 def test_dropping_features_renormalizes_instead_of_shrinking_the_loss():

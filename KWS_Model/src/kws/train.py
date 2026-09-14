@@ -358,6 +358,11 @@ def run_finetune(
         epoch_started = time.monotonic()
         set_train_mode_preserving_frozen_batchnorm(model)
         if kd is not None:
+            set_epoch = getattr(kd, "set_epoch", None)
+            if callable(set_epoch):
+                # Schedules are evaluated from the completed-epoch index, so
+                # a resumed run selects the same mix as an uninterrupted run.
+                set_epoch(epoch)
             kd.train()
         running: dict[str, torch.Tensor] = {
             "total": torch.zeros((), dtype=torch.float32, device=device)
@@ -423,6 +428,15 @@ def run_finetune(
             "seed": train_cfg.get("seed"),
             **{f"train_{name}": value for name, value in train_losses.items() if name != "total"},
         }
+        if kd is not None:
+            effective = getattr(kd, "weights", None)
+            if effective is not None:
+                record.update({
+                    "kd_temperature": effective.temperature,
+                    "kd_feature_weight": effective.feature_weight,
+                    "kd_response_weight": effective.response_weight,
+                    "kd_classification_weight": effective.classification_weight,
+                })
         if extra_epoch_fields is not None:
             record.update(dict(extra_epoch_fields()))
         global_step += len(train_loader)
@@ -656,6 +670,11 @@ def train(
     input_shape = (sample_features.shape[-2], sample_features.shape[-1])
     num_classes = len(label_names)
 
+    # Dataset construction may initialize feature transforms or consume
+    # randomness while probing a sample.  Re-establish the explicit model-init
+    # boundary so frontend/config changes cannot silently change a student's
+    # initial weights for the same seed.
+    set_seed(train_cfg["seed"])
     model = build_model(model_cfg, input_shape, num_classes).to(device)
     logger.info("Model %s: %d params, input_shape=%s, num_classes=%d",
                 model_cfg["name"], sum(p.numel() for p in model.parameters()), input_shape, num_classes)

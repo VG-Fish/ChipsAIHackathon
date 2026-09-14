@@ -58,6 +58,12 @@ including label smoothing 0.1, augmentation, stochastic gates, and 200 epochs.
 The measured logit-gradient ratio becomes roughly 1.2, with a less redundant
 direction. This is a bounded next experiment, not a tuned optimum.
 
+For the next controlled experiment, `configs/train/light_kd_annealed.yaml`
+uses the same recipe but linearly ramps response KD from 0 to 0.5 over
+zero-based epochs 0--40. The checkpointed KD state records this schedule, and
+epoch metrics include the effective response/classification weights so resumes
+and comparisons are auditable.
+
 Live training now records teacher accuracy, confidence, true-class probability,
 entropy, weighted loss components, and analytical KD/CE logit-gradient
 balance/alignment. Those diagnostics are detached and do not change the loss or

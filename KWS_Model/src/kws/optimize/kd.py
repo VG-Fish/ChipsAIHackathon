@@ -100,6 +100,114 @@ class KDWeights:
         }
 
 
+@dataclass(frozen=True)
+class KDAnnealing:
+    """Linear schedule for introducing the teacher response target.
+
+    The feature weight stays fixed.  The response weight is interpolated from
+    ``response_weight_start`` through ``response_weight_end`` (the configured
+    KD response weight by default), and the classification weight is the
+    complement so that every effective recipe remains a convex mix.  Epochs
+    are zero-based: ``start_epoch=0`` applies to the first training epoch.
+    """
+
+    start_epoch: int = 0
+    end_epoch: int = 0
+    response_weight_start: float = 0.0
+    response_weight_end: float | None = None
+    schedule_type: str = "linear"
+
+    @classmethod
+    def from_config(
+        cls, config: Mapping | None, base_weights: KDWeights,
+    ) -> "KDAnnealing | None":
+        if config is None:
+            return None
+        if not isinstance(config, Mapping):
+            raise TypeError("distillation.anneal must be a mapping")
+        allowed = {
+            "type", "start_epoch", "end_epoch",
+            "response_weight_start", "response_weight_end",
+        }
+        unknown = sorted(set(config).difference(allowed))
+        if unknown:
+            raise ValueError(f"unknown distillation.anneal options: {unknown}")
+        schedule_type = str(config.get("type", "linear"))
+        if schedule_type != "linear":
+            raise ValueError(
+                f"unsupported distillation anneal type {schedule_type!r}; "
+                "expected 'linear'"
+            )
+        start_epoch = int(config.get("start_epoch", 0))
+        end_epoch = int(config.get("end_epoch", 0))
+        if start_epoch < 0 or end_epoch < 0:
+            raise ValueError("distillation anneal epochs must be non-negative")
+        if end_epoch < start_epoch:
+            raise ValueError(
+                "distillation anneal end_epoch must be >= start_epoch"
+            )
+        start = float(config.get("response_weight_start", 0.0))
+        end_value = config.get("response_weight_end", base_weights.response_weight)
+        end = float(end_value)
+        maximum = 1.0 - base_weights.feature_weight
+        if not 0.0 <= start <= maximum:
+            raise ValueError(
+                "distillation anneal response_weight_start must be between "
+                f"0 and {maximum:g}"
+            )
+        if not 0.0 <= end <= maximum:
+            raise ValueError(
+                "distillation anneal response_weight_end must be between "
+                f"0 and {maximum:g}"
+            )
+        return cls(
+            start_epoch=start_epoch,
+            end_epoch=end_epoch,
+            response_weight_start=start,
+            response_weight_end=end,
+            schedule_type=schedule_type,
+        )
+
+    def weights(self, base_weights: KDWeights, epoch: int) -> KDWeights:
+        """Return the effective weights for one zero-based epoch."""
+        if epoch < 0:
+            raise ValueError("epoch must be non-negative")
+        end = (
+            base_weights.response_weight
+            if self.response_weight_end is None
+            else self.response_weight_end
+        )
+        if self.end_epoch == self.start_epoch:
+            response = end
+        elif epoch <= self.start_epoch:
+            response = self.response_weight_start
+        elif epoch >= self.end_epoch:
+            response = end
+        else:
+            progress = (epoch - self.start_epoch) / (
+                self.end_epoch - self.start_epoch
+            )
+            response = self.response_weight_start + progress * (
+                end - self.response_weight_start
+            )
+        return replace(
+            base_weights,
+            response_weight=response,
+            classification_weight=(
+                1.0 - base_weights.feature_weight - response
+            ),
+        )
+
+    def as_dict(self) -> dict:
+        return {
+            "type": self.schedule_type,
+            "start_epoch": self.start_epoch,
+            "end_epoch": self.end_epoch,
+            "response_weight_start": self.response_weight_start,
+            "response_weight_end": self.response_weight_end,
+        }
+
+
 def distillation_losses(
     student_logits: torch.Tensor,
     teacher_logits: torch.Tensor,
@@ -212,11 +320,17 @@ class FrozenTeacher(nn.Module):
     def __init__(self, checkpoint_path: str | Path, device: torch.device):
         super().__init__()
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        model = build_ds_cnn(
-            checkpoint["model_cfg"],
-            checkpoint_input_shape(checkpoint),
-            checkpoint["num_classes"],
-        )
+        # Loading a teacher must not perturb the student's seeded
+        # initialization.  ``build_ds_cnn`` initializes parameters before the
+        # checkpoint overwrites them, consuming the process-global CPU RNG.
+        # Isolate that construction so a supervised run and its KD control
+        # start from exactly the same student weights for the same seed.
+        with torch.random.fork_rng(devices=[]):
+            model = build_ds_cnn(
+                checkpoint["model_cfg"],
+                checkpoint_input_shape(checkpoint),
+                checkpoint["num_classes"],
+            )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device).eval()
         for parameter in model.parameters():
@@ -266,6 +380,7 @@ class DistillationCriterion:
         device: torch.device,
         *,
         student_feature_dim: int | None = None,
+        anneal: Mapping | None = None,
     ):
         self.teacher = teacher
         self.label_smoothing = label_smoothing
@@ -288,6 +403,18 @@ class DistillationCriterion:
                 self.adapter = nn.Linear(
                     student_feature_dim, teacher.feature_dim, bias=False,
                 ).to(device)
+        self.base_weights = self.weights
+        self.anneal = KDAnnealing.from_config(anneal, self.base_weights)
+        self.current_epoch: int | None = None
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the effective KD mix for a zero-based training epoch."""
+        self.current_epoch = int(epoch)
+        self.weights = (
+            self.anneal.weights(self.base_weights, self.current_epoch)
+            if self.anneal is not None
+            else self.base_weights
+        )
 
     @property
     def uses_features(self) -> bool:
@@ -314,10 +441,11 @@ class DistillationCriterion:
         """
         return {
             "format_version": self.state_format_version,
-            "weights": self.weights.as_dict(),
+            "weights": self.base_weights.as_dict(),
             "adapter_state_dict": (
                 self.adapter.state_dict() if self.adapter is not None else None
             ),
+            "anneal": self.anneal.as_dict() if self.anneal is not None else None,
         }
 
     def load_state_dict(self, state: Mapping, *, strict: bool = True):
@@ -326,8 +454,9 @@ class DistillationCriterion:
             raise TypeError("KD state must be a mapping")
 
         required = {"format_version", "weights", "adapter_state_dict"}
+        optional = {"anneal"}
         missing = required.difference(state)
-        unexpected = set(state).difference(required)
+        unexpected = set(state).difference(required | optional)
         if strict and (missing or unexpected):
             details = []
             if missing:
@@ -342,8 +471,12 @@ class DistillationCriterion:
                 f"unsupported KD state format {version!r}; "
                 f"expected {self.state_format_version}"
             )
-        if state.get("weights") != self.weights.as_dict():
+        if state.get("weights") != self.base_weights.as_dict():
             raise RuntimeError("KD state weights do not match the requested recipe")
+        saved_anneal = state.get("anneal")
+        expected_anneal = self.anneal.as_dict() if self.anneal is not None else None
+        if saved_anneal != expected_anneal:
+            raise RuntimeError("KD state annealing does not match the requested recipe")
 
         adapter_state = state.get("adapter_state_dict")
         if self.adapter is None:
@@ -406,7 +539,9 @@ class DistillationCriterion:
             "teacher_sha256": self.teacher.checkpoint_sha256,
             "teacher_model": self.teacher.model_cfg["name"],
             "teacher_val_acc": self.teacher.val_acc,
-            "weights": self.weights.as_dict(),
+            "weights": self.base_weights.as_dict(),
+            "anneal": self.anneal.as_dict() if self.anneal is not None else None,
+            "effective_weights": self.weights.as_dict(),
             "feature_adapter": (
                 "training_only_linear_checkpointed_not_deployed"
                 if self.adapter is not None

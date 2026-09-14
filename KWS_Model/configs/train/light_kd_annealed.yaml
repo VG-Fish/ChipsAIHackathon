@@ -1,0 +1,38 @@
+# Light SparkNet recipe plus a reproducible response-KD ramp.  Start as the
+# supervised objective for the first epoch and linearly introduce the teacher
+# response target over epochs 0..40; classification receives the complement.
+# The frontend is selected by the data config used for the supervised winner.
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  spec_augment: false
+epochs: 200
+batch_size: 256
+num_workers: 6
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+seed: 0
+
+distillation:
+  temperature: 2.0
+  feature_weight: 0.0
+  response_weight: 0.5
+  classification_weight: 0.5
+  anneal:
+    type: linear
+    start_epoch: 0
+    end_epoch: 40
+    response_weight_start: 0.0
+    response_weight_end: 0.5

@@ -78,6 +78,49 @@ uv run python -m kws.train \
 The pipeline accepts the same flag when reusing or continuing stages in an
 existing run root.
 
+### Controlled SparkNet frontend/gate comparison
+
+For a reproducible Phase-B comparison, keep `configs/train/light.yaml`, the
+seed, batch size, workers, and output layout fixed while changing only the
+data frontend and gate width. Run the four supervised controls:
+
+```bash
+for frontend in speech_commands_v2.yaml speech_commands_v2_mfcc32.yaml; do
+  for gate in 32 40; do
+    name="sparknet_c12_${frontend%.yaml}_g${gate}"
+    model=configs/model/sparknet_c12.yaml
+    [ "$gate" = 40 ] && model=configs/model/sparknet_c12_g40.yaml
+    uv run python -m kws.train \
+      --data-config "configs/data/$frontend" \
+      --model-config "$model" \
+      --train-config configs/train/light.yaml \
+      --stage student --seed 0 --graphs \
+      --output-dir "outputs/phase_b/$name"
+  done
+done
+```
+
+Select the highest validation accuracy (and retain the parameter/MAC cost)
+from those four runs. Then use that exact data/model pair for the annealed KD
+experiment. `configs/train/light_kd_annealed.yaml` starts with pure
+classification loss and linearly ramps response KD from 0 to 0.5 over epochs
+0–40, logging the effective weights each epoch:
+
+```bash
+uv run python -m kws.optimize.distill \
+  --teacher-checkpoint models/checkpoints/ds_cnn_l_12class.pt \
+  --data-config configs/data/speech_commands_v2.yaml \
+  --student-model-config configs/model/sparknet_c12.yaml \
+  --train-config configs/train/light_kd_annealed.yaml \
+  --output-dir outputs/phase_b/sparknet_c12_logmel_g32_kd_annealed \
+  --graphs --seed 0
+```
+
+The current DS-CNN-L teacher expects 40-bin log-mel inputs. If MFCC-32 wins
+the supervised comparison, first provide a teacher checkpoint trained on the
+same MFCC-32 frontend; distillation deliberately rejects a teacher/student
+feature-shape mismatch instead of comparing incompatible inputs.
+
 The run root contains `manifest.yaml`, append-only invocation logs under
 `logs/`, effective config snapshots under `metadata/configs/`, canonical
 epoch JSONL under `metrics/`, separate resumable `latest.pt` and deployable
