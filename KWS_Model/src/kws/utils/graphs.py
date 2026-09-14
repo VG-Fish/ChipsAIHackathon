@@ -26,7 +26,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, TypeGuard
 
 
 GRAPHS_ENV_VAR = "KWS_GRAPHS"
@@ -113,7 +113,7 @@ def _scalar(value: Any) -> Any:
     return value
 
 
-def _is_number(value: Any) -> bool:
+def _is_number(value: Any) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
@@ -140,6 +140,12 @@ def render_csv(records: Sequence[dict]) -> str:
 
 def _axis_for(name: str) -> str | None:
     lowered = name.lower()
+    if lowered in {
+        "train_teacher_confidence", "train_teacher_true_class_probability",
+    }:
+        return "accuracy"  # Probabilities share the accuracy scale.
+    if lowered.startswith("train_kd_logit_grad_") or lowered == "train_teacher_entropy_nats":
+        return "loss"  # General scalar axis, also used for non-loss diagnostics.
     if any(token in lowered for token in _LOSS_TOKENS):
         return "loss"
     if any(token in lowered for token in _ACCURACY_TOKENS):
@@ -163,13 +169,11 @@ def build_series(records: Sequence[dict]) -> list[dict]:
 
     # ``val_acc`` and ``val_accuracy`` are the same curve under two names; keep
     # whichever spelling is more explicit so the legend reads cleanly.
-    preferred: dict[tuple, str] = {}
-    for name in sorted(points):
-        signature = tuple(round(value, 12) for _, value in points[name])
-        chosen = preferred.get(signature)
-        if chosen is None or len(name) > len(chosen):
-            preferred[signature] = name
-    kept = set(preferred.values())
+    kept = set(points)
+    if "val_acc" in points and points["val_acc"] == points.get("val_accuracy"):
+        kept.remove("val_acc")
+    # Other fields can happen to have equal values (especially after epoch 1)
+    # without being aliases: retain teacher confidence, accuracy, gradients, etc.
 
     series = [
         {"name": name, "axis": _axis_for(name), "points": points[name]}

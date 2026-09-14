@@ -221,6 +221,54 @@ def test_kd_adapter_is_checkpointed_and_restored(tmp_path):
     assert torch.equal(resumed_adapter.weight, source_adapter.weight)
 
 
+def test_response_kd_diagnostics_survive_exact_resume(tmp_path):
+    weights = KDWeights(
+        temperature=2.0, feature_weight=0.0,
+        response_weight=0.5, classification_weight=0.5,
+    )
+
+    def run(path, *, resume_state=None, stop_after=None):
+        model = TinyClassifier()
+        kd = DistillationCriterion(
+            cast(Any, TinyTeacher()), weights, 0.1, torch.device("cpu"),
+        )
+        train_loader, val_loader = _loaders(7)
+
+        def on_epoch_end(record):
+            if record["epoch"] == stop_after:
+                raise RuntimeError("simulated interruption")
+
+        result = run_finetune(
+            model, train_loader, val_loader, torch.device("cpu"),
+            {**_cfg(), "label_smoothing": 0.1}, kd=kd,
+            recorder=MetricsRecorder(path.with_suffix(".jsonl"), stage="student", phase="distill"),
+            latest_path=path, resume_state=resume_state,
+            stage="student", phase="distill", recipe={"kd": weights.as_dict()},
+            on_epoch_end=on_epoch_end,
+        )
+        return model, result
+
+    set_seed(123)
+    full_model, full = run(tmp_path / "full.pt")
+    set_seed(123)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        run(tmp_path / "split.pt", stop_after=2)
+    state = torch.load(tmp_path / "split.pt", map_location="cpu", weights_only=False)
+    set_seed(999)
+    resumed_model, resumed = run(tmp_path / "split.pt", resume_state=state)
+
+    assert len(full.history) == len(resumed.history) == 4
+    for left, right in zip(full.history, resumed.history):
+        assert {k: v for k, v in left.items() if k != "elapsed_seconds"} == {
+            k: v for k, v in right.items() if k != "elapsed_seconds"
+        }
+        assert "train_teacher_accuracy" in right
+        assert "train_kd_logit_grad_norm_ratio" in right
+        assert "train_weighted_response_loss" in right
+    for key, value in full_model.state_dict().items():
+        assert torch.equal(value, resumed_model.state_dict()[key])
+
+
 class TinyAuxiliaryClassifier(TinyClassifier):
     """Adds a constant auxiliary term so the weighted total is predictable."""
 

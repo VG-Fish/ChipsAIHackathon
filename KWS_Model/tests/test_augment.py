@@ -234,6 +234,13 @@ def test_light_recipe_disables_speed_background_noise_and_spec_augment():
     with open("configs/train/light_kd.yaml") as f:
         light_kd = yaml.safe_load(f)
     assert {k: v for k, v in light_kd.items() if k != "distillation"} == light
+    assert light_kd["distillation"] == {
+        "temperature": 2.0,
+        "feature_weight": 0.0,
+        "response_weight": 0.5,
+        "classification_weight": 0.5,
+    }
+    assert light_kd["label_smoothing"] == 0.1
 
     waveform_augmenter, spec_augmenter = build_augmenters(
         light["augmentation"], REAL_NOISE_DIR, 16000,

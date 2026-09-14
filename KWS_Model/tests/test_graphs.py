@@ -77,7 +77,7 @@ def test_recorder_writes_chart_and_csv_only_when_enabled(tmp_path):
     assert csv_path.exists() and html_path.exists()
     assert (layout.root / "graphs" / "index.html").exists()
 
-    rows = list(csv.DictReader(io.StringIO(csv_path.read_text())))  # ty: ignore[no-matching-overload]
+    rows = list(csv.DictReader(io.StringIO(csv_path.read_text())))
     assert len(rows) == 4, "the CSV mirrors every JSONL record, not just new ones"
     assert rows[0]["epoch"] == "1" and rows[-1]["epoch"] == "4"
     # A single-element list is a scalar in disguise; keep it usable in a cell.
@@ -114,6 +114,28 @@ def test_chart_falls_back_for_an_unfamiliar_schema(tmp_path):
     payload = _payload(html_path)
     assert [item["name"] for item in payload["series"]] == ["dendrites"]
     assert payload["series"][0]["axis"] == "loss", "an unknown series still gets an axis"
+
+
+def test_chart_keeps_kd_diagnostics_even_when_first_values_coincide(tmp_path):
+    diagnostics = {
+        "train_teacher_accuracy": 0.9,
+        "train_teacher_confidence": 0.9,
+        "train_teacher_true_class_probability": 0.9,
+        "train_teacher_entropy_nats": 0.4,
+        "train_kd_logit_grad_norm_ratio": 1.2,
+        "train_kd_logit_grad_cosine": 0.4,
+        "train_weighted_response_loss": 0.2,
+        "train_weighted_classification_loss": 0.8,
+    }
+    records = [{**_records(1)[0], **diagnostics}]
+    path = graphs.update_phase(tmp_path, tmp_path / "metrics" / "student" / "distill.jsonl", records)
+    assert path is not None
+    names = {item["name"]: item["axis"] for item in _payload(path)["series"]}
+    assert diagnostics.keys() <= names.keys()
+    assert names["train_teacher_confidence"] == "accuracy"
+    assert names["train_kd_logit_grad_norm_ratio"] == "loss"
+    csv_rows = list(csv.DictReader(io.StringIO(graphs.render_csv(records))))
+    assert diagnostics.keys() <= csv_rows[0].keys()
 
 
 def test_update_from_recorder_survives_a_broken_chart(tmp_path, monkeypatch):

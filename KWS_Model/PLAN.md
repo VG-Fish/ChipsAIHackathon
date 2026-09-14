@@ -597,8 +597,32 @@ Phase A is done. Numbers come from `reports/sparknet_phase_a.yaml`, seed 0.
     white noise, each with p = 0.8, as in the reference YAML. No background
     noise mixing, speed perturbation, or SpecAugment, and
     `cache_train_features: false`. `configs/train/light_kd.yaml` is the same
-    plus response + CE KD with weights 1/7 and 6/7 (Song et al.'s 0.1 / 0.6
-    renormalized).
+    plus response + CE KD at temperature 2 with equal 0.5 weights and no
+    feature matching. Label smoothing stays at 0.1 in both recipes.
+  - **KD signal diagnostic (2026-09-14 UTC):** the initial temperature-1,
+    1/7 response / 6/7 CE recipe inherited Song et al.'s relative weights
+    after dropping feature matching; it was not tuned for SparkNet. On 1,024
+    paired training examples, the teacher scored 98.54% on clean views and
+    98.83% on light-augmented views. Thus this sample does not support an
+    augmentation-induced teacher failure. At T=1 the mixed target differs
+    from the smoothed ground-truth target by only 0.00977 mean total variation.
+    Its weighted response/CE logit-gradient norm ratio was 0.1484, with cosine
+    0.9045: a weak, mostly aligned extra signal. On the same stored logits,
+    T=2 with equal weights gives ratio 1.233 and cosine 0.737. This motivates
+    the revised recipe but does **not** establish an eventual accuracy gain
+    or rule out capacity limits; compare completed runs and multiple seeds.
+    These are gradients with respect to logits, not student parameters.
+    A second seed with 2,048 paired training examples replicated the pattern:
+    clean/augmented teacher accuracy 98.68%/98.49%, old target total variation
+    0.01003, old gradient ratio/cosine 0.1461/0.8846 versus 1.209/0.7084 at
+    T=2 with equal weights. Neither sample shows a material augmentation drop.
+    The historical teacher checkpoint's training provenance remains unverified.
+  - The shared KD criterion now logs detached teacher accuracy, confidence,
+    true-class probability, entropy, weighted response/CE losses, and
+    response/CE logit-gradient norm ratio and cosine. Epoch metrics are
+    sample-weighted batch means; `--graphs` includes them in live charts/CSV.
+    Diagnostic probabilities use T=1; gradient metrics use the actual recipe
+    temperature. Diagnostics do not contribute to the training objective.
   - Train configs take an optional `augmentation` block
     (`kws.data.augment.build_augmenters`). Without one, the recipe and its
     random draws are unchanged (tested). Unknown keys are rejected. All six

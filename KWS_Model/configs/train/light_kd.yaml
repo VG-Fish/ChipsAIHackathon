@@ -25,11 +25,13 @@ label_smoothing: 0.1
 warmup_fraction: 0.05
 seed: 0
 
-# Response and classification KD only. Song et al.'s 0.1 / 0.6 weights,
-# renormalized after dropping the feature term; the teacher and student share
-# the 40-bin log-mel input (kws.optimize.kd.DistillationCriterion).
+# Response and classification KD only, sharing the 40-bin log-mel input.
+# The former T=1, 1/7 response / 6/7 CE recipe added a weak, largely redundant
+# logit gradient on paired training-view diagnostics (see PLAN.md). T=2 and
+# equal weights strengthen the response signal; this is an experiment, not
+# evidence of an accuracy gain. Keep label smoothing and augmentation fixed.
 distillation:
-  temperature: 1.0
+  temperature: 2.0
   feature_weight: 0.0
-  response_weight: 0.1428571
-  classification_weight: 0.8571429
+  response_weight: 0.5
+  classification_weight: 0.5

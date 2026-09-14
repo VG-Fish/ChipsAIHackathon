@@ -7,6 +7,7 @@ from kws.models.ds_cnn import DSCNN
 from kws.optimize.kd import (
     DistillationCriterion,
     KDWeights,
+    distillation_diagnostics,
     distillation_losses,
     supports_pooled_features,
 )
@@ -146,3 +147,115 @@ def test_distillation_criterion_rejects_missing_required_adapter_state():
 
     with pytest.raises(RuntimeError, match="missing the feature adapter"):
         criterion.load_state_dict(state, strict=True)
+
+
+@pytest.mark.parametrize("temperature,response_weight", [(1.0, 1 / 7), (2.0, 0.5), (4.0, 0.8)])
+@pytest.mark.parametrize("label_smoothing", [0.0, 0.1])
+def test_diagnostics_match_teacher_probabilities_and_autograd(
+    temperature, response_weight, label_smoothing, monkeypatch,
+):
+    student = torch.tensor([[1.0, -0.5, 0.2], [-0.8, 1.4, 0.6]], requires_grad=True)
+    teacher = torch.tensor([[2.0, 0.3, -0.9], [-1.0, 0.5, 1.8]], requires_grad=True)
+    labels = torch.tensor([0, 1])
+    weights = KDWeights(
+        temperature=temperature, feature_weight=0.0,
+        response_weight=response_weight, classification_weight=1 - response_weight,
+    )
+    losses = distillation_losses(
+        student, teacher, labels, weights=weights, label_smoothing=label_smoothing,
+    )
+    assert set(losses) == {"total", "feature", "response", "classification"}
+    response_gradient = torch.autograd.grad(
+        weights.response_weight * losses["response"], student, retain_graph=True,
+    )[0].flatten()
+    classification_gradient = torch.autograd.grad(
+        weights.classification_weight * losses["classification"], student,
+    )[0].flatten()
+
+    def forbid_sync(*args, **kwargs):
+        raise AssertionError("diagnostics must not synchronize device to CPU")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(torch.Tensor, "item", forbid_sync)
+        patch.setattr(torch.Tensor, "cpu", forbid_sync)
+        metrics = distillation_diagnostics(
+            student, teacher, labels, weights=weights, label_smoothing=label_smoothing,
+        )
+    probabilities = teacher.detach().softmax(dim=1)
+    assert metrics["teacher_accuracy"].item() == 0.5
+    torch.testing.assert_close(metrics["teacher_confidence"], probabilities.max(dim=1).values.mean())
+    torch.testing.assert_close(
+        metrics["teacher_true_class_probability"], probabilities[torch.arange(2), labels].mean(),
+    )
+    torch.testing.assert_close(
+        metrics["teacher_entropy_nats"], -(probabilities * probabilities.log()).sum(dim=1).mean(),
+    )
+    torch.testing.assert_close(
+        metrics["kd_logit_grad_norm_ratio"], response_gradient.norm() / classification_gradient.norm(),
+    )
+    torch.testing.assert_close(
+        metrics["kd_logit_grad_cosine"],
+        F.cosine_similarity(response_gradient, classification_gradient, dim=0),
+    )
+    assert all(value.ndim == 0 and torch.isfinite(value) for value in metrics.values())
+    assert all(not value.requires_grad and value.grad_fn is None for value in metrics.values())
+    assert all(value.device == student.device for value in metrics.values())
+
+
+@pytest.mark.parametrize("response_weight,classification_weight", [(0.0, 1.0), (1.0, 0.0), (0.0, 0.0)])
+def test_diagnostics_stay_finite_with_zero_gradients_or_saturated_probabilities(
+    response_weight, classification_weight,
+):
+    weights = KDWeights(
+        feature_weight=1 - response_weight - classification_weight,
+        response_weight=response_weight, classification_weight=classification_weight,
+    )
+    metrics = distillation_diagnostics(
+        torch.tensor([[10000.0, -10000.0], [10000.0, -10000.0]]),
+        torch.tensor([[10000.0, -10000.0], [-10000.0, 10000.0]]),
+        torch.tensor([0, 0]), weights=weights, label_smoothing=0.0,
+    )
+    assert all(torch.isfinite(value) for value in metrics.values())
+    assert metrics["kd_logit_grad_cosine"].item() == 0.0
+
+
+class _FixedTeacher:
+    feature_dim = 3
+
+    def __call__(self, inputs):
+        return inputs.detach(), inputs.detach()
+
+
+@pytest.mark.parametrize("feature_weight", [0.0, 0.3])
+def test_criterion_diagnostics_do_not_change_loss_or_gradients(feature_weight):
+    student = torch.tensor([[1.0, 0.2, -0.5], [-0.3, 1.5, 0.5]], requires_grad=True)
+    teacher = torch.tensor([[2.0, 0.0, 0.5], [-1.0, 1.0, 0.0]])
+    features = student * 2
+    labels = torch.tensor([0, 1])
+    weights = KDWeights(
+        temperature=2.0, feature_weight=feature_weight,
+        response_weight=(1 - feature_weight) / 2, classification_weight=(1 - feature_weight) / 2,
+    )
+    criterion = DistillationCriterion(
+        cast(Any, _FixedTeacher()), weights, 0.1, torch.device("cpu"),
+        student_feature_dim=3,
+    )
+    projected = criterion.adapter(features) if criterion.adapter is not None else None
+    expected = distillation_losses(
+        student, teacher, labels, weights=weights, label_smoothing=0.1,
+        student_features=projected, teacher_features=teacher,
+    )
+    losses = criterion(teacher, student, labels, features)
+    for key in expected:
+        torch.testing.assert_close(losses[key], expected[key])
+    parameters = [student, *criterion.extra_parameters()]
+    expected_gradients = torch.autograd.grad(expected["total"], parameters, retain_graph=True)
+    actual_gradients = torch.autograd.grad(losses["total"], parameters)
+    for actual, wanted in zip(actual_gradients, expected_gradients):
+        torch.testing.assert_close(actual, wanted)
+    for key in set(losses) - set(expected):
+        assert not losses[key].requires_grad
+    torch.testing.assert_close(losses["weighted_response_loss"], weights.response_weight * expected["response"])
+    torch.testing.assert_close(
+        losses["weighted_classification_loss"], weights.classification_weight * expected["classification"],
+    )

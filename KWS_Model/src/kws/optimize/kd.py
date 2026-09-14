@@ -149,6 +149,58 @@ def distillation_losses(
     }
 
 
+@torch.no_grad()
+def distillation_diagnostics(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    weights: KDWeights,
+    label_smoothing: float,
+) -> dict[str, torch.Tensor]:
+    """Detached batch diagnostics, computed on-device without extra backward passes.
+
+    Teacher probabilities describe the actual augmented training inputs at T=1.
+    The gradient ratio and cosine compare the weighted response and CE gradients
+    with respect to student *logits*, not model parameters or the feature/gate
+    losses. The common batch-mean factor cancels in both statistics. Epoch logs
+    report sample-weighted means of these batch statistics, not a global cosine.
+    Zero gradient norms use a 1e-12 denominator floor to keep logging finite.
+    """
+    student = student_logits.detach().float()
+    teacher = teacher_logits.detach().float()
+    teacher_log_probabilities = F.log_softmax(teacher, dim=1)
+    teacher_probabilities = teacher_log_probabilities.exp()
+    targets = F.one_hot(labels, num_classes=student.shape[1]).to(student.dtype)
+    targets = targets * (1.0 - label_smoothing) + label_smoothing / student.shape[1]
+    classification_gradient = weights.classification_weight * (
+        F.softmax(student, dim=1) - targets
+    )
+    response_gradient = weights.response_weight * weights.temperature * (
+        F.softmax(student / weights.temperature, dim=1)
+        - F.softmax(teacher / weights.temperature, dim=1)
+    )
+    classification_flat = classification_gradient.flatten()
+    response_flat = response_gradient.flatten()
+    return {
+        "teacher_accuracy": (teacher.argmax(dim=1) == labels).float().mean(),
+        "teacher_confidence": teacher_probabilities.max(dim=1).values.mean(),
+        "teacher_true_class_probability": teacher_probabilities.gather(
+            1, labels.unsqueeze(1)
+        ).mean(),
+        "teacher_entropy_nats": -(
+            teacher_probabilities * teacher_log_probabilities
+        ).sum(dim=1).mean(),
+        "kd_logit_grad_norm_ratio": (
+            torch.linalg.vector_norm(response_flat)
+            / torch.linalg.vector_norm(classification_flat).clamp_min(1e-12)
+        ),
+        "kd_logit_grad_cosine": F.cosine_similarity(
+            response_flat, classification_flat, dim=0, eps=1e-12
+        ),
+    }
+
+
 class FrozenTeacher(nn.Module):
     """The fixed full-precision teacher, loaded once and never updated.
 
@@ -325,7 +377,7 @@ class DistillationCriterion:
                 if self.adapter is not None
                 else student_features
             )
-        return distillation_losses(
+        losses = distillation_losses(
             student_logits,
             teacher_logits,
             labels,
@@ -334,6 +386,19 @@ class DistillationCriterion:
             student_features=projected,
             teacher_features=teacher_features if self.uses_features else None,
         )
+        # Training loops log every scalar, but backpropagate only "total".
+        # Keep distillation_losses' legacy four-key contract unchanged.
+        losses.update(distillation_diagnostics(
+            student_logits, teacher_logits, labels,
+            weights=self.weights, label_smoothing=self.label_smoothing,
+        ))
+        losses["weighted_response_loss"] = (
+            self.weights.response_weight * losses["response"].detach()
+        )
+        losses["weighted_classification_loss"] = (
+            self.weights.classification_weight * losses["classification"].detach()
+        )
+        return losses
 
     def describe(self) -> dict:
         return {

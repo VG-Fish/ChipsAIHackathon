@@ -425,6 +425,28 @@ augmentation snaps random factors to a fine rational rate grid and reuses
 prebuilt resampling kernels, avoiding the very large one-off sinc kernels
 produced by arbitrary integer sample-rate pairs.
 
+For SparkNet's Phase B response-only KD experiment, `light_kd.yaml` uses
+temperature 2, response/classification weights 0.5/0.5, label smoothing 0.1,
+and no feature matching. The original T=1, 1/7 response / 6/7 classification
+recipe produced a weak, mostly CE-aligned logit gradient in paired training-view
+diagnostics; the teacher remained accurate on the student's light augmentation.
+The stronger response setting is an evidence-motivated experiment, not a proven
+accuracy improvement. See `PLAN.md` for measurements and remaining uncertainty,
+including the unverified historical teacher training recipe. Other KD configs
+retain their existing settings. Start a fresh run for the changed recipe;
+`--resume-dir` intentionally rejects a checkpoint with different KD weights.
+
+Shared KD stages log `train_teacher_accuracy`, `train_teacher_confidence`,
+`train_teacher_true_class_probability`, `train_teacher_entropy_nats`,
+`train_weighted_response_loss`, `train_weighted_classification_loss`,
+`train_kd_logit_grad_norm_ratio`, and `train_kd_logit_grad_cosine` to JSONL and,
+with `--graphs`, the live HTML/CSV. Teacher probabilities are measured at T=1
+on the actual augmented inputs. Gradient metrics compare weighted response/CE
+gradients with respect to logits (not model parameters), using the configured
+temperature. Epoch values are sample-weighted batch means, so the cosine is
+not a global epoch-gradient cosine. These diagnostics are detached, do not
+change the objective, and require no extra backward pass or per-batch CPU sync.
+
 ## Model sizes (12-way task: 10 keywords + unknown + silence)
 
 | Variant   | Params  | Role                                              |
