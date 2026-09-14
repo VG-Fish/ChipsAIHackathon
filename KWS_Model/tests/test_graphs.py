@@ -103,6 +103,30 @@ def test_chart_buckets_axes_and_drops_aliased_series(tmp_path):
     assert len({item["color"] for item in payload["series"]}) == 4
 
 
+def test_chart_uses_interactive_plotly_renderer(tmp_path):
+    root = tmp_path / "run"
+    metrics_path = root / "metrics" / "teacher" / "ds_cnn_l.jsonl"
+    html_path = graphs.update_phase(root, metrics_path, _records())
+    assert html_path is not None
+
+    page = html_path.read_text()
+    assert "https://cdn.plot.ly/plotly-4.0.0.min.js" in page
+    assert "Plotly.newPlot(host, traces, layout" in page
+    assert 'hovermode: "x unified"' in page
+    assert "scrollZoom: true" in page
+    assert "layout.yaxis2" in page
+    assert 'createElementNS(NS, "svg")' not in page
+
+
+def test_chart_escapes_embedded_payload_out_of_script_markup():
+    page = graphs.render_chart_html(
+        "safe title", [{"epoch": 1, "unexpected_loss</script>": 0.5}], "metrics.csv"
+    )
+
+    assert "unexpected_loss</script>" not in page
+    assert "unexpected_loss\\u003c/script>" in page
+
+
 def test_chart_falls_back_for_an_unfamiliar_schema(tmp_path):
     root = tmp_path / "run"
     metrics_path = root / "metrics" / "sparsity" / "w12" / "pai.jsonl"

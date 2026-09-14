@@ -3,9 +3,9 @@
 ``MetricsRecorder.append`` is the single point every epoch-level stage already
 passes through, so ``--graphs`` is a run-wide switch rather than a parameter
 threaded through six stage signatures.  Each phase gets a CSV of its records
-plus a self-contained HTML chart that reloads itself, which keeps the per-epoch
-cost at two small text writes instead of a plot render, and keeps the chart
-openable with nothing but a browser (no server, no CDN, no extra install).
+plus a Plotly HTML chart that reloads itself.  Plotly.js is loaded from its
+pinned official CDN build, so training only writes two small text files per
+epoch and does not need a plotting dependency or a server.
 
 The same code runs as a CLI so an already-finished or already-running output
 directory can be charted after the fact::
@@ -196,156 +196,128 @@ def build_series(records: Sequence[dict]) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
-_CHART_HTML = """<meta charset="utf-8">
+_CHART_HTML = """<!doctype html>
+<meta charset="utf-8">
 <title>__TITLE__</title>
 <style>
   :root { color-scheme: light dark; --bg:#fff; --fg:#111827; --muted:#6b7280;
-          --grid:#e5e7eb; --card:#fff; --line:#e5e7eb; }
+          --card:#fff; --line:#e5e7eb; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#0b0f19; --fg:#e5e7eb; --muted:#9ca3af; --grid:#1f2937;
+    :root { --bg:#0b0f19; --fg:#e5e7eb; --muted:#9ca3af;
             --card:#111827; --line:#1f2937; }
   }
   body { margin:0; background:var(--bg); color:var(--fg);
          font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  main { max-width:860px; margin:0 auto; padding:20px 16px 32px; }
+  main { max-width:1180px; margin:0 auto; padding:20px 16px 32px; }
   h1 { font-size:17px; margin:0; letter-spacing:-0.01em; }
   .meta { margin:2px 0 14px; color:var(--muted); font-size:12px;
           font-variant-numeric:tabular-nums; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
-          padding:10px 8px 4px; }
-  svg { display:block; width:100%; height:auto; }
-  .legend { display:flex; flex-wrap:wrap; gap:6px 16px; list-style:none;
-            margin:12px 0 0; padding:0; font-size:12px;
-            font-variant-numeric:tabular-nums; }
-  .legend li { display:flex; align-items:center; gap:6px; }
-  .swatch { width:10px; height:3px; border-radius:2px; flex:none; }
-  .legend b { font-weight:600; }
-  .legend span { color:var(--muted); }
+          padding:4px; overflow:hidden; }
+  #chart { width:100%; min-height:520px; }
+  .error { box-sizing:border-box; min-height:160px; padding:64px 20px;
+           color:var(--muted); text-align:center; }
   footer { display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center;
            margin-top:14px; font-size:12px; color:var(--muted); }
   footer a { color:inherit; }
   label { display:flex; align-items:center; gap:6px; cursor:pointer; }
+  @media (max-width:640px) { #chart { min-height:420px; } }
 </style>
 <main>
   <h1>__TITLE__</h1>
   <p class="meta" id="meta"></p>
   <div class="card"><div id="chart"></div></div>
-  <ul class="legend" id="legend"></ul>
   <footer>
     <label><input type="checkbox" id="live"> live &middot; reloads every __RELOAD__s</label>
     <a href="__CSV__">download CSV</a>
     <span id="stamp"></span>
   </footer>
 </main>
+<script src="https://cdn.plot.ly/plotly-4.0.0.min.js" charset="utf-8"></script>
 <script>
 const DATA = __PAYLOAD__;
-const NS = "http://www.w3.org/2000/svg";
-const W = 760, H = 300, PAD = {t: 14, r: 54, b: 34, l: 54};
-
-function el(name, attrs, text) {
-  const node = document.createElementNS(NS, name);
-  for (const key in attrs) node.setAttribute(key, attrs[key]);
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function fmt(value) {
-  const abs = Math.abs(value);
-  if (abs !== 0 && (abs < 1e-3 || abs >= 1e5)) return value.toExponential(1);
-  return (Math.round(value * 1000) / 1000).toString();
-}
-
-function bounds(series) {
-  let lo = Infinity, hi = -Infinity;
-  for (const s of series) for (const [, y] of s.points) { if (y < lo) lo = y; if (y > hi) hi = y; }
-  if (!isFinite(lo)) return [0, 1];
-  if (lo === hi) { const pad = Math.abs(lo) * 0.1 || 0.5; return [lo - pad, hi + pad]; }
-  const pad = (hi - lo) * 0.08;
-  return [lo - pad, hi + pad];
-}
-
 function render() {
   const series = DATA.series.filter(s => s.points.length);
   const host = document.getElementById("chart");
-  host.textContent = "";
-  if (!series.length) { host.textContent = "No numeric series yet."; return; }
-
-  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img"});
-  const xs = series.flatMap(s => s.points.map(p => p[0]));
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const axes = {};
-  for (const key of ["loss", "accuracy"]) {
-    const group = series.filter(s => s.axis === key);
-    if (group.length) axes[key] = bounds(group);
-  }
-  const px = v => PAD.l + (x1 === x0 ? 0 : (v - x0) / (x1 - x0)) * (W - PAD.l - PAD.r);
-  const py = (v, key) => {
-    const [lo, hi] = axes[key];
-    return H - PAD.b - (hi === lo ? 0.5 : (v - lo) / (hi - lo)) * (H - PAD.t - PAD.b);
-  };
-
-  const primary = axes.loss ? "loss" : "accuracy";
-  for (let i = 0; i <= 4; i++) {
-    const [lo, hi] = axes[primary];
-    const value = lo + (hi - lo) * (i / 4);
-    const y = py(value, primary);
-    svg.appendChild(el("line", {x1: PAD.l, x2: W - PAD.r, y1: y, y2: y,
-      stroke: "var(--grid)", "stroke-width": 1}));
-    svg.appendChild(el("text", {x: PAD.l - 8, y: y + 4, "text-anchor": "end",
-      "font-size": 10, fill: "var(--muted)"}, fmt(value)));
-    if (axes.loss && axes.accuracy) {
-      const [alo, ahi] = axes.accuracy;
-      svg.appendChild(el("text", {x: W - PAD.r + 8, y: y + 4, "text-anchor": "start",
-        "font-size": 10, fill: "var(--muted)"}, fmt(alo + (ahi - alo) * (i / 4))));
-    }
-  }
-  for (let i = 0; i <= 4; i++) {
-    const value = x0 + (x1 - x0) * (i / 4);
-    svg.appendChild(el("text", {x: px(value), y: H - PAD.b + 16, "text-anchor": "middle",
-      "font-size": 10, fill: "var(--muted)"}, Math.round(value).toString()));
-  }
-  svg.appendChild(el("text", {x: (PAD.l + W - PAD.r) / 2, y: H - 2,
-    "text-anchor": "middle", "font-size": 10, fill: "var(--muted)"}, DATA.xlabel));
-
-  for (const s of series) {
-    const d = s.points.map((p, i) => `${i ? "L" : "M"}${px(p[0]).toFixed(1)} ${py(p[1], s.axis).toFixed(1)}`).join(" ");
-    svg.appendChild(el("path", {d, fill: "none", stroke: s.color, "stroke-width": 1.75,
-      "stroke-linejoin": "round", "stroke-linecap": "round"}));
-    const last = s.points[s.points.length - 1];
-    svg.appendChild(el("circle", {cx: px(last[0]), cy: py(last[1], s.axis), r: 2.5, fill: s.color}));
-  }
-  host.appendChild(svg);
-
-  const legend = document.getElementById("legend");
-  legend.textContent = "";
-  for (const s of series) {
-    const last = s.points[s.points.length - 1][1];
-    const item = document.createElement("li");
-    const swatch = document.createElement("i");
-    swatch.className = "swatch";
-    swatch.style.background = s.color;
-    const name = document.createElement("span");
-    name.textContent = s.name;
-    const value = document.createElement("b");
-    value.textContent = fmt(last);
-    item.append(swatch, name, value);
-    legend.appendChild(item);
-  }
-
   document.getElementById("meta").textContent =
     `${DATA.count} records` + (DATA.best ? ` · ${DATA.best}` : "");
   document.getElementById("stamp").textContent = "written " + DATA.updated;
+
+  if (!series.length) {
+    host.className = "error";
+    host.textContent = "No numeric series yet.";
+    return;
+  }
+  if (typeof Plotly === "undefined") {
+    host.className = "error";
+    host.textContent = "Plotly.js could not be loaded. Check the network connection and reload.";
+    return;
+  }
+
+  const hasLoss = series.some(s => s.axis === "loss");
+  const hasAccuracy = series.some(s => s.axis === "accuracy");
+  const splitAxes = hasLoss && hasAccuracy;
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const traces = series.map(s => ({
+    x: s.points.map(point => point[0]),
+    y: s.points.map(point => point[1]),
+    name: s.name,
+    type: "scatter",
+    mode: "lines+markers",
+    yaxis: splitAxes && s.axis === "accuracy" ? "y2" : "y",
+    line: {color: s.color, width: 2},
+    marker: {color: s.color, size: 4},
+    hovertemplate: `${DATA.xlabel}=%{x}<br>value=%{y:.5g}<extra></extra>`,
+  }));
+
+  const layout = {
+    autosize: true,
+    height: 520,
+    margin: {t: 24, r: splitAxes ? 74 : 36, b: 58, l: 72},
+    paper_bgcolor: dark ? "#111827" : "#ffffff",
+    plot_bgcolor: dark ? "#111827" : "#ffffff",
+    font: {color: dark ? "#e5e7eb" : "#111827", size: 12},
+    hovermode: "x unified",
+    dragmode: "zoom",
+    legend: {orientation: "h", y: -0.2, x: 0},
+    xaxis: {title: DATA.xlabel, gridcolor: dark ? "#1f2937" : "#e5e7eb"},
+    yaxis: {
+      title: splitAxes || hasLoss ? "loss / scalar" : "accuracy / probability",
+      gridcolor: dark ? "#1f2937" : "#e5e7eb",
+      zerolinecolor: dark ? "#374151" : "#d1d5db",
+    },
+    uirevision: "kws-metrics",
+  };
+  if (splitAxes) {
+    layout.yaxis2 = {
+      title: "accuracy / probability",
+      overlaying: "y",
+      side: "right",
+      showgrid: false,
+      zeroline: false,
+    };
+  }
+  Plotly.newPlot(host, traces, layout, {
+    responsive: true,
+    scrollZoom: true,
+    displaylogo: false,
+    toImageButtonOptions: {format: "png", filename: "kws-metrics"},
+  });
 }
 
 render();
 
 const live = document.getElementById("live");
 live.checked = sessionStorage.getItem("kws-graph-live") !== "0";
+let reloadTimer;
+function schedule() {
+  clearTimeout(reloadTimer);
+  if (live.checked) reloadTimer = setTimeout(() => location.reload(), __RELOAD__ * 1000);
+}
 live.addEventListener("change", () => {
   sessionStorage.setItem("kws-graph-live", live.checked ? "1" : "0");
-  if (live.checked) schedule();
+  schedule();
 });
-function schedule() { setTimeout(() => { if (live.checked) location.reload(); }, __RELOAD__ * 1000); }
 schedule();
 </script>
 """
@@ -374,8 +346,9 @@ def render_chart_html(title: str, records: Sequence[dict], csv_name: str) -> str
         "best": _best_summary(records),
         "updated": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    script_payload = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
     return (
-        _CHART_HTML.replace("__PAYLOAD__", json.dumps(payload, separators=(",", ":")))
+        _CHART_HTML.replace("__PAYLOAD__", script_payload)
         .replace("__TITLE__", html.escape(title))
         .replace("__CSV__", html.escape(csv_name, quote=True))
         .replace("__RELOAD__", str(RELOAD_SECONDS))
