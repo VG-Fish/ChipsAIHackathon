@@ -53,6 +53,12 @@ def test_exact_placement_ids_are_normalized_validated_and_non_overlapping():
         raise AssertionError("nested placement IDs should be rejected")
 
 
+def test_all_feature_blocks_placement_covers_every_block_and_classifier():
+    assert placement_module_names(
+        _model(), {"conversion": "blocks_and_linear"}
+    ) == ("blocks.0", "blocks.1", "fc")
+
+
 def test_projection_charges_selected_copy_and_residual_against_budget():
     model = _model().eval()
     fc = project_dendritic_cost(

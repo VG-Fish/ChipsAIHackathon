@@ -57,7 +57,10 @@ uv run --env-file .env python -m kws.pipeline --extreme-prune \
 ```
 
 `--extreme-prune` selects `configs/train/compression_experiment.yaml` by
-default. Pass `--config PATH` to use another compression-experiment config.
+default. The shipped recipe compares classifier-only dendrites, late-block plus
+classifier dendrites, and dendrites on every `DSConvBlock` plus the classifier.
+Projected budget checks may skip the broader placement at larger widths. Pass
+`--config PATH` to use another compression-experiment config.
 
 The executable run trains each conventional structured backbone once, reuses
 that exact checkpoint for each eligible dendritic placement, and rejects a PAI

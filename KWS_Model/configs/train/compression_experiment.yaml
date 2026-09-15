@@ -32,6 +32,8 @@ placements:
   - name: late_feature_and_classifier
     conversion: module_ids
     module_ids: [blocks.1, fc]
+  - name: all_feature_blocks_and_classifier
+    conversion: blocks_and_linear
 
 perforatedai:
   enabled: true
