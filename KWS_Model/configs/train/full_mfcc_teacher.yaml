@@ -1,0 +1,14 @@
+# Full DS-CNN-L teacher recipe for the MFCC-32 frontend.
+# The training cache is kept in-process because the ~43k-example MFCC cache is
+# too large to pickle into macOS DataLoader workers reliably.
+augment: true
+epochs: 200
+batch_size: 256
+num_workers: 0
+cache_features: true
+cache_train_features: true
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+seed: 0
