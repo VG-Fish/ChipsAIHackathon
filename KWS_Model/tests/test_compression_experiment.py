@@ -10,9 +10,14 @@ from kws.optimize.compression_experiment import (
     run_compression_experiment,
 )
 from kws.optimize.dendritic_config import (
+    PAI_EFFECTIVELY_UNLIMITED_DENDRITES,
+    UNLIMITED_DENDRITES,
     normalize_module_ids,
+    pai_runtime_dendrite_limit,
     placement_module_names,
+    projected_dendrite_count,
     project_dendritic_cost,
+    validate_max_dendrites,
 )
 
 
@@ -97,6 +102,19 @@ def test_projection_charges_triangular_skip_cost_for_multiple_dendrites():
     )
 
 
+def test_unlimited_dendrites_uses_one_dendrite_for_cost_admission():
+    assert validate_max_dendrites(UNLIMITED_DENDRITES) == -1
+    assert projected_dendrite_count(UNLIMITED_DENDRITES) == 1
+    assert (
+        pai_runtime_dendrite_limit(UNLIMITED_DENDRITES)
+        == PAI_EFFECTIVELY_UNLIMITED_DENDRITES
+    )
+    assert pai_runtime_dendrite_limit(3) == 3
+    for invalid in (True, False, 0, -2, 1.5, "3"):
+        with pytest.raises(ValueError, match="positive integer or -1"):
+            validate_max_dendrites(invalid)
+
+
 def test_comparison_matches_conventional_models_at_no_greater_final_cost():
     records = [
         {
@@ -172,7 +190,11 @@ def test_dry_run_writes_a_plan_without_importing_perforatedai(tmp_path, monkeypa
         "budget": {"max_deployed_params": 10000, "max_macs": 1000000},
         "backbones": {"widths": [4]},
         "placements": [{"name": "classifier", "conversion": "fc_only"}],
-        "perforatedai": {"enabled": True, "on_unavailable": "error"},
+        "perforatedai": {
+            "enabled": True,
+            "on_unavailable": "error",
+            "max_dendrites": -1,
+        },
     }
 
     def reject_import(name):
@@ -189,6 +211,13 @@ def test_dry_run_writes_a_plan_without_importing_perforatedai(tmp_path, monkeypa
         "dendritic",
     ]
     assert all(candidate["accuracy"] is None for candidate in report["candidates"])
+    dendritic = report["candidates"][1]
+    assert report["max_dendrites"] == -1
+    assert dendritic["perforatedai"]["max_dendrites"] == -1
+    assert dendritic["cost_projection"]["max_dendrites"] == 1
+    assert dendritic["cost_projection"]["configured_max_dendrites"] == -1
+    assert dendritic["cost_projection"]["basis"] == "one_dendrite_lower_bound"
+    assert dendritic["budget_admission_basis"] == "one_dendrite_lower_bound"
     persisted = yaml.safe_load(
         (output / "reports" / "compression_experiment.yaml").read_text()
     )

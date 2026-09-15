@@ -337,7 +337,9 @@ def test_pai_optimizer_keeps_kd_adapter_outside_pai_parameter_filter(monkeypatch
     assert adapter_scheduler.base_lrs == [0.00025]
 
 
-def test_fc_only_configuration_targets_exact_classifier(monkeypatch):
+def test_fc_only_configuration_targets_exact_classifier_and_allows_unlimited(
+    monkeypatch,
+):
     from kws.optimize import dendritic
 
     class FakePAIConfig:
@@ -361,7 +363,7 @@ def test_fc_only_configuration_targets_exact_classifier(monkeypatch):
         {
             "testing_dendrite_capacity": False,
             "conversion": "fc_only",
-            "max_dendrites": 1,
+            "max_dendrites": -1,
             "n_epochs_to_switch": 25,
             "improvement_threshold": [0.001, 0.0001, 0.0],
             "candidate_weight_initialization_multiplier": 0.01,
@@ -372,6 +374,7 @@ def test_fc_only_configuration_targets_exact_classifier(monkeypatch):
         torch.device("cpu"),
     )
 
+    assert pc.values["max_dendrites"] == dendritic.pai_runtime_dendrite_limit(-1)
     assert pc.values["module_ids_to_perforate"] == [".fc"]
     assert pc.values["modules_to_perforate"] == []
     assert pc.values["module_names_to_perforate"] == []
@@ -502,6 +505,10 @@ def test_completed_pai_tracker_boundary_is_export_only(monkeypatch):
 
     assert dendritic.pai_tracker_at_terminal_boundary(1)
     assert not dendritic.pai_tracker_at_terminal_boundary(2)
+    assert not dendritic.pai_tracker_at_terminal_boundary(-1)
+    assert dendritic.pai_tracker_at_terminal_boundary(
+        -1, checkpoint_training_complete=True
+    )
 
     tracker.member_vars["doing_pai"] = False
     assert dendritic.pai_tracker_at_terminal_boundary(2)

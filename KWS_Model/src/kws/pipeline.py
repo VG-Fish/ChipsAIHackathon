@@ -47,6 +47,7 @@ from kws.optimize.cluster import (
     save_clustered_model,
 )
 from kws.optimize.compression_experiment import run_compression_experiment
+from kws.optimize.dendritic_config import validate_max_dendrites
 from kws.optimize.distill import distill, distillation_fingerprint
 from kws.optimize.kd import (
     DistillationCriterion,
@@ -1496,6 +1497,16 @@ def main() -> None:
         help="Plan and profile --extreme-prune candidates without training",
     )
     parser.add_argument(
+        "--max-dendrites",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override the PAI dendrite cap for --extreme-prune; use -1 for no "
+            "hard cap and let PAI stop through its no-improvement/retry policy"
+        ),
+    )
+    parser.add_argument(
         "--stages",
         default=",".join(STAGES),
         help=f"Comma-separated subset of: {', '.join(STAGES)}",
@@ -1538,8 +1549,17 @@ def main() -> None:
             parser.error("--graphs is not supported by --extreme-prune")
         if args.stages != ",".join(STAGES):
             parser.error("--stages does not apply to --extreme-prune")
+        if args.max_dendrites is not None:
+            try:
+                validate_max_dendrites(args.max_dendrites)
+            except ValueError as error:
+                parser.error(str(error).replace("max_dendrites", "--max-dendrites"))
 
         config = load_yaml(config_path)
+        if args.max_dendrites is not None:
+            perforatedai_config = dict(config.get("perforatedai") or {})
+            perforatedai_config["max_dendrites"] = args.max_dendrites
+            config["perforatedai"] = perforatedai_config
         try:
             output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
         except ValueError as error:
@@ -1573,6 +1593,8 @@ def main() -> None:
 
     if args.dry_run:
         parser.error("--dry-run requires --extreme-prune")
+    if args.max_dendrites is not None:
+        parser.error("--max-dendrites requires --extreme-prune")
 
     stages = tuple(stage.strip() for stage in args.stages.split(",") if stage.strip())
     unknown = [stage for stage in stages if stage not in STAGES]

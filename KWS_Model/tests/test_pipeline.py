@@ -105,6 +105,66 @@ def test_extreme_prune_flag_routes_to_budgeted_compression_experiment(
     ]
 
 
+@pytest.mark.parametrize("max_dendrites", [3, -1])
+def test_extreme_prune_can_override_the_pai_dendrite_cap(
+    tmp_path, monkeypatch, max_dendrites
+):
+    output_dir = tmp_path / "extreme-multi-dendrite"
+    config = {
+        "output_dir": str(output_dir),
+        "data_config": "data.yaml",
+        "train_config": "train.yaml",
+        "source_checkpoint": "source.pt",
+        "teacher_checkpoint": "teacher.pt",
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        pipeline.sys,
+        "argv",
+        [
+            "kws.pipeline",
+            "--extreme-prune",
+            "--dry-run",
+            "--max-dendrites",
+            str(max_dendrites),
+        ],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "load_yaml",
+        lambda path: config
+        if path == pipeline.DEFAULT_EXTREME_PRUNE_CONFIG
+        else (_ for _ in ()).throw(AssertionError(path)),
+    )
+    monkeypatch.setattr(pipeline, "run_session", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        pipeline,
+        "run_compression_experiment",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    pipeline.main()
+
+    assert calls[0][0][0]["perforatedai"] == {
+        "max_dendrites": max_dendrites
+    }
+
+
+@pytest.mark.parametrize("max_dendrites", [0, -2])
+def test_extreme_prune_rejects_invalid_dendrite_limits(
+    monkeypatch, max_dendrites
+):
+    monkeypatch.setattr(
+        pipeline.sys,
+        "argv",
+        ["kws.pipeline", "--extreme-prune", "--max-dendrites", str(max_dendrites)],
+    )
+
+    with pytest.raises(SystemExit):
+        pipeline.main()
+
+
 def test_selection_minimizes_the_configured_cost_axis():
     config = {"sparsity": {"select_by": "deployed_params"}}
     assert select_deployment_candidate(_sweep(), config)["label"] == "w15"

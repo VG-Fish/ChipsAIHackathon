@@ -19,6 +19,49 @@ from kws.utils.profile import count_macs, deployed_parameter_count
 
 
 CONVERSION_MODES = ("blocks_and_linear", "fc_only", "module_ids")
+# ``-1`` is this pipeline's CLI/config sentinel. PerforatedAI documents a
+# positive integer cap, so translate the sentinel at the runtime boundary
+# instead of depending on how a particular PAI release compares negatives.
+UNLIMITED_DENDRITES = -1
+PAI_EFFECTIVELY_UNLIMITED_DENDRITES = 2_147_483_647
+
+
+def validate_max_dendrites(value: int) -> int:
+    """Validate a finite positive dendrite cap or this pipeline's sentinel."""
+    # ``bool`` is an ``int`` subclass, but accepting YAML values such as
+    # ``max_dendrites: true`` as one dendrite is a configuration error rather
+    # than a useful shorthand.  Do not silently truncate floats either.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("max_dendrites must be a positive integer or -1 for unlimited")
+    if value == UNLIMITED_DENDRITES or value >= 1:
+        return value
+    raise ValueError("max_dendrites must be a positive integer or -1 for unlimited")
+
+
+def pai_runtime_dendrite_limit(max_dendrites: int) -> int:
+    """Return the positive cap passed to PerforatedAI.
+
+    PAI still owns the normal no-improvement/retry stop. The large positive
+    value only removes the reachable numeric cap without relying on an
+    undocumented negative-value convention in the third-party API.
+    """
+    validate_max_dendrites(max_dendrites)
+    return (
+        PAI_EFFECTIVELY_UNLIMITED_DENDRITES
+        if max_dendrites == UNLIMITED_DENDRITES
+        else max_dendrites
+    )
+
+
+def projected_dendrite_count(max_dendrites: int) -> int:
+    """Return the finite count usable for pre-training cost admission.
+
+    An unlimited search cannot have a finite upper-bound projection. Its
+    one-dendrite projection is instead the minimum useful augmented model;
+    the clean exported graph remains the final budget authority.
+    """
+    validate_max_dendrites(max_dendrites)
+    return 1 if max_dendrites == UNLIMITED_DENDRITES else max_dendrites
 
 
 def normalize_module_ids(values: object) -> tuple[str, ...]:

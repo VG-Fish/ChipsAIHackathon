@@ -35,7 +35,12 @@ import torch.nn as nn
 import yaml
 
 from kws.optimize.pai_import import import_pai_module
-from kws.optimize.dendritic_config import pai_module_ids, placement_module_names
+from kws.optimize.dendritic_config import (
+    pai_module_ids,
+    pai_runtime_dendrite_limit,
+    placement_module_names,
+    validate_max_dendrites,
+)
 
 # PerforatedAI is distributed as compiled extension modules without typing
 # stubs. Keep its dynamic API behind one narrow, explicit boundary.
@@ -111,10 +116,15 @@ PAI_SIDECAR_KEYS = frozenset(
         "native_pai_latest_sha256",
         "teacher_checkpoint",
         "recipe_fingerprint",
+        "training_complete",
         "rng_state",
         "loader_generator_states",
     }
 )
+# Version-3 sidecars created before the terminal marker was added are still
+# internally consistent and remain resumable.  They fall back to PAI's tracker
+# state for terminal-boundary detection.
+PAI_SIDECAR_OPTIONAL_KEYS = frozenset({"training_complete"})
 
 
 def cycle_fingerprint(
@@ -201,7 +211,9 @@ def _load_pai_sidecar(
     if not isinstance(state, dict):
         raise ValueError(f"PAI sidecar {sidecar_path} is not a mapping")
 
-    missing = PAI_SIDECAR_KEYS.difference(state)
+    missing = PAI_SIDECAR_KEYS.difference(state).difference(
+        PAI_SIDECAR_OPTIONAL_KEYS
+    )
     unexpected = set(state).difference(PAI_SIDECAR_KEYS)
     if missing or unexpected:
         details = []
@@ -218,6 +230,12 @@ def _load_pai_sidecar(
             f"PAI sidecar {sidecar_path} uses format "
             f"{state['format_version']!r}; expected {FRAMEWORK_CYCLE_VERSION}"
         )
+    training_complete = state.get("training_complete", False)
+    if not isinstance(training_complete, bool):
+        raise ValueError(
+            f"PAI sidecar {sidecar_path} has invalid training_complete metadata"
+        )
+    state["training_complete"] = training_complete
     if (state["kind"], state["stage"], state["phase"]) != (
         "kws_pai_training_state",
         "sparsity",
@@ -477,6 +495,7 @@ def _save_pai_restart_pair(
     pai_run_dir_ref: str | None = None,
     native_pai_latest_ref: str | None = None,
     run_id: str | None = None,
+    training_complete: bool = False,
 ) -> dict:
     """Commit native PAI state first, then atomically attest it in the sidecar."""
     run_id = run_id or uuid.uuid4().hex
@@ -526,6 +545,7 @@ def _save_pai_restart_pair(
         "native_pai_latest_sha256": sha256_path(native_latest),
         "teacher_checkpoint": teacher_checkpoint,
         "recipe_fingerprint": recipe_fingerprint,
+        "training_complete": training_complete,
         "rng_state": capture_rng_state(),
         "loader_generator_states": [
             loader.generator.get_state().clone()
@@ -1011,13 +1031,19 @@ def current_pai_integration_count(default: int | None = None) -> int | None:
         return default
 
 
-def pai_tracker_at_terminal_boundary(max_dendrites: int) -> bool:
+def pai_tracker_at_terminal_boundary(
+    max_dendrites: int, *, checkpoint_training_complete: bool = False
+) -> bool:
     """Whether a restored PAI tracker already completed its search.
 
     The KWS/native pair is committed before final export, so an export failure
     can leave a fully completed tracker behind.  Resuming that boundary must
-    retry export directly instead of training an unrequested extra epoch.
+    retry export directly instead of training an unrequested extra epoch. PAI
+    does not expose its no-improvement completion in durable tracker fields, so
+    new sidecars persist the returned completion decision explicitly.
     """
+    if checkpoint_training_complete:
+        return True
     try:
         member_vars = GPA.pai_tracker.member_vars
         if not bool(member_vars["doing_pai"]):
@@ -1448,8 +1474,11 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     GPA.pc.set_use_cuda(device.type == "cuda")
     GPA.pc.set_testing_dendrite_capacity(testing)
     # PAI's capacity check expects to exercise three dendrites.  The real run
-    # returns to the configured one-dendrite deployment budget.
-    GPA.pc.set_max_dendrites(3 if testing else config["max_dendrites"])
+    # returns to the configured experiment limit.
+    max_dendrites = validate_max_dendrites(config["max_dendrites"])
+    GPA.pc.set_max_dendrites(
+        3 if testing else pai_runtime_dendrite_limit(max_dendrites)
+    )
     GPA.pc.set_n_epochs_to_switch(config["n_epochs_to_switch"])
     GPA.pc.set_improvement_threshold(config["improvement_threshold"])
     GPA.pc.set_candidate_weight_initialization_multiplier(
@@ -1945,11 +1974,19 @@ def run_cycle(
     effective_max_dendrites = (
         3
         if bool(pai_cfg.get("testing_dendrite_capacity", False))
-        else int(pai_cfg.get("max_dendrites", 0))
+        # Keep the historical programmatic default for lightweight callers
+        # whose PAI configuration is intentionally partial, while rejecting
+        # malformed values whenever a limit is supplied.
+        else validate_max_dendrites(pai_cfg.get("max_dendrites", 1))
     )
     resume_at_terminal_boundary = bool(
         resume_candidate
-        and pai_tracker_at_terminal_boundary(effective_max_dendrites)
+        and pai_tracker_at_terminal_boundary(
+            effective_max_dendrites,
+            checkpoint_training_complete=bool(
+                pai_state and pai_state.get("training_complete", False)
+            ),
+        )
     )
     if resume_at_terminal_boundary and pai_state is not None:
         logger.info(
@@ -2213,6 +2250,7 @@ def run_cycle(
                 layout.relative(run_dir / "latest.pt") if layout is not None else None
             ),
             run_id=run_id,
+            training_complete=bool(training_complete),
         )
         if cycle_checkpoint_path is not None and isinstance(saved_state, Mapping):
             # Immutable, evaluation-oriented snapshot at each accepted

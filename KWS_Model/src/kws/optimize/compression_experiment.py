@@ -26,9 +26,12 @@ from kws.models.registry import (
     checkpoint_model_family,
 )
 from kws.optimize.dendritic_config import (
+    UNLIMITED_DENDRITES,
     pai_module_ids,
     placement_module_names,
+    projected_dendrite_count,
     project_dendritic_cost,
+    validate_max_dendrites,
 )
 from kws.optimize.pareto import ParetoPoint, pareto_front
 from kws.optimize.prune import SparsitySpec, prune_and_fine_tune, prune_ds_cnn
@@ -344,14 +347,14 @@ def run_compression_experiment(
     on_unavailable = str(pai_experiment.get("on_unavailable", "error"))
     if on_unavailable not in {"error", "skip"}:
         raise ValueError("perforatedai.on_unavailable must be 'error' or 'skip'")
-    max_dendrites = int(
+    max_dendrites = validate_max_dendrites(
         pai_experiment.get(
             "max_dendrites",
             (train_cfg.get("perforatedai") or {}).get("max_dendrites", 1),
         )
     )
-    if max_dendrites < 1:
-        raise ValueError("perforatedai.max_dendrites must be at least 1")
+    projection_dendrites = projected_dendrite_count(max_dendrites)
+    unlimited_dendrites = max_dendrites == UNLIMITED_DENDRITES
 
     source = torch.load(source_path, map_location="cpu", weights_only=False)
     if checkpoint_model_family(source) != "ds_cnn":
@@ -443,8 +446,15 @@ def run_compression_experiment(
             # topology and not another.
             placement_module_names(base, pai_cfg)
             projection = project_dendritic_cost(
-                base, input_shape, pai_cfg, max_dendrites=max_dendrites
+                base, input_shape, pai_cfg, max_dendrites=projection_dendrites
             )
+            projection_details = projection.as_dict()
+            projection_details["basis"] = (
+                "one_dendrite_lower_bound"
+                if unlimited_dendrites
+                else "configured_maximum"
+            )
+            projection_details["configured_max_dendrites"] = max_dendrites
             violations = budget.violations(
                 params=projection.projected_params, macs=projection.projected_macs
             )
@@ -458,8 +468,10 @@ def run_compression_experiment(
                 "status": "planned" if not violations else "skipped_projected_budget",
                 "budget_admitted": not violations,
                 "budget_violations": violations,
+                "budget_admission_basis": projection_details["basis"],
                 "accuracy": None,
-                "cost_projection": projection.as_dict(),
+                "cost_projection": projection_details,
+                "costs_source": projection_details["basis"],
                 "costs": {
                     "deployed_params": projection.projected_params,
                     "macs": projection.projected_macs,
@@ -609,6 +621,7 @@ def run_compression_experiment(
                     result = asdict(cycle)
                 record["accuracy"] = float(result["best_val_acc"])
                 record["costs"] = _cost_dict(result.get("cost") or {})
+                record["costs_source"] = "measured_clean_export"
                 record["cycle_checkpoints"] = []
                 for checkpoint_value in result.get("cycle_checkpoints") or []:
                     checkpoint_path = Path(checkpoint_value)
@@ -624,6 +637,7 @@ def run_compression_experiment(
                 )
                 record["budget_violations"] = actual_violations
                 record["budget_admitted"] = not actual_violations
+                record["budget_admission_basis"] = "measured_clean_export"
                 record["status"] = (
                     "complete" if not actual_violations else "rejected_actual_budget"
                 )

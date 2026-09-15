@@ -54,6 +54,19 @@ uv run python -m kws.pipeline --extreme-prune --dry-run \
   --output-dir outputs/compression-plan
 uv run --env-file .env python -m kws.pipeline --extreme-prune \
   --output-dir outputs/compression-run
+
+# Optional multi-dendrite run. PAI can add up to three dendrites per selected
+# module, but its history/retry policy may stop earlier when validation stops
+# improving.
+uv run --env-file .env python -m kws.pipeline --extreme-prune \
+  --max-dendrites 3 \
+  --output-dir outputs/compression-run-multi-dendrite
+
+# Remove the hard dendrite cap. PAI stops after validation no longer improves
+# and its configured candidate retries are exhausted.
+uv run --env-file .env python -m kws.pipeline --extreme-prune \
+  --max-dendrites -1 \
+  --output-dir outputs/compression-run-unlimited-dendrites
 ```
 
 `--extreme-prune` selects `configs/train/compression_experiment.yaml` by
@@ -61,6 +74,16 @@ default. The shipped recipe compares classifier-only dendrites, late-block plus
 classifier dendrites, and dendrites on every `DSConvBlock` plus the classifier.
 Projected budget checks may skip the broader placement at larger widths. Pass
 `--config PATH` to use another compression-experiment config.
+Use `--max-dendrites N` for a separate multi-dendrite run. This is an upper
+bound, not a request to force exactly `N`: PerforatedAI retries a non-improving
+candidate according to `max_dendrite_tries`, then stops when its validation
+history no longer supports another dendrite. Use `--max-dendrites -1` to remove
+the reachable hard cap and rely on that no-improvement stop. The pipeline maps
+`-1` to an effectively unreachable positive PAI limit rather than relying on
+undocumented negative-value behavior in the third-party API. Since an
+unlimited search has no finite worst-case size, its pre-training budget check
+uses and labels a one-dendrite lower bound; the measured clean export is still
+rejected if its actual parameter count or MACs exceed the experiment budget.
 
 The executable run trains each conventional structured backbone once, reuses
 that exact checkpoint for each eligible dendritic placement, and rejects a PAI

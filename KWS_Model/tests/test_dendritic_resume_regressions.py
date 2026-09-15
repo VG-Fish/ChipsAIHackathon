@@ -300,6 +300,7 @@ def test_pai_pair_save_persists_kd_state_and_requires_matching_native_digest(
         teacher_checkpoint="teacher.pt",
         recipe_fingerprint="recipe",
         loaders=loaders,
+        training_complete=True,
     )
 
     assert saved["kd_state_dict"]["marker"] == "persisted"
@@ -309,6 +310,17 @@ def test_pai_pair_save_persists_kd_state_and_requires_matching_native_digest(
         sidecar_path, run_dir, "recipe", torch.device("cpu")
     )
     assert loaded["completed_epoch"] == 1
+    assert loaded["training_complete"] is True
+
+    # Sidecars written before the optional terminal marker was added remain
+    # resumable and conservatively fall back to tracker-based detection.
+    legacy = torch.load(sidecar_path, map_location="cpu", weights_only=False)
+    legacy.pop("training_complete")
+    torch.save(legacy, sidecar_path)
+    loaded_legacy = dendritic._load_pai_sidecar(
+        sidecar_path, run_dir, "recipe", torch.device("cpu")
+    )
+    assert loaded_legacy["training_complete"] is False
 
     (run_dir / "latest.pt").write_bytes(b"corrupt replacement")
     with pytest.raises(ValueError, match="does not match sidecar"):
@@ -339,6 +351,7 @@ def test_pai_sidecar_schema_rejects_missing_native_digest(tmp_path):
             "pai_run_dir": str(run_dir),
             "native_pai_latest": str(native),
             "recipe_fingerprint": "recipe",
+            "training_complete": False,
         }
     )
     torch.save(state, sidecar)
@@ -565,9 +578,11 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
 
     monkeypatch.setattr(dendritic, "_make_optimizer_and_scheduler", make_optimizer)
     paired_optimizers = []
+    paired_training_complete = []
 
     def save_pair(**kwargs):
         paired_optimizers.append(kwargs["optimizer"])
+        paired_training_complete.append(kwargs["training_complete"])
         return {"model_state_dict": kwargs["model"].state_dict()}
 
     monkeypatch.setattr(
@@ -606,6 +621,7 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
     )
 
     assert paired_optimizers == [reset_optimizer]
+    assert paired_training_complete == [True]
     assert optimizer_lr_multipliers == [1.0, 0.25]
     assert estimated_conversions == ["blocks_and_linear"]
     cycle_paths = list((run_dir / "cycle_checkpoints").glob("*.pt"))
