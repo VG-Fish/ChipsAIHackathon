@@ -11,6 +11,7 @@ import random
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 import torch
 import torchaudio
@@ -245,16 +246,20 @@ def build_augmenters(
             raise ValueError(f"{name} must contain only numbers")
         return float(first), float(second)
 
+    def float_value(value: object) -> float:
+        """Preserve ``float``'s accepted YAML scalar values for the checker."""
+        return float(cast(str | int | float, value))
+
     waveform_augmenter = WaveformAugmenter(
         background_noise_dir,
         sample_rate,
-        max_shift_ms=float(cfg["time_shift_ms"]),
+        max_shift_ms=float_value(cfg["time_shift_ms"]),
         snr_db_range=float_pair(cfg["background_noise_snr_db_range"], "background_noise_snr_db_range"),
         speed_factor_range=float_pair(speed, "speed_factor_range") if speed is not None else None,
-        noise_probability=float(cfg["background_noise_probability"]),
-        shift_mode=cfg["time_shift_mode"],
-        shift_probability=float(cfg["time_shift_probability"]),
-        white_noise_probability=float(cfg["white_noise_probability"]),
+        noise_probability=float_value(cfg["background_noise_probability"]),
+        shift_mode=cast(str, cfg["time_shift_mode"]),
+        shift_probability=float_value(cfg["time_shift_probability"]),
+        white_noise_probability=float_value(cfg["white_noise_probability"]),
         white_noise_db_range=float_pair(cfg["white_noise_db_range"], "white_noise_db_range"),
     )
     spec_augmenter = SpecAugmenter() if cfg["spec_augment"] else None

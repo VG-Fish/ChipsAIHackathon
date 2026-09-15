@@ -90,7 +90,7 @@ def normalize_module_ids(values: object) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def placement_module_names(model: DSCNN, config: Mapping[str, Any]) -> tuple[str, ...]:
+def placement_module_names(model: nn.Module, config: Mapping[str, Any]) -> tuple[str, ...]:
     """Resolve a placement recipe to exact, validated module names."""
     conversion = str(config.get("conversion", "blocks_and_linear"))
     if conversion not in CONVERSION_MODES:
@@ -147,7 +147,7 @@ class DendriticCostProjection:
 
 
 def project_dendritic_cost(
-    model: DSCNN,
+    model: nn.Module,
     input_shape: tuple[int, int],
     placement: Mapping[str, Any],
     *,

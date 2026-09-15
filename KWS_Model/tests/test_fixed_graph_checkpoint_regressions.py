@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
 import yaml
@@ -144,9 +146,11 @@ def test_qat_persists_distinct_best_and_resumable_latest_on_zero_accuracy(
     assert "optimizer_state_dict" not in best
     assert latest["kind"] == "kws_training_state"
     assert best["run_id"] == latest["run_id"] == run_id
-    extra_files = {"run_id": ""}
+    extra_files: dict[str, Any] = {"run_id": ""}
     torch.jit.load(result["checkpoint"], _extra_files=extra_files)
-    assert extra_files["run_id"].decode() == run_id
+    serialized_run_id = extra_files.get("run_id")
+    assert isinstance(serialized_run_id, bytes)
+    assert serialized_run_id.decode() == run_id
     assert best_path != latest_path
     assert all(
         torch.equal(value, latest["best_model_state_dict"][name])

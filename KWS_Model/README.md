@@ -546,6 +546,32 @@ change the objective, and require no extra backward pass or per-batch CPU sync.
 
 ## Model sizes (12-way task: 10 keywords + unknown + silence)
 
+Plan the no-KD SparkNet C12 dendritic-pruning comparison without training:
+
+```bash
+uv run python -m kws.optimize.sparknet_dendritic_prune_experiment \
+  --config configs/experiment/sparknet_c12_dendritic_prune_no_kd.yaml \
+  --no-KD --dry-run
+```
+
+Then launch the full validation-only C10/C8/C6 sweep:
+
+```bash
+uv run python -m kws.optimize.sparknet_dendritic_prune_experiment \
+  --config configs/experiment/sparknet_c12_dendritic_prune_no_kd.yaml \
+  --no-KD
+```
+
+`--no-KD` (also accepted as `--no-kd`) forces a null teacher even though the
+standalone dendritic command retains its historical DS-CNN teacher default.
+For each width the runner saves one supervised prune-fine-tune baseline, starts
+PAI from that exact best checkpoint, and performs a supervised post-PAI resume.
+PAI uses full mode, unlimited dendrites, three candidate retries, and the
+slides' eight-epoch history lookback rather than a fixed dendrite schedule.
+The report records raw validation gain, gain above the measured pruning-only
+curve when its parameter range brackets the dendritic model, and parameter/MAC
+growth. It records costs but applies no budget admission or rejection.
+
 | Variant   | Params  | Role                                              |
 |-----------|---------|----------------------------------------------------|
 | DS-CNN-XS | 4,096   | Primary Phase 3 dendrite-growth starting point     |

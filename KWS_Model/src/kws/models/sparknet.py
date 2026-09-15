@@ -7,6 +7,8 @@ feature input, with frequency bins as channels. This keeps the model visible
 to the project's Conv2d-only MAC/parameter profiling, clustering, and QAT
 Conv+BN fusion (see PLAN.md Finding 7).
 """
+from typing import cast
+
 import torch
 import torch.nn as nn
 
@@ -42,7 +44,7 @@ class TCSBlock(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         y = self.bn(self.pointwise(self.depthwise(x)))
         if self.res_conv is not None:
-            y = y + self.res_bn(self.res_conv(x))
+            y = y + cast(nn.BatchNorm2d, self.res_bn)(self.res_conv(x))
         return self.relu(y)
 
 

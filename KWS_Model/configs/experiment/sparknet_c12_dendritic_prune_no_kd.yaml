@@ -1,0 +1,30 @@
+source_checkpoint: outputs/phase_b/sparknet_c12_speech_commands_v2_mfcc32_g32/models/checkpoints/student/best.pt
+source_validation_accuracy: 0.9261330761812921
+source_channels: 12
+widths: [10, 8, 6]
+teacher_checkpoint: null
+data_config: configs/data/speech_commands_v2_mfcc32.yaml
+model_config: configs/model/sparknet_c12.yaml
+train_config: configs/train/sparknet_dendritic_prune_no_kd.yaml
+output_dir: outputs/sparknet-c12-dendritic-prune-no-kd-unlimited
+objective:
+  metric: validation_accuracy
+  use_test: false
+perforatedai:
+  conversion: module_ids
+  module_ids: [.blocks.3, .gate_conv, .fc]
+  max_dendrites: -1
+  testing_dendrite_capacity: false
+  switch_mode: history
+  history_lookback: 8
+  n_epochs_to_switch: 25
+  improvement_threshold: [0.001, 0.0001, 0.0]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true
+pruning:
+  method: l1_filter

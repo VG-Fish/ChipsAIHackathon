@@ -37,6 +37,7 @@ def test_run_session_retains_layout_manifest_run_id(tmp_path):
     expected = layout.manifest_run_id
 
     with run_session(layout=layout, command="test.run-id") as manifest:
+        assert manifest is not None
         assert manifest["run_id"] == expected
 
     assert ArtifactLayout(layout.root).manifest_run_id == expected

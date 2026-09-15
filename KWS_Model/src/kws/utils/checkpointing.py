@@ -319,7 +319,10 @@ def write_phase_summary(
     path = layout.root / "metrics" / "summaries.yaml"
     if path.exists():
         with path.open(encoding="utf-8") as stream:
-            summary = yaml.safe_load(stream) or {}
+            loaded_summary = yaml.safe_load(stream)
+        summary: dict[str, Any] = (
+            loaded_summary if isinstance(loaded_summary, dict) else {}
+        )
     else:
         summary = {"format_version": 1, "phases": {}}
     payload = result.as_dict() if hasattr(result, "as_dict") else _safe(result)
@@ -330,7 +333,11 @@ def write_phase_summary(
     payload["metrics"] = layout.relative(layout.metrics_path(stage, phase, candidate=candidate))
     for role, artifact in (artifacts or {}).items():
         payload[role] = layout.relative(artifact)
-    summary.setdefault("phases", {})[f"{stage}/{phase}"] = payload
+    phases = summary.get("phases")
+    if not isinstance(phases, dict):
+        phases = {}
+        summary["phases"] = phases
+    phases[f"{stage}/{phase}"] = payload
     layout.atomic_yaml(path, summary)
     return path
 

@@ -6,6 +6,7 @@ import torch
 import yaml
 
 from kws.models.ds_cnn import build_ds_cnn
+from kws.models.sparknet import SparkNet
 from kws.optimize.dendritic import (
     build_cycle_base,
     estimate_one_dendrite_params,
@@ -56,6 +57,55 @@ def test_cycle1_base_hits_expected_size_and_widths(tmp_path):
     with torch.no_grad():
         output = model(torch.zeros(2, 1, *checkpoint["input_shape"]))
     assert output.shape == (2, checkpoint["num_classes"])
+
+
+def test_cycle_base_structurally_prunes_sparknet_to_exact_target(tmp_path):
+    source_cfg = {
+        "family": "sparknet",
+        "name": "sparknet_c12",
+        "channels": 12,
+        "gate_channels": 32,
+        "sparsity_weight": 0.01,
+    }
+    input_shape = (32, 101)
+    source = SparkNet(
+        32,
+        12,
+        channels=12,
+        gate_channels=32,
+        input_shape=input_shape,
+    )
+    checkpoint_path = tmp_path / "sparknet_c12.pt"
+    torch.save(
+        {
+            "model_state_dict": source.state_dict(),
+            "model_cfg": source_cfg,
+            "input_shape": input_shape,
+            "num_classes": 12,
+        },
+        checkpoint_path,
+    )
+    target_cfg = {
+        "family": "sparknet",
+        "name": "sparknet_c8",
+        "channels": 8,
+        "gate_channels": 32,
+        "sparsity_weight": 0.01,
+    }
+
+    model, _, model_cfg = build_cycle_base(
+        str(checkpoint_path),
+        keep_ratio=8 / 12,
+        target_model_cfg=target_cfg,
+    )
+
+    assert isinstance(model, SparkNet)
+    assert model_cfg == target_cfg
+    assert [block.pointwise.out_channels for block in model.blocks] == [8] * 4
+    assert model.gate_conv.in_channels == 8
+    model.eval()
+    with torch.no_grad():
+        assert model(torch.zeros(2, 1, *input_shape)).shape == (2, 12)
 
 
 def test_read_pai_architecture_results_selects_best_deployable_row(tmp_path):
@@ -138,7 +188,7 @@ def test_restore_single_dendrite_skip_weights_from_pai_sequential_cleanup():
     weights = {"fc": [torch.tensor([[0.25, -0.5]])]}
 
     restored = _restore_single_dendrite_skip_weights(model, weights)
-    clean_module = cast(CleanModule, model.fc)
+    clean_module = model.fc
 
     assert restored == 1
     assert torch.equal(clean_module.skip_weights[0], weights["fc"][0])
@@ -389,6 +439,8 @@ def test_module_id_configuration_targets_only_requested_placements(monkeypatch):
     from kws.optimize import dendritic
 
     class FakePAIConfig:
+        DOING_HISTORY = 1
+
         def __init__(self):
             self.values = {}
 
@@ -411,6 +463,8 @@ def test_module_id_configuration_targets_only_requested_placements(monkeypatch):
             "conversion": "module_ids",
             "module_ids_to_perforate": ["blocks.0", ".fc"],
             "max_dendrites": 1,
+            "switch_mode": "history",
+            "history_lookback": 8,
             "n_epochs_to_switch": 25,
             "improvement_threshold": [0.001, 0.0001, 0.0],
             "candidate_weight_initialization_multiplier": 0.01,
@@ -422,6 +476,8 @@ def test_module_id_configuration_targets_only_requested_placements(monkeypatch):
     )
 
     assert pc.values["module_ids_to_perforate"] == [".blocks.0", ".fc"]
+    assert pc.values["switch_mode"] == pc.DOING_HISTORY
+    assert pc.values["history_lookback"] == 8
     assert pc.values["modules_to_perforate"] == []
     assert pc.values["modules_to_track"] == [
         dendritic.DSConvBlock,

@@ -147,3 +147,52 @@ def test_build_datasets_caches_non_augmented_training_split(monkeypatch, tmp_pat
     build_datasets(config, augment=False, cache_features=True)
 
     assert seen_cache_flags == [True, True, True]
+
+
+def test_build_datasets_can_omit_test_split_and_its_precomputation(monkeypatch, tmp_path):
+    """Validation-only callers do not construct the held-out test split."""
+    constructed_splits = []
+    precomputed_splits = []
+
+    class _Dataset:
+        def __init__(self, entries, *_args, cache_features=False, **_kwargs):
+            constructed_splits.append(entries[0].rel_path.split("/")[0])
+            self.split = constructed_splits[-1]
+            self.cache_features = cache_features
+
+        def precompute_features(self):
+            precomputed_splits.append(self.split)
+            return 1
+
+    monkeypatch.setattr("kws.data.dataset.SpeechCommandsKWSDataset", _Dataset)
+    monkeypatch.setattr("kws.data.dataset.FeatureExtractor", lambda **_kwargs: object())
+    monkeypatch.setattr("kws.data.dataset.SilenceSampler", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        "kws.data.dataset.build_split_index",
+        lambda *_args, **_kwargs: {
+            TRAIN: [("yes", "training/example.wav")],
+            VAL: [("yes", "validation/example.wav")],
+            TEST: [("yes", "testing/example.wav")],
+        },
+    )
+    config = {
+        "dataset": {"root": str(tmp_path), "sample_rate": 16_000, "clip_seconds": 1.0},
+        "target_keywords": ["yes"],
+        "unknown": {"target_ratio_to_avg_keyword_count": 0.0},
+        "silence": {
+            "background_noise_dir": "_background_noise_",
+            "target_ratio_to_avg_keyword_count": 0.0,
+            "min_gain": 0.1,
+            "max_gain": 1.0,
+        },
+        "features": {"type": "logmel", "n_mels": 40, "win_length_ms": 30, "hop_length_ms": 10},
+        "splits": {"testing_list": "testing.txt", "validation_list": "validation.txt"},
+    }
+
+    datasets, _ = build_datasets(
+        config, augment=False, cache_features=True, splits=(TRAIN, VAL)
+    )
+
+    assert set(datasets) == {TRAIN, VAL}
+    assert constructed_splits == ["training", "validation"]
+    assert precomputed_splits == ["training", "validation"]

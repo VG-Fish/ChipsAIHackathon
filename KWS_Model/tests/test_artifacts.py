@@ -201,6 +201,7 @@ def test_run_session_refreshes_artifact_without_downgrading_role(tmp_path):
     artifact_path = layout.report_path("result.json")
 
     with run_session(layout=layout, command="test.refresh") as manifest:
+        assert manifest is not None
         artifact_path.write_text("first", encoding="utf-8")
         layout.register_file(manifest, artifact_path, role="stage_report")
         artifact_path.write_text("replacement", encoding="utf-8")
@@ -264,6 +265,7 @@ def test_logging_propagates_manifest_finalization_failure(tmp_path):
 
     with pytest.raises(ValueError, match="manifest artifact is missing"):
         with run_session(layout=layout, command="test.finalization") as manifest:
+            assert manifest is not None
             artifact_path.write_text("temporary", encoding="utf-8")
             layout.register_file(manifest, artifact_path, role="stage_report")
             artifact_path.unlink()
@@ -279,6 +281,7 @@ def test_logging_preserves_command_error_when_finalization_also_fails(
     artifact_path = layout.report_path("vanishing.json")
     with pytest.raises(RuntimeError, match="command failed") as exc_info:
         with run_session(layout=layout, command="test.double_failure") as manifest:
+            assert manifest is not None
             artifact_path.write_text("temporary", encoding="utf-8")
             layout.register_file(manifest, artifact_path, role="stage_report")
             artifact_path.unlink()

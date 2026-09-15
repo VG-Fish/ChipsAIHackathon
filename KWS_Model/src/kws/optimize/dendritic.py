@@ -1,6 +1,6 @@
-"""Framework steps 3c-3e: the perforation/dendrite phase and its KD resume.
+"""Framework steps 3c-3e: dendrites with optional KD or supervised resume.
 
-One candidate enters here already pruned and KD-fine-tuned (steps 3a-3b) and
+One candidate enters here already pruned and fine-tuned (steps 3a-3b) and
 leaves with a recorded accuracy and deployment cost. In between:
 
 - **3c, perforation.** PerforatedAI keeps the base weights out of its optimizer,
@@ -9,8 +9,8 @@ leaves with a recorded accuracy and deployment cost. In between:
   trail and per-epoch optimizer audit make that hold/select/freeze cycle
   inspectable after the fact.
 - **3d, resume.** The dendrites are fixed; the base student weights are not yet
-  adapted to them. So the clean deployment graph resumes KD fine-tuning on its
-  active parameters, with the same fixed teacher used everywhere else.
+  adapted to them. The clean deployment graph resumes fine-tuning on its
+  active parameters, using either the fixed teacher or supervised CE.
 - **3e, record.** Validation accuracy plus latency, memory, and compute, so the
   step-3f Pareto rule has all four axes to compare candidates on.
 
@@ -50,12 +50,17 @@ UPA: Any = import_pai_module("perforatedai.utils_perforatedai")
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
-from kws.models.ds_cnn import build_ds_cnn
 from kws.models.ds_cnn import FeatureModel
 from kws.models.ds_cnn import DSCNN
 from kws.models.layers import DSConvBlock
+from kws.models.registry import (
+    build_model_from_checkpoint,
+    checkpoint_input_shape,
+    checkpoint_model_family,
+    model_family,
+)
+from kws.models.sparknet import SparkNet
 from torch.nn.modules.batchnorm import _BatchNorm
-from kws.models.registry import checkpoint_input_shape
 from kws.optimize.kd import (
     DistillationCriterion,
     FrozenTeacher,
@@ -63,9 +68,10 @@ from kws.optimize.kd import (
     file_sha256,
     supports_pooled_features,
 )
-from kws.optimize.prune import prune_ds_cnn
+from kws.optimize.prune import prune_ds_cnn, prune_sparknet
 from kws.train import (
     build_lr_scheduler,
+    collect_auxiliary_losses,
     evaluate_loss_acc,
     resolve_manifest_run_id,
     run_finetune,
@@ -91,6 +97,19 @@ from kws.utils.seed import set_seed, with_seed
 logger = get_logger(__name__)
 
 FRAMEWORK_CYCLE_VERSION = 3
+
+
+def _add_auxiliary_losses(
+    losses: dict[str, torch.Tensor], model: nn.Module
+) -> dict[str, torch.Tensor]:
+    """Add model-defined training losses using the normal training contract."""
+    for name, (value, weight) in collect_auxiliary_losses(model).items():
+        if name in losses:
+            raise ValueError(f"auxiliary loss {name!r} collides with a task loss")
+        losses[name] = value
+        if weight:
+            losses["total"] = losses["total"] + weight * value
+    return losses
 
 PAI_SIDECAR_KEYS = frozenset(
     {
@@ -575,6 +594,7 @@ class DendriticCycleResult:
     best_val_acc: float
     epochs: int
     elapsed_seconds: float
+    pai_best_val_acc: float | None = None
     pai_deployed_params: int | None = None
     cost: dict | None = None
     distillation: dict | None = None
@@ -596,39 +616,66 @@ def build_cycle_base(
     target_model_cfg: dict | None = None,
     expected_run_id: str | None = None,
 ):
-    """Load a trained DS-CNN and structurally prune its block channels."""
+    """Load a trained model and structurally prune its supported channels."""
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     validate_checkpoint_run_id(checkpoint, expected_run_id, source=checkpoint_path)
-    model = build_ds_cnn(
-        checkpoint["model_cfg"],
-        checkpoint_input_shape(checkpoint),
-        checkpoint["num_classes"],
-    )
+    family = checkpoint_model_family(checkpoint)
+    model = build_model_from_checkpoint(checkpoint)
     model.load_state_dict(checkpoint["model_state_dict"])
-    pruned = prune_ds_cnn(model, keep_ratio)
+    if family == "ds_cnn":
+        if not isinstance(model, DSCNN):
+            raise TypeError("DS-CNN checkpoint did not build a DSCNN")
+        pruned = prune_ds_cnn(model, keep_ratio)
+    elif family == "sparknet":
+        if not isinstance(model, SparkNet):
+            raise TypeError("SparkNet checkpoint did not build a SparkNet")
+        # SparkNet exposes an absolute channel target; retain the historical
+        # keep-ratio API at this boundary while preferring the exact target
+        # model width so decimal rounding cannot select the wrong candidate.
+        source_channels = int(checkpoint["model_cfg"]["channels"])
+        target_channels = int(
+            target_model_cfg["channels"]
+            if target_model_cfg is not None
+            else round(source_channels * keep_ratio)
+        )
+        pruned = prune_sparknet(model, target_channels)
+    else:  # guarded by model_family, kept explicit for future families
+        raise ValueError(f"unsupported dendritic pruning family: {family!r}")
 
-    generated_channels = [
-        block.pointwise.out_channels for block in pruned.blocks
-    ]
     model_cfg = dict(checkpoint["model_cfg"])
     model_cfg["name"] = f'{model_cfg["name"]}_dendritic_cycle1_base'
-    model_cfg["block_channels"] = generated_channels
+    pruned_blocks = cast(nn.ModuleList, pruned.get_submodule("blocks"))
+    if family == "ds_cnn":
+        generated_channels = [
+            cast(nn.Conv2d, block.get_submodule("pointwise")).out_channels
+            for block in pruned_blocks
+        ]
+        model_cfg["block_channels"] = generated_channels
+    else:
+        generated_channels = [
+            cast(nn.Conv2d, block.get_submodule("pointwise")).out_channels
+            for block in pruned_blocks
+        ]
+        model_cfg["channels"] = generated_channels[0]
 
     if target_model_cfg is not None:
-        stem_conv = cast(nn.Conv2d, pruned.stem[0])
-        if target_model_cfg["initial_channels"] != stem_conv.out_channels:
-            raise ValueError("XXS initial_channels does not match the pruned model")
-        if target_model_cfg["block_channels"] != generated_channels:
-            raise ValueError(
-                "XXS block_channels does not match the pruned model: "
-                f'{target_model_cfg["block_channels"]} != {generated_channels}'
-            )
+        if family == "ds_cnn":
+            stem_conv = cast(nn.Conv2d, pruned.get_submodule("stem.0"))
+            if target_model_cfg["initial_channels"] != stem_conv.out_channels:
+                raise ValueError("initial_channels does not match the pruned model")
+            if target_model_cfg["block_channels"] != generated_channels:
+                raise ValueError("block_channels does not match the pruned model")
+        else:
+            if model_family(target_model_cfg) != family:
+                raise ValueError("target model family does not match the source checkpoint")
+            if int(target_model_cfg.get("channels", -1)) != generated_channels[0]:
+                raise ValueError("channels does not match the pruned model")
         model_cfg = dict(target_model_cfg)
     return pruned, checkpoint, model_cfg
 
 
 def estimate_one_dendrite_params(
-    model: DSCNN,
+    model: nn.Module,
     conversion: str = "blocks_and_linear",
     module_ids: list[str] | tuple[str, ...] | None = None,
 ) -> int:
@@ -678,7 +725,7 @@ def _prune_finetune_train_recipe(train_cfg: Mapping[str, Any]) -> dict[str, Any]
 
 def _prune_finetune_recipe(
     checkpoint_path: str,
-    teacher_checkpoint: str,
+    teacher_checkpoint: str | None,
     train_cfg: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Fingerprint step 3a/3b independently from later PAI/deployment knobs."""
@@ -694,6 +741,11 @@ def _same_path(left: Any, right: str | Path) -> bool:
     if not isinstance(left, (str, Path)):
         return False
     return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+
+
+def _same_optional_path(left: Any, right: str | Path | None) -> bool:
+    """Compare optional artifact paths without coercing ``None`` to a Path."""
+    return left is None if right is None else _same_path(left, right)
 
 
 def _same_model_state(
@@ -718,7 +770,7 @@ def _load_reusable_prune_finetune_checkpoint(
     latest_path: Path,
     *,
     checkpoint_path: str,
-    teacher_checkpoint: str,
+    teacher_checkpoint: str | None,
     model_cfg: Mapping[str, Any],
     train_cfg: Mapping[str, Any],
     expected_run_id: str | None,
@@ -727,9 +779,9 @@ def _load_reusable_prune_finetune_checkpoint(
 
     Historical latest checkpoints fingerprinted the entire dendritic config,
     including PAI conversion and post-integration settings. Those settings
-    cannot affect the already completed prune+KD weights, so compare the
-    phase-local recipe explicitly. Both the durable latest state and the best
-    deployment checkpoint must attest the same completed phase.
+    cannot affect the already completed prune-fine-tune weights, so compare
+    the phase-local recipe explicitly. Both the durable latest state and the
+    best deployment checkpoint must attest the same completed phase.
     """
     if not best_path.is_file() or not latest_path.is_file():
         return None
@@ -745,24 +797,42 @@ def _load_reusable_prune_finetune_checkpoint(
     recipe = latest.get("recipe")
     recorded_train = recipe.get("train") if isinstance(recipe, Mapping) else None
     distillation = best.get("distillation")
+    recorded_teacher_matches = (
+        isinstance(recipe, Mapping)
+        and _same_optional_path(recipe.get("teacher_checkpoint"), teacher_checkpoint)
+    )
+    if teacher_checkpoint is None:
+        distillation_matches = distillation is None
+    else:
+        distillation_matches = (
+            isinstance(distillation, Mapping)
+            and _same_path(distillation.get("teacher_checkpoint"), teacher_checkpoint)
+            and distillation.get("teacher_sha256") == file_sha256(teacher_checkpoint)
+        )
+    expected_phase = (
+        "prune_kd" if teacher_checkpoint is not None else "prune_supervised"
+    )
+    expected_stage = (
+        "pruned_kd_finetune"
+        if teacher_checkpoint is not None
+        else "pruned_supervised_finetune"
+    )
     compatible = (
         latest.get("stage") == "sparsity"
-        and latest.get("phase") == "prune_kd"
+        and latest.get("phase") == expected_phase
         and int(latest.get("target_epochs", -1)) == target_epochs
         and int(latest.get("completed_epoch", -1)) >= target_epochs
         and isinstance(recipe, Mapping)
         and _same_path(recipe.get("source_checkpoint"), checkpoint_path)
-        and _same_path(recipe.get("teacher_checkpoint"), teacher_checkpoint)
+        and recorded_teacher_matches
         and isinstance(recorded_train, Mapping)
         and _prune_finetune_train_recipe(recorded_train)
         == _prune_finetune_train_recipe(train_cfg)
         and recipe.get("pruning") == train_cfg.get("pruning")
-        and best.get("stage") == "pruned_kd_finetune"
+        and best.get("stage") == expected_stage
         and best.get("model_cfg") == dict(model_cfg)
         and best.get("sparsity") == train_cfg.get("pruning")
-        and isinstance(distillation, Mapping)
-        and _same_path(distillation.get("teacher_checkpoint"), teacher_checkpoint)
-        and distillation.get("teacher_sha256") == file_sha256(teacher_checkpoint)
+        and distillation_matches
         and isinstance(best.get("model_state_dict"), Mapping)
         # ``best.pt`` and ``latest.pt`` are separate atomic writes. A process
         # interruption or manual artifact copy can leave individually valid
@@ -1213,8 +1283,8 @@ def freeze_selected_dendrites(model: nn.Module) -> int:
     """Freeze the dendrites PAI selected, leaving the base student active.
 
     This is the boundary between steps 3c and 3d: the dendritic residual nodes
-    are settled, and the KD resume that follows adapts only the base student
-    parameters to them.
+    are settled, and the optional supervised/KD resume adapts only the base
+    student parameters to them.
     """
     frozen = 0
     for name, parameter in model.named_parameters():
@@ -1229,7 +1299,7 @@ def resume_kd_finetune(
     datasets,
     train_cfg: dict,
     device: torch.device,
-    teacher: FrozenTeacher,
+    teacher: FrozenTeacher | None,
     input_shape: tuple[int, int],
     save_name: str,
     baseline_val_acc: float = 0.0,
@@ -1237,14 +1307,16 @@ def resume_kd_finetune(
     data_cfg: dict | None = None,
     cycle_recipe_fingerprint: str | None = None,
     run_id: str | None = None,
+    num_classes: int | None = None,
+    num_keywords: int | None = None,
 ) -> dict:
-    """Framework step 3d: resume KD fine-tuning of the active student parameters.
+    """Framework step 3d: fine-tune the active base around selected dendrites.
 
     The dendrites were selected and frozen against a base network that has not
-    seen them. Re-running the task + KD objective over the clean deployment
-    graph lets the base weights settle around the capacity the dendrites added,
-    and it runs on the exact graph that gets exported -- not on the PAI training
-    wrapper, whose extra scaffolding is gone by deployment.
+    seen them. Re-running the task objective over the clean deployment graph
+    lets the base weights settle around the capacity the dendrites added. A
+    teacher supplements that objective only when explicitly supplied; the
+    no-KD path remains ordinary label-smoothed cross entropy end to end.
     """
     epochs = int(train_cfg.get("resume_epochs", 0))
     if epochs < 1:
@@ -1261,16 +1333,19 @@ def resume_kd_finetune(
         }
 
     clean_model.to(device)
-    kd = DistillationCriterion(
-        teacher,
-        KDWeights.from_config(train_cfg.get("distillation")),
-        train_cfg["label_smoothing"],
-        device,
-        student_feature_dim=(
-            _clean_feature_dim(clean_model, input_shape)
-            if supports_pooled_features(clean_model, input_shape)
-            else None
-        ),
+    kd = (
+        DistillationCriterion(
+            teacher,
+            KDWeights.from_config(train_cfg.get("distillation")),
+            train_cfg["label_smoothing"],
+            device,
+            student_feature_dim=(
+                _clean_feature_dim(clean_model, input_shape)
+                if supports_pooled_features(clean_model, input_shape)
+                else None
+            ),
+        )
+        if teacher is not None else None
     )
     train_generator = torch.Generator().manual_seed(int(train_cfg["seed"]))
     val_generator = torch.Generator().manual_seed(int(train_cfg["seed"]) + 1)
@@ -1282,17 +1357,18 @@ def resume_kd_finetune(
     )
     layout = ArtifactLayout(output_dir) if output_dir is not None else None
     run_id = resolve_manifest_run_id(layout, run_id)
+    resume_phase = "resume_kd" if teacher is not None else "resume_supervised"
     recorder = (
         MetricsRecorder(
-            layout.metrics_path("sparsity", "resume_kd", candidate=Path(save_name).name),
+            layout.metrics_path("sparsity", resume_phase, candidate=Path(save_name).name),
             stage="sparsity",
-            phase="resume_kd",
+            phase=resume_phase,
         )
         if layout is not None else None
     )
     latest_path = (
         layout.checkpoint_path(
-            "sparsity", "resume_kd", "latest", candidate=Path(save_name).name
+            "sparsity", resume_phase, "latest", candidate=Path(save_name).name
         )
         if layout is not None else None
     )
@@ -1302,8 +1378,9 @@ def resume_kd_finetune(
     )
 
     logger.info(
-        "Step 3d: resuming KD fine-tuning for %d epochs on %d active parameters "
+        "Step 3d: resuming %s fine-tuning for %d epochs on %d active parameters "
         "(%d dendrite parameters frozen)",
+        "KD" if kd is not None else "supervised no-KD",
         epochs,
         sum(parameter.numel() for parameter in active),
         frozen_dendrites,
@@ -1333,18 +1410,21 @@ def resume_kd_finetune(
         resume_state=resume_state,
         latest_path=latest_path,
         stage="sparsity",
-        phase="resume_kd",
+        phase=resume_phase,
         run_id=run_id,
         recipe={
             "train": train_cfg,
             "data": data_cfg,
-            "teacher_checkpoint": teacher.checkpoint_path,
-            "teacher_sha256": getattr(teacher, "checkpoint_sha256", None),
+            "teacher_checkpoint": teacher.checkpoint_path if teacher is not None else None,
+            "teacher_sha256": (
+                getattr(teacher, "checkpoint_sha256", None)
+                if teacher is not None else None
+            ),
             "cycle_recipe_fingerprint": cycle_recipe_fingerprint,
             "save_name": Path(save_name).name,
         },
         epochs=epochs,
-        label="resume-kd",
+        label=resume_phase.replace("_", "-"),
     )
     if not best_state and resume_state is not None:
         best_state.update(resume_state.get("best_model_state_dict") or {})
@@ -1358,25 +1438,36 @@ def resume_kd_finetune(
 
     path = (
         layout.checkpoint_path(
-            "sparsity", "resume_kd", "best", candidate=Path(save_name).name
+            "sparsity", resume_phase, "best", candidate=Path(save_name).name
         )
         if layout is not None
         else Path(save_name) / "resumed_clean_pai.pt"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
+    if teacher is not None:
+        resolved_num_classes = teacher.num_classes
+        resolved_num_keywords = teacher.num_keywords
+    else:
+        if num_classes is None:
+            classifier = clean_model.get_submodule("fc")
+            if not isinstance(classifier, nn.Linear):
+                raise ValueError("no-KD resume requires num_classes or a Linear .fc")
+            num_classes = classifier.out_features
+        resolved_num_classes = num_classes
+        resolved_num_keywords = num_keywords or 0
     atomic_torch_save(
         path,
         {
             "model_state_dict": clean_model.state_dict(),
-            "stage": "dendrite_kd_resume",
+            "stage": f"dendrite_{resume_phase}",
             "run_id": run_id,
             "val_acc": selected_val_acc,
             "resume_best_val_acc": result.best_val_acc,
             "input_shape": list(input_shape),
-            "num_classes": teacher.num_classes,
-            "num_keywords": teacher.num_keywords,
-            "teacher_checkpoint": teacher.checkpoint_path,
-            "distillation": kd.describe(),
+            "num_classes": int(resolved_num_classes),
+            "num_keywords": int(resolved_num_keywords),
+            "teacher_checkpoint": teacher.checkpoint_path if teacher is not None else None,
+            "distillation": kd.describe() if kd is not None else None,
         },
     )
 
@@ -1395,7 +1486,7 @@ def resume_kd_finetune(
             "resume_best_val_acc": result.best_val_acc,
             "frozen_dendrite_params": frozen_dendrites,
             "active_params": sum(parameter.numel() for parameter in active),
-            "distillation": kd.describe(),
+            "distillation": kd.describe() if kd is not None else None,
             "checkpoint": str(path),
             "history": result.history,
             "run_id": run_id,
@@ -1410,7 +1501,7 @@ def resume_kd_finetune(
         "best_val_acc": result.best_val_acc,
         "frozen_dendrite_params": frozen_dendrites,
         "active_params": sum(parameter.numel() for parameter in active),
-        "distillation": kd.describe(),
+        "distillation": kd.describe() if kd is not None else None,
         "checkpoint": str(path),
         "history": result.history,
         "run_id": run_id,
@@ -1473,6 +1564,19 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     GPA.pc.set_device(device)
     GPA.pc.set_use_cuda(device.type == "cuda")
     GPA.pc.set_testing_dendrite_capacity(testing)
+    if "switch_mode" in config:
+        if config["switch_mode"] != "history":
+            raise ValueError("perforatedai.switch_mode must be history")
+        GPA.pc.set_switch_mode(GPA.pc.DOING_HISTORY)
+    if "history_lookback" in config:
+        history_lookback = config["history_lookback"]
+        if (
+            isinstance(history_lookback, bool)
+            or not isinstance(history_lookback, int)
+            or history_lookback < 1
+        ):
+            raise ValueError("perforatedai.history_lookback must be a positive integer")
+        GPA.pc.set_history_lookback(history_lookback)
     # PAI's capacity check expects to exercise three dendrites.  The real run
     # returns to the configured experiment limit.
     max_dendrites = validate_max_dendrites(config["max_dendrites"])
@@ -1605,11 +1709,11 @@ def run_cycle(
     prune_finetune_candidate: str | None = None,
     run_id: str | None = None,
 ) -> DendriticCycleResult:
-    """Run steps 3c-3e for one candidate: perforate, resume with KD, measure.
+    """Run one prune/fine-tune, perforate, resume, and measurement cycle.
 
-    ``teacher_checkpoint`` is the same fixed teacher every other stage uses. If
-    it is omitted the cycle falls back to plain task loss, which is the older
-    behaviour and still useful for isolating the dendrites' own contribution.
+    Supplying ``teacher_checkpoint`` enables the same fixed teacher in both
+    fine-tuning phases. Omitting it keeps both phases strictly supervised,
+    which isolates the dendrites' contribution from distillation.
     """
     train_cfg = with_seed(train_cfg, seed)
     layout = None
@@ -1742,10 +1846,14 @@ def run_cycle(
     )
     logger.info(
         "Dendrite-cycle base: %d params, estimated one-dendrite deployment: %d "
-        "params, block_channels=%s",
+        "params, channels=%s",
         base_params,
         estimated_params,
-        model_cfg["block_channels"],
+        (
+            model_cfg.get("block_channels")
+            or [model_cfg["channels"]]
+            * len(cast(nn.ModuleList, base.get_submodule("blocks")))
+        ),
     )
 
     datasets, label_map = build_datasets(
@@ -1755,6 +1863,7 @@ def run_cycle(
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
         augmentation=train_cfg.get("augmentation"),
+        splits=(TRAIN, VAL),
     )
 
     if teacher_checkpoint and run_id is not None and (
@@ -1771,28 +1880,36 @@ def run_cycle(
     # student first has to adapt to the structurally smaller graph with task +
     # KD loss; otherwise the first PAI neuron phase is doing double duty and a
     # run cannot prove that pruning itself was fine-tuned before perforation.
-    prune_finetune = {"status": "skipped", "reason": "no teacher supplied"}
-    if teacher is not None:
+    # Pruning always gets a supervised adaptation pass.  KD is an optional
+    # auxiliary objective, not a prerequisite for this phase.
+    prune_finetune = {"status": "pending"}
+    if prune_finetune["status"] != "complete":
         pre_candidate = prune_finetune_candidate or run_dir.name
+        pre_phase = "prune_kd" if teacher is not None else "prune_supervised"
+        pre_stage = (
+            "pruned_kd_finetune"
+            if teacher is not None
+            else "pruned_supervised_finetune"
+        )
         pre_checkpoint = (
             ArtifactLayout(output_dir).checkpoint_path(
-                "sparsity", "prune_kd", "best", candidate=pre_candidate
+                "sparsity", pre_phase, "best", candidate=pre_candidate
             )
             if output_dir is not None
-            else run_dir / "pruned_kd.pt"
+            else run_dir / f"{pre_phase}.pt"
         )
         pre_latest = (
             layout.checkpoint_path(
-                "sparsity", "prune_kd", "latest", candidate=pre_candidate
+                "sparsity", pre_phase, "latest", candidate=pre_candidate
             )
             if layout is not None
-            else pre_checkpoint.with_name("pruned_kd_latest.pt")
+            else pre_checkpoint.with_name(f"{pre_phase}_latest.pt")
         )
         reusable_pre = _load_reusable_prune_finetune_checkpoint(
             pre_checkpoint,
             pre_latest,
             checkpoint_path=checkpoint_path,
-            teacher_checkpoint=teacher.checkpoint_path,
+            teacher_checkpoint=teacher.checkpoint_path if teacher is not None else None,
             model_cfg=model_cfg,
             train_cfg=train_cfg,
             expected_run_id=run_id,
@@ -1807,17 +1924,21 @@ def run_cycle(
                 "distillation": reusable_pre.get("distillation"),
             }
             logger.info(
-                "Steps 3a-3b reused: pruned student KD val_acc=%.4f <- %s",
+                "Steps 3a-3b reused: pruned student %s val_acc=%.4f <- %s",
+                "KD" if teacher is not None else "supervised no-KD",
                 prune_finetune["best_val_acc"],
                 pre_checkpoint,
             )
         else:
-            pre_kd = DistillationCriterion(
-                teacher,
-                KDWeights.from_config(train_cfg.get("distillation")),
-                train_cfg["label_smoothing"],
-                device,
-                student_feature_dim=base.fc.in_features,
+            pre_kd = (
+                DistillationCriterion(
+                    teacher,
+                    KDWeights.from_config(train_cfg.get("distillation")),
+                    train_cfg["label_smoothing"],
+                    device,
+                    student_feature_dim=base.fc.in_features,
+                )
+                if teacher is not None else None
             )
             pre_val_acc = train_model(
                 base,
@@ -1830,20 +1951,22 @@ def run_cycle(
                 checkpoint["num_keywords"],
                 kd=pre_kd,
                 extra_checkpoint_fields={
-                    "stage": "pruned_kd_finetune",
+                    "stage": pre_stage,
                     "sparsity": train_cfg.get("pruning"),
-                    "distillation": pre_kd.describe(),
+                    "distillation": pre_kd.describe() if pre_kd is not None else None,
                 },
                 output_dir=output_dir,
                 stage="sparsity",
-                phase="prune_kd",
+                phase=pre_phase,
                 artifact_candidate=(
                     pre_candidate if output_dir is not None else None
                 ),
                 resume_from=pre_latest if pre_latest.exists() else None,
                 run_id=run_id,
                 recipe=_prune_finetune_recipe(
-                    checkpoint_path, teacher.checkpoint_path, train_cfg
+                    checkpoint_path,
+                    teacher.checkpoint_path if teacher is not None else None,
+                    train_cfg,
                 ),
             )
             best_pruned = torch.load(
@@ -1855,10 +1978,11 @@ def run_cycle(
                 "reused": False,
                 "best_val_acc": pre_val_acc.best_val_acc,
                 "checkpoint": str(pre_checkpoint),
-                "distillation": pre_kd.describe(),
+                "distillation": pre_kd.describe() if pre_kd is not None else None,
             }
             logger.info(
-                "Steps 3a-3b complete: pruned student KD val_acc=%.4f -> %s",
+                "Steps 3a-3b complete: pruned student %s val_acc=%.4f -> %s",
+                "KD" if pre_kd is not None else "supervised no-KD",
                 pre_val_acc.best_val_acc,
                 pre_checkpoint,
             )
@@ -2062,6 +2186,7 @@ def run_cycle(
                     else model(features)
                 )
                 losses = kd(features, logits, labels, student_features)
+            _add_auxiliary_losses(losses, model)
             loss = losses["total"]
             loss.backward()
             optimizer.step()
@@ -2306,31 +2431,35 @@ def run_cycle(
         logger.info("PAI cycle export recovered; results saved under %s", save_name)
 
     best_val_acc, deployed_params = read_pai_architecture_results(save_name)
+    pai_best_val_acc = best_val_acc
 
-    # Step 3d: resume KD fine-tuning of the active student parameters.
-    resume: dict[str, Any] = {"status": "skipped", "reason": "no teacher supplied"}
-    if teacher is not None:
-        resume = resume_kd_finetune(
-            clean_model,
-            datasets,
-            train_cfg,
-            device,
-            teacher,
-            input_shape,
-            save_name,
-            baseline_val_acc=best_val_acc,
-            output_dir=output_dir,
-            data_cfg=data_cfg,
-            cycle_recipe_fingerprint=fingerprint,
-            run_id=run_id,
+    # Step 3d: adapt the active base weights to the selected dendrites.  The
+    # teacher is genuinely optional; no-KD experiments still get the matched
+    # supervised resume requested by their recipe.
+    resume_result = resume_kd_finetune(
+        clean_model,
+        datasets,
+        train_cfg,
+        device,
+        teacher,
+        input_shape,
+        save_name,
+        baseline_val_acc=best_val_acc,
+        output_dir=output_dir,
+        data_cfg=data_cfg,
+        cycle_recipe_fingerprint=fingerprint,
+        run_id=run_id,
+        num_classes=int(checkpoint["num_classes"]),
+        num_keywords=int(checkpoint["num_keywords"]),
+    )
+    if resume_result.get("status") == "complete":
+        logger.info(
+            "%s resume improved validation accuracy %.4f -> %.4f",
+            "KD" if teacher is not None else "Supervised no-KD",
+            best_val_acc,
+            resume_result["best_val_acc"],
         )
-        if resume.get("status") == "complete":
-            logger.info(
-                "KD resume improved validation accuracy %.4f -> %.4f",
-                best_val_acc,
-                resume["best_val_acc"],
-            )
-            best_val_acc = resume["best_val_acc"]
+        best_val_acc = resume_result["best_val_acc"]
 
     # Step 3e: record latency, memory, and compute for the exported graph.
     profile_device = torch.device(
@@ -2357,16 +2486,21 @@ def run_cycle(
     deployed_params = int(cost["params"])
     result = DendriticCycleResult(
         save_name=save_name,
-        block_channels=list(model_cfg["block_channels"]),
+        block_channels=list(
+            model_cfg.get("block_channels")
+            or [model_cfg["channels"]]
+            * len(cast(nn.ModuleList, base.get_submodule("blocks")))
+        ),
         base_params=base_params,
         deployed_params=deployed_params,
         best_val_acc=best_val_acc,
         epochs=epoch + 1,
         elapsed_seconds=monotonic() - started_at,
+        pai_best_val_acc=pai_best_val_acc,
         pai_deployed_params=pai_deployed_params,
         cost=cost,
         distillation=kd.describe() if kd is not None else None,
-        resume=resume,
+        resume=resume_result,
         prune_finetune=prune_finetune,
         phase_trail=phase_trail,
         cycle_checkpoints=cycle_checkpoints,
@@ -2462,6 +2596,10 @@ def main() -> None:
         help="Fixed teacher for the cycle's KD loss and the step-3d resume",
     )
     parser.add_argument(
+        "--no-KD", "--no-kd", dest="no_kd", action="store_true",
+        help="Disable KD and force teacher-free supervised fine-tuning",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -2469,6 +2607,8 @@ def main() -> None:
     )
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
+    if args.no_kd:
+        args.teacher_checkpoint = None
     try:
         args.output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
     except ValueError as error:

@@ -1,4 +1,4 @@
-"""Structured (channel) and N:M pruning for DS-CNN.
+"""Structured channel pruning for DS-CNN/SparkNet, plus generic N:M pruning.
 
 Step 3a of the framework asks for "structured or N:M pruning", and the two
 answer different deployment stories:
@@ -32,6 +32,7 @@ import yaml
 from kws.data.dataset import build_datasets
 from kws.models.ds_cnn import DSCNN
 from kws.models.registry import checkpoint_input_shape
+from kws.models.sparknet import SparkNet, TCSBlock
 from kws.optimize.kd import DistillationCriterion, FrozenTeacher, KDWeights, file_sha256
 from kws.train import (
     resolve_manifest_run_id,
@@ -86,6 +87,13 @@ def prune_finetune_recipe(
     }
 
 
+def _prune_artifact_names(teacher_checkpoint: str | None) -> tuple[str, str]:
+    """Return the phase and durable-checkpoint stage for this fine-tune mode."""
+    if teacher_checkpoint is None:
+        return "prune_supervised", "pruned_supervised_finetune"
+    return "prune_kd", "pruned_kd_finetune"
+
+
 def _l1_topk_indices(weight: torch.Tensor, k: int) -> torch.Tensor:
     scores = weight.detach().abs().sum(dim=(1, 2, 3))
     return torch.topk(scores, k).indices.sort().values
@@ -107,6 +115,8 @@ def _copy_bn_subset(old_bn: nn.BatchNorm2d, new_bn: nn.BatchNorm2d, indices: tor
         new_bias.copy_(old_bias[indices])
         new_mean.copy_(old_mean[indices])
         new_var.copy_(old_var[indices])
+        if old_bn.num_batches_tracked is not None and new_bn.num_batches_tracked is not None:
+            new_bn.num_batches_tracked.copy_(old_bn.num_batches_tracked)
 
 
 def prune_ds_cnn(model: DSCNN, keep_ratio: float) -> DSCNN:
@@ -150,6 +160,72 @@ def prune_ds_cnn(model: DSCNN, keep_ratio: float) -> DSCNN:
         raise ValueError("channel pruning requires a classifier bias")
     new_model.fc.weight.data = model.fc.weight.data[:, keep_in].clone()
     new_model.fc.bias.data = cast(torch.Tensor, model.fc.bias).data.clone()
+    return new_model
+
+
+def prune_sparknet(model: SparkNet, target_channels: int) -> SparkNet:
+    """L1-prune a SparkNet backbone to an exact, narrower channel width.
+
+    The same output-channel selection is threaded through each following
+    depthwise convolution, residual projection, and batch norm.  Gate and
+    classifier widths are intentionally unchanged.
+    """
+    if not isinstance(model, SparkNet):
+        raise TypeError("prune_sparknet expects a SparkNet model")
+    old_blocks = [cast(TCSBlock, block) for block in model.blocks]
+    old_channels = [block.pointwise.out_channels for block in old_blocks]
+    if not old_channels or any(ch != old_channels[0] for ch in old_channels):
+        raise ValueError("prune_sparknet requires a uniform-width SparkNet backbone")
+    source_channels = old_channels[0]
+    if isinstance(target_channels, bool) or not isinstance(target_channels, int):
+        raise TypeError("SparkNet target_channels must be an integer")
+    if not 0 < target_channels < source_channels:
+        raise ValueError(
+            "SparkNet target_channels must be positive and narrower than "
+            f"the source width {source_channels}"
+        )
+    device = next(model.parameters()).device
+    dtype = next(model.parameters()).dtype
+    first_block = old_blocks[0]
+    new_model = SparkNet(
+        n_feat=first_block.depthwise.in_channels,
+        num_classes=model.fc.out_features,
+        channels=target_channels,
+        gate_channels=model.gate_conv.out_channels,
+        kernels=tuple(block.depthwise.kernel_size[-1] for block in old_blocks),
+        block_bn_eps=first_block.bn.eps,
+        sparsity_weight=model.sparsity_weight,
+        input_shape=model.input_shape,
+    ).to(device=device, dtype=dtype)
+
+    new_blocks = [cast(TCSBlock, block) for block in new_model.blocks]
+    keep_in: torch.Tensor | None = None
+    for old, new_block in zip(old_blocks, new_blocks):
+        if keep_in is None:
+            keep_in = torch.arange(old.depthwise.in_channels, device=device)
+        # Depthwise filters are indexed by their channel/group.
+        new_block.depthwise.weight.data.copy_(old.depthwise.weight.data[keep_in])
+        pw = old.pointwise.weight[:, keep_in]
+        keep_out = _l1_topk_indices(pw, target_channels).to(device)
+        new_block.pointwise.weight.data.copy_(pw.data[keep_out])
+        _copy_bn_subset(old.bn, new_block.bn, keep_out)
+        if old.res_conv is not None:
+            if new_block.res_conv is None or old.res_bn is None or new_block.res_bn is None:
+                raise ValueError("SparkNet residual structure changed during pruning")
+            new_block.res_conv.weight.data.copy_(
+                old.res_conv.weight.data[keep_out][:, keep_in]
+            )
+            _copy_bn_subset(old.res_bn, new_block.res_bn, keep_out)
+        keep_in = keep_out
+
+    new_model.gate_conv.weight.data.copy_(model.gate_conv.weight.data[:, keep_in])
+    if model.gate_conv.bias is not None:
+        if new_model.gate_conv.bias is None:
+            raise ValueError("SparkNet gate bias changed during pruning")
+        new_model.gate_conv.bias.data.copy_(model.gate_conv.bias.data)
+    new_model.gate_bn.load_state_dict(model.gate_bn.state_dict())
+    new_model.fc.load_state_dict(model.fc.state_dict())
+    new_model.train(model.training)
     return new_model
 
 
@@ -328,6 +404,7 @@ def _resolve_prune_resume_from(
     output_dir: str | Path | None,
     out_checkpoint: str | Path,
     spec: SparsitySpec,
+    teacher_checkpoint: str | None = None,
     artifact_candidate: str | None = None,
 ) -> Path | None:
     """Resolve pruning's explicit or phase-standard training-state input."""
@@ -337,15 +414,16 @@ def _resolve_prune_resume_from(
         return None
 
     layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    phase, _ = _prune_artifact_names(teacher_checkpoint)
     if layout is not None:
         latest_path = layout.checkpoint_path(
             "sparsity",
-            "prune_kd",
+            phase,
             "latest",
             candidate=artifact_candidate or spec.label,
         )
         metrics_path = layout.metrics_path(
-            "sparsity", "prune_kd", candidate=artifact_candidate or spec.label
+            "sparsity", phase, candidate=artifact_candidate or spec.label
         )
     else:
         latest_path = Path(out_checkpoint).with_name("latest.pt")
@@ -359,7 +437,7 @@ def _resolve_prune_resume_from(
         and metrics_path.stat().st_size
     ):
         raise FileNotFoundError(
-            f"--resume requested for sparsity/{spec.label}/prune_kd, but the "
+            f"--resume requested for sparsity/{spec.label}/{phase}, but the "
             f"phase checkpoint does not exist at {latest_path} while metrics exist "
             f"at {metrics_path}; refusing to restart at epoch 1 and append duplicate metrics"
         )
@@ -367,16 +445,21 @@ def _resolve_prune_resume_from(
 
 
 def _load_prune_resume_state(
-    path: str | Path, device, *, expected_run_id: str | None = None
+    path: str | Path,
+    device,
+    *,
+    teacher_checkpoint: str | None = None,
+    expected_run_id: str | None = None,
 ) -> dict:
     state = require_training_state(
         torch.load(path, map_location=device, weights_only=False), source=path
     )
     validate_checkpoint_run_id(state, expected_run_id, source=path)
-    if state.get("stage") != "sparsity" or state.get("phase") != "prune_kd":
+    phase, _ = _prune_artifact_names(teacher_checkpoint)
+    if state.get("stage") != "sparsity" or state.get("phase") != phase:
         raise ValueError(
             f"resume checkpoint belongs to {state.get('stage')}/{state.get('phase')}, "
-            "not sparsity/prune_kd"
+            f"not sparsity/{phase}"
         )
     return state
 
@@ -402,22 +485,21 @@ def prune_and_fine_tune(
     artifact_candidate: str | None = None,
     run_id: str | None = None,
 ) -> dict:
-    """Framework steps 3a-3b: sparsify the student, then fine-tune it with KD.
+    """Framework steps 3a-3b: sparsify the student, then fine-tune it.
 
-    Fine-tuning after pruning uses task loss *and* the fixed teacher's KD loss.
-    The teacher still has the capacity that pruning just removed, so its soft
-    targets carry more information about the classes the pruned student is now
-    confusing than the one-hot labels do.
+    A supplied fixed teacher adds KD loss to the task loss; without a teacher,
+    the pruned model is fine-tuned with task loss alone.
     """
     train_cfg = with_seed(train_cfg, seed)
     device = get_device()
     layout = ArtifactLayout(output_dir) if output_dir is not None else None
     run_id = resolve_manifest_run_id(layout, run_id)
     artifact_candidate = artifact_candidate or spec.label
+    phase, checkpoint_stage = _prune_artifact_names(teacher_checkpoint)
     if layout is not None:
         layout.ensure_tree()
         out_checkpoint = layout.checkpoint_path(
-            "sparsity", "prune_kd", "best", candidate=artifact_candidate
+            "sparsity", phase, "best", candidate=artifact_candidate
         )
     resume_path = _resolve_prune_resume_from(
         resume=resume,
@@ -425,10 +507,16 @@ def prune_and_fine_tune(
         output_dir=output_dir,
         out_checkpoint=out_checkpoint,
         spec=spec,
+        teacher_checkpoint=teacher_checkpoint,
         artifact_candidate=artifact_candidate,
     )
     resume_state = (
-        _load_prune_resume_state(resume_path, device, expected_run_id=run_id)
+        _load_prune_resume_state(
+            resume_path,
+            device,
+            teacher_checkpoint=teacher_checkpoint,
+            expected_run_id=run_id,
+        )
         if resume_path is not None else None
     )
 
@@ -560,7 +648,7 @@ def prune_and_fine_tune(
         kd=kd,
         post_step=masks,
         extra_checkpoint_fields={
-            "stage": "pruned_kd_finetune",
+            "stage": checkpoint_stage,
             # Keep the durable checkpoint compatible with the dendritic
             # cycle's phase-local reuse validator. The richer label remains
             # in this function's returned report.
@@ -570,7 +658,7 @@ def prune_and_fine_tune(
         },
         output_dir=output_dir,
         stage="sparsity",
-        phase="prune_kd",
+        phase=phase,
         resume_state=resume_state,
         recipe=recipe,
         stage_specific_state={
@@ -645,8 +733,9 @@ def main():
         m=args.m,
     )
     layout = ArtifactLayout(args.output_dir) if args.output_dir else None
+    phase, _ = _prune_artifact_names(args.teacher_checkpoint)
     destination = (
-        layout.checkpoint_path("sparsity", "prune_kd", "best", candidate=spec.label)
+        layout.checkpoint_path("sparsity", phase, "best", candidate=spec.label)
         if layout is not None else Path(args.out_checkpoint)
     )
     resume_from = _resolve_prune_resume_from(
@@ -655,6 +744,7 @@ def main():
         output_dir=args.output_dir,
         out_checkpoint=destination,
         spec=spec,
+        teacher_checkpoint=args.teacher_checkpoint,
     )
     inputs = [
         (args.data_config, "data_config"),

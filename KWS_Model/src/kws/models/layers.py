@@ -17,24 +17,11 @@ class DSConvBlockSequence(nn.Sequential):
     def __init__(self, *blocks: "DSConvBlock") -> None:
         super().__init__(*blocks)
 
-    def __getitem__(self, index: int) -> "DSConvBlock":
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError("DSConvBlockSequence index out of range")
-        return cast(DSConvBlock, self._modules[str(index)])
-
     def __iter__(self) -> Iterator["DSConvBlock"]:
         return (cast(DSConvBlock, block) for block in self._modules.values())
 
     def __len__(self) -> int:
         return len(self._modules)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for block in self:
-            x = block(x)
-        return x
-
 
 class DSConvBlock(nn.Module):
     """Depthwise-separable conv block: depthwise 3x3 -> BN -> ReLU -> pointwise 1x1 -> BN -> ReLU."""

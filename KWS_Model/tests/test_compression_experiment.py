@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 import torch
 import yaml
@@ -112,7 +114,7 @@ def test_unlimited_dendrites_uses_one_dendrite_for_cost_admission():
     assert pai_runtime_dendrite_limit(3) == 3
     for invalid in (True, False, 0, -2, 1.5, "3"):
         with pytest.raises(ValueError, match="positive integer or -1"):
-            validate_max_dendrites(invalid)
+            validate_max_dendrites(cast(int, invalid))
 
 
 def test_comparison_matches_conventional_models_at_no_greater_final_cost():

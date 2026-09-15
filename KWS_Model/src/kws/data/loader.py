@@ -147,4 +147,10 @@ def build_data_loader(
             prefetch_factor=prefetch_factor,
         )
         return _ResilientDataLoader(dataset, settings)
-    return DataLoader(dataset=dataset, **settings)
+    return DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        generator=generator,
+        num_workers=num_workers,
+    )

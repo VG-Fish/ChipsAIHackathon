@@ -43,8 +43,16 @@ from kws.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-CLUSTERABLE_TYPES = (nn.Conv2d, nn.Linear)
+CLUSTERABLE_TYPES: tuple[type[nn.Conv2d], type[nn.Linear]] = (nn.Conv2d, nn.Linear)
 BEST_CHECKPOINT_KIND = "kws_best_model"
+
+
+def _clusterable_weight_count(module: nn.Module) -> int:
+    """Return the count of a clusterable layer's weight tensor."""
+    weight = getattr(module, "weight")
+    if not isinstance(weight, torch.Tensor):
+        raise TypeError("clusterable layer weight must be a Tensor")
+    return weight.numel()
 
 
 def _infer_manifest_run_id(path: str | Path) -> str | None:
@@ -195,7 +203,7 @@ def apply_weight_clustering(model: nn.Module, spec: ClusterSpec) -> ClusteringRe
     skipped: list[str] = []
     dense_params = sum(parameter.numel() for parameter in model.parameters())
     clusterable_weights = sum(
-        cast(nn.Conv2d | nn.Linear, module).weight.numel()
+        _clusterable_weight_count(module)
         for module in model.modules()
         if isinstance(module, CLUSTERABLE_TYPES)
     )

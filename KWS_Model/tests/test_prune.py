@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from kws.models.ds_cnn import DSCNN
+from kws.models.layers import DSConvBlock
 from kws.optimize.prune import (
     SparsitySpec,
     apply_nm_sparsity,
@@ -99,8 +100,12 @@ def test_sparsity_spec_validates_and_labels_itself():
 def test_apply_sparsity_dispatches_on_kind():
     structured, masks = apply_sparsity(_build_model(), SparsitySpec("structured", keep_ratio=0.5))
     assert masks is None
-    assert structured.blocks[0].pointwise.out_channels == 32
+    structured_block = structured.blocks[0]
+    assert isinstance(structured_block, DSConvBlock)
+    assert structured_block.pointwise.out_channels == 32
 
     same, nm_masks = apply_sparsity(_build_model(), SparsitySpec("nm", n=1, m=4))
     assert nm_masks is not None
-    assert same.blocks[0].pointwise.out_channels == 64  # shapes are untouched
+    unchanged_block = same.blocks[0]
+    assert isinstance(unchanged_block, DSConvBlock)
+    assert unchanged_block.pointwise.out_channels == 64  # shapes are untouched

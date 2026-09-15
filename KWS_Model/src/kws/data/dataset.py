@@ -4,6 +4,7 @@ import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import torch
 from torch.utils.data import Dataset
@@ -122,7 +123,8 @@ class SpeechCommandsKWSDataset(Dataset):
             # resilient loader can fall back to one process in that case.
             # A shape mismatch is a feature-extraction defect and must remain
             # visible; only the host shared-memory operation is optional.
-            stacked = torch.stack(self._feature_cache, dim=0)
+            assert all(feature is not None for feature in self._feature_cache)
+            stacked = torch.stack(cast(list[torch.Tensor], self._feature_cache), dim=0)
             try:
                 stacked.share_memory_()
             except RuntimeError as error:
@@ -194,12 +196,15 @@ def build_datasets(
     cache_features: bool = False,
     cache_train_features: bool = False,
     augmentation: Mapping | None = None,
+    splits: Collection[str] | None = None,
 ):
-    """Build the train, validation, and test datasets.
+    """Build the requested train, validation, and test datasets.
 
     ``augmentation`` is the train config's optional block of augmentation
     options (see ``kws.data.augment.build_augmenters``); it only matters when
-    ``augment`` is true.
+    ``augment`` is true. ``splits`` defaults to all three splits to preserve
+    existing callers; callers that only evaluate validation can avoid building
+    and precomputing the test dataset by requesting ``(TRAIN, VAL)``.
     """
     dataset_cfg = data_cfg["dataset"]
     dataset_root = Path(dataset_cfg["root"])
@@ -231,9 +236,14 @@ def build_datasets(
         silence_cfg["min_gain"], silence_cfg["max_gain"],
     )
 
+    requested_splits = (TRAIN, VAL, TEST) if splits is None else tuple(splits)
+    invalid_splits = set(requested_splits) - {TRAIN, VAL, TEST}
+    if invalid_splits:
+        raise ValueError(f"unsupported dataset splits: {sorted(invalid_splits)!r}")
+
     datasets = {}
     rng = random.Random(seed)
-    for split in (TRAIN, VAL, TEST):
+    for split in requested_splits:
         entries = _build_entries(
             split_index, split, label_map, unknown_pool,
             unknown_cfg["target_ratio_to_avg_keyword_count"],

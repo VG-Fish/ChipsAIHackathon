@@ -59,6 +59,21 @@ def test_explicit_resume_requires_the_selected_sidecar(tmp_path):
         )
 
 
+def test_automatic_resume_starts_clean_in_empty_candidate_and_selects_canonical_sidecar(tmp_path):
+    run_dir = tmp_path / "candidate"
+    run_dir.mkdir()
+    canonical = tmp_path / "kws_latest.pt"
+
+    assert dendritic._select_pai_resume_sidecar(
+        run_dir, canonical, resume=None, resume_from=None
+    ) is None
+
+    canonical.write_bytes(b"sidecar")
+    assert dendritic._select_pai_resume_sidecar(
+        run_dir, canonical, resume=None, resume_from=None
+    ) == canonical.resolve()
+
+
 def test_completed_prune_kd_is_reused_when_only_pai_recipe_changes(tmp_path):
     source = tmp_path / "student.pt"
     teacher = tmp_path / "teacher.pt"
@@ -130,6 +145,63 @@ def test_completed_prune_kd_is_reused_when_only_pai_recipe_changes(tmp_path):
 
     assert reused is not None
     assert reused["val_acc"] == 0.81
+
+
+def test_completed_supervised_prune_is_reused_without_teacher(tmp_path):
+    source = tmp_path / "student.pt"
+    source.write_bytes(b"student")
+    best_path = tmp_path / "best.pt"
+    latest_path = tmp_path / "latest.pt"
+    model_cfg = {"name": "sparknet_c8", "channels": 8, "gate_channels": 32}
+    train_cfg = {
+        "epochs": 40,
+        "lr": 0.001,
+        "pruning": {"kind": "structured", "target_channels": 8},
+        "perforatedai": {"module_ids": [".blocks.3", ".gate_conv", ".fc"]},
+    }
+    model_state = {"weight": torch.ones(1)}
+    phase_train = dendritic._prune_finetune_train_recipe(train_cfg)
+    torch.save(
+        {
+            "stage": "sparsity",
+            "phase": "prune_supervised",
+            "target_epochs": 40,
+            "completed_epoch": 40,
+            "best_metric_value": 0.82,
+            "best_model_state_dict": model_state,
+            "recipe": {
+                "source_checkpoint": str(source),
+                "teacher_checkpoint": None,
+                "train": phase_train,
+                "pruning": train_cfg["pruning"],
+            },
+        },
+        latest_path,
+    )
+    torch.save(
+        {
+            "stage": "pruned_supervised_finetune",
+            "model_cfg": model_cfg,
+            "sparsity": train_cfg["pruning"],
+            "distillation": None,
+            "val_acc": 0.82,
+            "model_state_dict": model_state,
+        },
+        best_path,
+    )
+
+    reused = dendritic._load_reusable_prune_finetune_checkpoint(
+        best_path,
+        latest_path,
+        checkpoint_path=str(source),
+        teacher_checkpoint=None,
+        model_cfg=model_cfg,
+        train_cfg=train_cfg,
+        expected_run_id=None,
+    )
+
+    assert reused is not None
+    assert reused["distillation"] is None
 
 
 def test_completed_prune_kd_is_not_reused_after_phase_local_change(tmp_path):
@@ -483,6 +555,30 @@ def test_pai_epoch_metrics_include_named_kd_losses_and_adapter_lr(monkeypatch):
     assert record["base_params_in_optimizer"] == 0
 
 
+@pytest.mark.parametrize("with_kd", [False, True])
+def test_pai_auxiliary_losses_are_logged_and_contribute_gradients(monkeypatch, with_kd):
+    class _AuxiliaryModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.penalty = torch.nn.Parameter(torch.tensor(2.0))
+
+        def auxiliary_losses(self):
+            return {"gate": (self.penalty, 0.25)}
+
+    model = _AuxiliaryModel()
+    losses = {"total": model.penalty * 0}
+    if with_kd:
+        losses["classification"] = model.penalty * 0
+
+    result = dendritic._add_auxiliary_losses(losses, model)
+    result["total"].backward()
+
+    assert result["gate"] is model.penalty
+    assert result["total"].item() == pytest.approx(0.5)
+    assert model.penalty.grad is not None
+    assert model.penalty.grad.item() == pytest.approx(0.25)
+
+
 def test_restructure_resets_optimizer_before_the_only_paired_save(
     tmp_path, monkeypatch
 ):
@@ -540,14 +636,13 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
         return 2
 
     monkeypatch.setattr(dendritic, "estimate_one_dendrite_params", estimate_params)
-    monkeypatch.setattr(
-        dendritic,
-        "build_datasets",
-        lambda *_args, **_kwargs: (
-            {dendritic.TRAIN: dataset, dendritic.VAL: dataset},
-            {"keyword": 0},
-        ),
-    )
+    dataset_build_kwargs = {}
+
+    def build_train_and_val_datasets(*_args, **kwargs):
+        dataset_build_kwargs.update(kwargs)
+        return {dendritic.TRAIN: dataset, dendritic.VAL: dataset}, {"keyword": 0}
+
+    monkeypatch.setattr(dendritic, "build_datasets", build_train_and_val_datasets)
     monkeypatch.setattr(
         dendritic,
         "build_data_loader",
@@ -555,6 +650,25 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
             (torch.stack([item[0] for item in value]), torch.stack([item[1] for item in value]))
         ],
     )
+
+    def fake_prune_finetune(
+        value,
+        _datasets,
+        _label_map,
+        _model_cfg,
+        _train_cfg,
+        checkpoint_path,
+        *_args,
+        **_kwargs,
+    ):
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {"model_state_dict": value.state_dict(), "val_acc": 0.0},
+            checkpoint_path,
+        )
+        return SimpleNamespace(best_val_acc=0.0)
+
+    monkeypatch.setattr(dendritic, "train_model", fake_prune_finetune)
     monkeypatch.setattr(dendritic, "configure_perforatedai", lambda *_args: None)
     monkeypatch.setattr(dendritic.UPA, "perforate_model", lambda value, **_kwargs: value)
     monkeypatch.setattr(
@@ -623,6 +737,7 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
     assert paired_optimizers == [reset_optimizer]
     assert paired_training_complete == [True]
     assert optimizer_lr_multipliers == [1.0, 0.25]
+    assert dataset_build_kwargs["splits"] == (dendritic.TRAIN, dendritic.VAL)
     assert estimated_conversions == ["blocks_and_linear"]
     cycle_paths = list((run_dir / "cycle_checkpoints").glob("*.pt"))
     assert [path.name for path in cycle_paths] == ["cycle_01_epoch_0001.pt"]
@@ -693,15 +808,70 @@ def test_post_pai_kd_materializes_best_checkpoint_when_zero_does_not_improve(
         assert torch.equal(checkpoint["model_state_dict"][name], tensor)
 
 
+def test_post_pai_supervised_resume_never_constructs_distillation(tmp_path, monkeypatch):
+    model = torch.nn.Linear(2, 2)
+    monkeypatch.setattr(dendritic, "freeze_selected_dendrites", lambda _model: 0)
+    monkeypatch.setattr(dendritic, "build_data_loader", lambda *_args, **_kwargs: [])
+
+    def reject_kd(*_args, **_kwargs):
+        raise AssertionError("DistillationCriterion must not be built for --no-KD")
+
+    monkeypatch.setattr(dendritic, "DistillationCriterion", reject_kd)
+
+    def fake_finetune(value, *_args, **kwargs):
+        with torch.no_grad():
+            for parameter in value.parameters():
+                parameter.add_(1)
+        kwargs["on_best"](value, 0.75)
+        return SimpleNamespace(best_val_acc=0.75, history=[{"val_acc": 0.75}])
+
+    monkeypatch.setattr(dendritic, "run_finetune", fake_finetune)
+    output_dir = tmp_path / "run"
+    result = dendritic.resume_kd_finetune(
+        model,
+        {dendritic.TRAIN: [], dendritic.VAL: []},
+        {
+            "resume_epochs": 1,
+            "seed": 0,
+            "label_smoothing": 0.1,
+            "distillation": {"temperature": 4.0},
+        },
+        torch.device("cpu"),
+        None,
+        (1, 2),
+        "candidate",
+        baseline_val_acc=0.5,
+        output_dir=output_dir,
+        num_classes=2,
+        num_keywords=1,
+    )
+
+    best_path = dendritic.ArtifactLayout(output_dir).checkpoint_path(
+        "sparsity", "resume_supervised", "best", candidate="candidate"
+    )
+    checkpoint = torch.load(best_path, map_location="cpu", weights_only=False)
+    assert result["status"] == "complete"
+    assert result["best_val_acc"] == 0.75
+    assert result["checkpoint"] == str(best_path)
+    assert checkpoint["distillation"] is None
+    assert checkpoint["teacher_checkpoint"] is None
+
+
 @pytest.mark.parametrize(
-    ("cli_args", "expected_resume", "expected_resume_from"),
+    ("cli_args", "expected_resume", "expected_resume_from", "expected_teacher"),
     [
-        (["--resume"], True, None),
-        (["--resume-from", "explicit-sidecar.pt"], False, "explicit-sidecar.pt"),
+        (["--resume"], True, None, "models/checkpoints/ds_cnn_l_12class.pt"),
+        (
+            ["--resume-from", "explicit-sidecar.pt"],
+            False,
+            "explicit-sidecar.pt",
+            "models/checkpoints/ds_cnn_l_12class.pt",
+        ),
+        (["--no-KD"], False, None, None),
     ],
 )
 def test_standalone_cli_forwards_resume_options(
-    cli_args, expected_resume, expected_resume_from, monkeypatch
+    cli_args, expected_resume, expected_resume_from, expected_teacher, monkeypatch
 ):
     captured = {}
     monkeypatch.setattr(
@@ -719,6 +889,7 @@ def test_standalone_cli_forwards_resume_options(
 
     assert captured["resume"] is expected_resume
     assert captured["resume_from"] == expected_resume_from
+    assert captured["teacher_checkpoint"] == expected_teacher
 
 
 def test_step_3c_check_separates_unmeasurable_from_violated():
@@ -778,6 +949,8 @@ def test_base_batchnorm_stats_are_pinned_without_severing_autograd():
             return self.base_bn(value) + self.dendrite_bn(value)
 
     model = Model().train()
+    assert model.base_bn.running_mean is not None
+    assert model.dendrite_bn.running_mean is not None
     before_base_mean = model.base_bn.running_mean.clone()
     before_dendrite_mean = model.dendrite_bn.running_mean.clone()
 
@@ -788,6 +961,8 @@ def test_base_batchnorm_stats_are_pinned_without_severing_autograd():
 
     model(torch.full((4, 3), 2.0)).sum().backward()
 
+    assert model.base_bn.running_mean is not None
+    assert model.dendrite_bn.running_mean is not None
     assert torch.equal(model.base_bn.running_mean, before_base_mean)
     assert not torch.equal(model.dendrite_bn.running_mean, before_dendrite_mean)
     assert model.base_bn.weight.grad is not None

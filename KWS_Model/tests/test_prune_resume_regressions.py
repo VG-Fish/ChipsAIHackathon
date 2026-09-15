@@ -11,6 +11,7 @@ from kws.models.ds_cnn import DSCNN
 from kws.optimize import prune as prune_module
 from kws.optimize.prune import (
     SparsitySpec,
+    _prune_artifact_names,
     _load_prune_resume_state,
     _resolve_prune_resume_from,
     _validate_prune_resume_state,
@@ -29,11 +30,20 @@ def _training_state(*, stage="sparsity", phase="prune_kd", recipe=None):
     }
 
 
-def test_resume_resolves_candidate_phase_latest_under_output_root(tmp_path):
+@pytest.mark.parametrize(
+    ("teacher_checkpoint", "phase", "checkpoint_stage"),
+    [
+        (None, "prune_supervised", "pruned_supervised_finetune"),
+        ("teacher.pt", "prune_kd", "pruned_kd_finetune"),
+    ],
+)
+def test_prune_artifact_names_and_resume_paths_match_training_mode(
+    tmp_path, teacher_checkpoint, phase, checkpoint_stage
+):
     spec = SparsitySpec("structured", keep_ratio=0.5)
     layout = ArtifactLayout(tmp_path)
     latest = layout.checkpoint_path(
-        "sparsity", "prune_kd", "latest", candidate=spec.label
+        "sparsity", phase, "latest", candidate=spec.label
     )
     latest.parent.mkdir(parents=True)
     latest.touch()
@@ -44,8 +54,10 @@ def test_resume_resolves_candidate_phase_latest_under_output_root(tmp_path):
         output_dir=tmp_path,
         out_checkpoint=tmp_path / "ignored-best.pt",
         spec=spec,
+        teacher_checkpoint=teacher_checkpoint,
     )
 
+    assert _prune_artifact_names(teacher_checkpoint) == (phase, checkpoint_stage)
     assert resolved == latest
 
 
@@ -53,7 +65,7 @@ def test_explicit_resume_from_takes_precedence_over_standard_latest(tmp_path):
     spec = SparsitySpec("structured", keep_ratio=0.5)
     layout = ArtifactLayout(tmp_path / "run")
     latest = layout.checkpoint_path(
-        "sparsity", "prune_kd", "latest", candidate=spec.label
+        "sparsity", "prune_supervised", "latest", candidate=spec.label
     )
     latest.parent.mkdir(parents=True)
     latest.touch()
@@ -73,7 +85,7 @@ def test_explicit_resume_from_takes_precedence_over_standard_latest(tmp_path):
 def test_resume_refuses_epoch_one_restart_when_metrics_exist_without_latest(tmp_path):
     spec = SparsitySpec("nm", n=2, m=4)
     layout = ArtifactLayout(tmp_path)
-    metrics = layout.metrics_path("sparsity", "prune_kd", candidate=spec.label)
+    metrics = layout.metrics_path("sparsity", "prune_supervised", candidate=spec.label)
     metrics.parent.mkdir(parents=True)
     metrics.write_text('{"epoch":1}\n', encoding="utf-8")
 
@@ -95,7 +107,7 @@ def test_prune_resume_rejects_legacy_and_wrong_phase_states(tmp_path):
 
     wrong_phase = tmp_path / "qat-latest.pt"
     torch.save(_training_state(stage="quantize", phase="qat"), wrong_phase)
-    with pytest.raises(ValueError, match="quantize/qat, not sparsity/prune_kd"):
+    with pytest.raises(ValueError, match="quantize/qat, not sparsity/prune_supervised"):
         _load_prune_resume_state(wrong_phase, torch.device("cpu"))
 
 
@@ -200,11 +212,24 @@ def test_programmatic_resume_does_not_duplicate_committed_epoch_metrics(
     )
 
     metrics = ArtifactLayout(output_dir).metrics_path(
-        "sparsity", "prune_kd", candidate=spec.label
+        "sparsity", "prune_supervised", candidate=spec.label
     )
     records = metrics.read_text(encoding="utf-8").splitlines()
     assert [record["epoch"] for record in resumed["history"]] == [1, 2]
     assert len(records) == 2
+    layout = ArtifactLayout(output_dir)
+    latest = torch.load(
+        layout.checkpoint_path("sparsity", "prune_supervised", "latest", candidate=spec.label),
+        map_location="cpu",
+        weights_only=False,
+    )
+    best = torch.load(
+        layout.checkpoint_path("sparsity", "prune_supervised", "best", candidate=spec.label),
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert latest["phase"] == "prune_supervised"
+    assert best["stage"] == "pruned_supervised_finetune"
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -220,7 +245,7 @@ def test_cli_resolves_resume_and_preserves_explicit_precedence(
     output_dir = tmp_path / "run"
     spec = SparsitySpec("structured", keep_ratio=0.5)
     standard_latest = ArtifactLayout(output_dir).checkpoint_path(
-        "sparsity", "prune_kd", "latest", candidate=spec.label
+        "sparsity", "prune_supervised", "latest", candidate=spec.label
     )
     standard_latest.parent.mkdir(parents=True)
     standard_latest.touch()
