@@ -46,8 +46,7 @@ from kws.optimize.cluster import (
     load_clustered_model,
     save_clustered_model,
 )
-from kws.optimize.dendritic import FRAMEWORK_CYCLE_VERSION, load_yaml
-from kws.optimize.dendritic_prune_loop import run_pruning_search, search_fingerprint
+from kws.optimize.compression_experiment import run_compression_experiment
 from kws.optimize.distill import distill, distillation_fingerprint
 from kws.optimize.kd import (
     DistillationCriterion,
@@ -59,6 +58,7 @@ from kws.optimize.kd import (
 from kws.optimize.pai_import import import_pai_module
 from kws.optimize.quantize_qat import quantize_aware_distill_model
 from kws.train import (
+    load_yaml,
     train as train_from_scratch,
     validate_checkpoint_run_id,
 )
@@ -75,6 +75,8 @@ from kws.utils.seed import resolve_seed, set_seed, with_seed
 logger = get_logger(__name__)
 
 STAGES = ("teacher", "student", "sparsity", "cluster", "quantize", "benchmark")
+DEFAULT_PIPELINE_CONFIG = "configs/train/pipeline.yaml"
+DEFAULT_EXTREME_PRUNE_CONFIG = "configs/train/compression_experiment.yaml"
 _RUN_OUTPUT_ROOTS = {"metadata", "metrics", "models", "pai", "reports"}
 
 
@@ -420,6 +422,11 @@ def stage_student(config: dict, *, force: bool, seed: int | None = None) -> dict
 
 def stage_sparsity(config: dict, *, force: bool, seed: int | None = None) -> dict:
     """Step 3: the sparsity sweep, stopping on the Pareto frontier."""
+    from kws.optimize.dendritic_prune_loop import (
+        run_pruning_search,
+        search_fingerprint,
+    )
+
     search_cfg = load_yaml(config["sparsity"]["search_config"])
     if config.get("output_dir"):
         output_layout = ArtifactLayout(config["output_dir"])
@@ -485,6 +492,8 @@ def validate_sparsity_report(
     silently deploy a candidate selected under a different teacher, student,
     data recipe, or sparsity configuration.
     """
+    from kws.optimize.dendritic_prune_loop import search_fingerprint
+
     if not isinstance(sweep, dict):
         raise ValueError("stage 3 report is not a mapping")
     if config.get("output_dir"):
@@ -565,6 +574,7 @@ def load_candidate_model(
     UPA: Any = import_pai_module("perforatedai.utils_perforatedai")
 
     from kws.optimize.dendritic import (
+        FRAMEWORK_CYCLE_VERSION,
         build_cycle_base,
         configure_perforatedai,
         ensure_clean_dendrite_skip_weights,
@@ -1464,7 +1474,27 @@ def _configure_unified_outputs(config: dict, layout: ArtifactLayout) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/train/pipeline.yaml")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Configuration file. Defaults to pipeline.yaml normally and "
+            "compression_experiment.yaml with --extreme-prune"
+        ),
+    )
+    parser.add_argument(
+        "--extreme-prune",
+        action="store_true",
+        help=(
+            "Run the budget-matched structured-backbone and selective-dendrite "
+            "compression experiment"
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Plan and profile --extreme-prune candidates without training",
+    )
     parser.add_argument(
         "--stages",
         default=",".join(STAGES),
@@ -1495,12 +1525,61 @@ def main() -> None:
     graphs.add_cli_flag(parser)
     args = parser.parse_args()
 
+    config_path = args.config or (
+        DEFAULT_EXTREME_PRUNE_CONFIG
+        if args.extreme_prune
+        else DEFAULT_PIPELINE_CONFIG
+    )
+
+    if args.extreme_prune:
+        if args.force:
+            parser.error("--force does not apply to --extreme-prune; use a new output root")
+        if args.graphs:
+            parser.error("--graphs is not supported by --extreme-prune")
+        if args.stages != ",".join(STAGES):
+            parser.error("--stages does not apply to --extreme-prune")
+
+        config = load_yaml(config_path)
+        try:
+            output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
+        except ValueError as error:
+            parser.error(str(error))
+        if output_dir is None:
+            output_dir = config.get("output_dir")
+        if output_dir is None:
+            parser.error("--extreme-prune requires an output_dir in config or CLI")
+        inputs = [
+            (config_path, "compression_experiment_config"),
+            (config["data_config"], "data_config"),
+            (config["train_config"], "train_config"),
+            (config["source_checkpoint"], "source_checkpoint"),
+        ]
+        if config.get("teacher_checkpoint"):
+            inputs.append((config["teacher_checkpoint"], "teacher_checkpoint"))
+        with run_session(
+            output_dir,
+            command="kws.pipeline.extreme_prune",
+            argv=sys.argv,
+            seed=args.seed,
+            inputs=inputs,
+        ):
+            run_compression_experiment(
+                config,
+                dry_run=args.dry_run,
+                output_dir=output_dir,
+                seed=args.seed,
+            )
+        return
+
+    if args.dry_run:
+        parser.error("--dry-run requires --extreme-prune")
+
     stages = tuple(stage.strip() for stage in args.stages.split(",") if stage.strip())
     unknown = [stage for stage in stages if stage not in STAGES]
     if unknown:
         parser.error(f"unknown stage(s) {unknown}; choose from {list(STAGES)}")
 
-    config = load_yaml(args.config)
+    config = load_yaml(config_path)
     try:
         output_dir = resolve_resume_dir(args.output_dir, args.resume_dir)
     except ValueError as error:
@@ -1518,7 +1597,7 @@ def main() -> None:
             force=args.force,
             seed=args.seed,
             output_dir=output_dir,
-            pipeline_config_path=args.config,
+            pipeline_config_path=config_path,
         )
 
 

@@ -44,6 +44,32 @@ uv run --env-file .env python -m kws.pipeline --stages sparsity
 uv run --env-file .env python -m kws.pipeline --stages cluster,quantize,benchmark
 ```
 
+For a focused, budget-matched compression experiment (without running the
+later clustering/export stages), use `configs/train/compression_experiment.yaml`.
+Always inspect the candidate widths, selective PAI placements, and projected
+parameter/MAC admission decisions first:
+
+```bash
+uv run python -m kws.pipeline --extreme-prune --dry-run \
+  --output-dir outputs/compression-plan
+uv run --env-file .env python -m kws.pipeline --extreme-prune \
+  --output-dir outputs/compression-run
+```
+
+`--extreme-prune` selects `configs/train/compression_experiment.yaml` by
+default. Pass `--config PATH` to use another compression-experiment config.
+
+The executable run trains each conventional structured backbone once, reuses
+that exact checkpoint for each eligible dendritic placement, and rejects a PAI
+candidate both before training (projected cost) and after clean export
+(measured cost) if it exceeds the shared budget. The report at
+`reports/compression_experiment.yaml` records validation accuracy, parameters,
+MACs, matched-budget conventional comparisons, and the joint Pareto frontier.
+PAI integrations also receive immutable `cycle_checkpoints/` snapshots in
+addition to the existing resumable `latest.pt` pair. Set
+`perforatedai.on_unavailable: skip` to keep conventional results when PAI is
+not installed/licensed; dry-run mode never imports it.
+
 PerforatedAI/PerforatedBP validates its license while its modules are imported.
 Run every PAI-dependent command from this `KWS_Model` directory with the
 `uv run --env-file .env ...` form above. A direct `.venv/bin/python` invocation

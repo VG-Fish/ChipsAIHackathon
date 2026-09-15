@@ -406,6 +406,7 @@ def _load_completed_result(
         resume=recorded.get("resume"),
         prune_finetune=recorded.get("prune_finetune"),
         phase_trail=recorded.get("phase_trail") or [],
+        cycle_checkpoints=recorded.get("cycle_checkpoints") or [],
         run_id=expected_run_id,
     )
 

@@ -35,6 +35,7 @@ import torch.nn as nn
 import yaml
 
 from kws.optimize.pai_import import import_pai_module
+from kws.optimize.dendritic_config import pai_module_ids, placement_module_names
 
 # PerforatedAI is distributed as compiled extension modules without typing
 # stubs. Keep its dynamic API behind one narrow, explicit boundary.
@@ -560,6 +561,7 @@ class DendriticCycleResult:
     resume: dict | None = None
     prune_finetune: dict | None = None
     phase_trail: list[dict] = field(default_factory=list)
+    cycle_checkpoints: list[str] = field(default_factory=list)
     run_id: str | None = None
 
 
@@ -608,6 +610,7 @@ def build_cycle_base(
 def estimate_one_dendrite_params(
     model: DSCNN,
     conversion: str = "blocks_and_linear",
+    module_ids: list[str] | tuple[str, ...] | None = None,
 ) -> int:
     """Estimate deployed parameters after one configured dendrite.
 
@@ -615,12 +618,13 @@ def estimate_one_dendrite_params(
     during deployment cleanup, so temporary candidates and connection
     scaffolding are excluded from the deployed parameter count.
     """
-    if conversion == "blocks_and_linear":
-        selected_modules = [*model.blocks, model.fc]
-    elif conversion == "fc_only":
-        selected_modules = [model.fc]
-    else:
-        raise ValueError(f"unsupported dendrite conversion: {conversion}")
+    placement = {"conversion": conversion}
+    if module_ids is not None:
+        placement["module_ids_to_perforate"] = list(module_ids)
+    selected_modules = [
+        model.get_submodule(name)
+        for name in placement_module_names(model, placement)
+    ]
     dendrite_params = sum(
         parameter.numel()
         for module in selected_modules
@@ -1433,9 +1437,10 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     # introduced, blocks plus the classifier were the sole conversion recipe,
     # so omitting the key must retain that historical behavior.
     conversion = config.get("conversion", "blocks_and_linear")
-    if conversion not in {"blocks_and_linear", "fc_only"}:
+    if conversion not in {"blocks_and_linear", "fc_only", "module_ids"}:
         raise ValueError(
-            "Cycle 1 supports conversion=blocks_and_linear or conversion=fc_only"
+            "Cycle 1 supports conversion=blocks_and_linear, conversion=fc_only, "
+            "or conversion=module_ids"
         )
 
     # PerforatedAI defaults to CUDA-or-CPU and does not auto-detect Apple MPS.
@@ -1464,13 +1469,21 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
         GPA.pc.set_module_ids_to_perforate([])
         GPA.pc.set_modules_to_perforate([DSConvBlock, nn.Linear])
         GPA.pc.set_modules_to_track([nn.Conv2d, nn.BatchNorm2d])
-    else:
+    elif conversion == "fc_only":
         # Module IDs are exact matches in PAI and must begin with a dot. Track
         # whole DSConvBlock subtrees so no convolutional child can inherit a
         # default perforation rule; `.fc` is the sole dendrite target.
         GPA.pc.set_module_ids_to_perforate([".fc"])
         GPA.pc.set_modules_to_perforate([])
         GPA.pc.set_modules_to_track([DSConvBlock, nn.Conv2d, nn.BatchNorm2d])
+    else:
+        # Exact IDs allow experiments to isolate one block, convolution, or
+        # classifier without expanding the class-based conversion surface.
+        GPA.pc.set_module_ids_to_perforate(list(pai_module_ids(config)))
+        GPA.pc.set_modules_to_perforate([])
+        GPA.pc.set_modules_to_track(
+            [DSConvBlock, nn.Conv2d, nn.BatchNorm2d, nn.Linear]
+        )
     GPA.pc.set_perforated_backpropagation(True)
     GPA.pc.set_dendrite_update_mode(True)
     GPA.pc.set_unwrapped_modules_confirmed(True)
@@ -1560,6 +1573,7 @@ def run_cycle(
     output_dir: str | Path | None = None,
     resume: bool | None = None,
     resume_from: str | Path | None = None,
+    prune_finetune_candidate: str | None = None,
     run_id: str | None = None,
 ) -> DendriticCycleResult:
     """Run steps 3c-3e for one candidate: perforate, resume with KD, measure.
@@ -1687,13 +1701,21 @@ def run_cycle(
         if layout is not None else None
     )
     resume_candidate = pai_state is not None
+    conversion = pai_cfg.get("conversion", "blocks_and_linear")
+    estimated_params = (
+        estimate_one_dendrite_params(
+            base,
+            conversion,
+            pai_cfg.get("module_ids_to_perforate", pai_cfg.get("module_ids")),
+        )
+        if conversion == "module_ids"
+        else estimate_one_dendrite_params(base, conversion)
+    )
     logger.info(
         "Dendrite-cycle base: %d params, estimated one-dendrite deployment: %d "
         "params, block_channels=%s",
         base_params,
-        estimate_one_dendrite_params(
-            base, pai_cfg.get("conversion", "blocks_and_linear")
-        ),
+        estimated_params,
         model_cfg["block_channels"],
     )
 
@@ -1722,16 +1744,17 @@ def run_cycle(
     # run cannot prove that pruning itself was fine-tuned before perforation.
     prune_finetune = {"status": "skipped", "reason": "no teacher supplied"}
     if teacher is not None:
+        pre_candidate = prune_finetune_candidate or run_dir.name
         pre_checkpoint = (
             ArtifactLayout(output_dir).checkpoint_path(
-                "sparsity", "prune_kd", "best", candidate=run_dir.name
+                "sparsity", "prune_kd", "best", candidate=pre_candidate
             )
             if output_dir is not None
             else run_dir / "pruned_kd.pt"
         )
         pre_latest = (
             layout.checkpoint_path(
-                "sparsity", "prune_kd", "latest", candidate=run_dir.name
+                "sparsity", "prune_kd", "latest", candidate=pre_candidate
             )
             if layout is not None
             else pre_checkpoint.with_name("pruned_kd_latest.pt")
@@ -1786,7 +1809,7 @@ def run_cycle(
                 stage="sparsity",
                 phase="prune_kd",
                 artifact_candidate=(
-                    run_dir.name if output_dir is not None else None
+                    pre_candidate if output_dir is not None else None
                 ),
                 resume_from=pre_latest if pre_latest.exists() else None,
                 run_id=run_id,
@@ -1945,6 +1968,11 @@ def run_cycle(
         if pai_state is not None
         else [{"epoch": 0, **describe_learning_phase(model)}]
     )
+    cycle_checkpoints = [
+        str(item["cycle_checkpoint"])
+        for item in phase_trail
+        if item.get("cycle_checkpoint")
+    ]
     last_mode = phase_trail[-1]["mode"]
 
     epoch = int(pai_state.get("completed_epoch", 0)) - 1 if pai_state is not None else -1
@@ -2142,7 +2170,25 @@ def run_cycle(
         # Keep the vendor restart and the KWS sidecar at the same validation
         # boundary. This is deliberately after any graph restructure and
         # optimizer reset, so the first durable pair is internally loadable.
-        _save_pai_restart_pair(
+        cycle_checkpoint_path = None
+        if dendrite_integrated:
+            integration_number = (
+                integrations_after
+                if integrations_after is not None
+                else len(cycle_checkpoints) + 1
+            )
+            cycle_checkpoint_path = (
+                run_dir
+                / "cycle_checkpoints"
+                / f"cycle_{integration_number:02d}_epoch_{epoch + 1:04d}.pt"
+            )
+            phase_trail[-1]["cycle_checkpoint"] = (
+                layout.relative(cycle_checkpoint_path)
+                if layout is not None
+                else str(cycle_checkpoint_path)
+            )
+
+        saved_state = _save_pai_restart_pair(
             model=model,
             run_dir=run_dir,
             pai_run_name=pai_run_name,
@@ -2168,6 +2214,24 @@ def run_cycle(
             ),
             run_id=run_id,
         )
+        if cycle_checkpoint_path is not None and isinstance(saved_state, Mapping):
+            # Immutable, evaluation-oriented snapshot at each accepted
+            # integration. The canonical paired latest files remain the
+            # resumable PAI state because the vendor checkpoint is mutable.
+            atomic_torch_save(
+                cycle_checkpoint_path,
+                {
+                    "format_version": FRAMEWORK_CYCLE_VERSION,
+                    "kind": "kws_pai_cycle_checkpoint",
+                    "run_id": run_id,
+                    "completed_epoch": epoch + 1,
+                    "dendrites_integrated": integrations_after,
+                    "recipe_fingerprint": fingerprint,
+                    "model_state_dict": saved_state["model_state_dict"],
+                    "phase_trail": list(phase_trail),
+                },
+            )
+            cycle_checkpoints.append(str(cycle_checkpoint_path))
 
         logger.info(
             "epoch %d mode=%s train_loss=%.4f train_acc=%.4f val_loss=%.4f "
@@ -2267,6 +2331,7 @@ def run_cycle(
         resume=resume,
         prune_finetune=prune_finetune,
         phase_trail=phase_trail,
+        cycle_checkpoints=cycle_checkpoints,
         run_id=run_id,
     )
 

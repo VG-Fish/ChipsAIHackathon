@@ -1,0 +1,51 @@
+# Budget-matched structured-backbone versus selective-dendrite experiment.
+#
+# Start with a dry run; it constructs and profiles every candidate without
+# importing PerforatedAI, loading the dataset, or training:
+#   uv run python -m kws.optimize.compression_experiment --dry-run
+#
+# Remove --dry-run to train each conventional width once and reuse that exact
+# checkpoint for every PAI placement admitted by the projected budget.
+source_checkpoint: models/checkpoints/ds_cnn_xs_distilled_warm_12class.pt
+teacher_checkpoint: models/checkpoints/ds_cnn_l_12class.pt
+data_config: configs/data/speech_commands_v2.yaml
+train_config: configs/train/dendritic_cycle1.yaml
+output_dir: outputs/compression_experiment
+
+# Both arms must fit these same hard ceilings. Projected costs gate expensive
+# PAI runs; the clean exported graph is profiled and checked again afterward.
+budget:
+  max_deployed_params: 4096
+  max_macs: 1500000
+
+# Absolute widths are supported for this equal-width XS source. Alternatively,
+# configure width_multipliers, or sweep: {start: 18, minimum: 6, step: 2}.
+backbones:
+  widths: [18, 14, 10, 6]
+
+# Placements become separate experiment candidates. module_ids are exact model
+# paths (a leading dot is optional); fc_only and blocks_and_linear remain
+# available for compatibility with existing dendritic runs.
+placements:
+  - name: classifier
+    conversion: fc_only
+  - name: late_feature_and_classifier
+    conversion: module_ids
+    module_ids: [blocks.1, fc]
+
+perforatedai:
+  enabled: true
+  max_dendrites: 1
+  # "skip" preserves completed conventional results when the optional runtime
+  # or license is unavailable; "error" fails immediately instead.
+  on_unavailable: skip
+
+deployment:
+  bits_per_weight: 8
+  bytes_per_activation: 1
+  profile_device: cpu
+  latency_iterations: 10
+  latency_warmup: 3
+
+pareto:
+  cost_keys: [deployed_params, macs]

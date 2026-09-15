@@ -1,5 +1,9 @@
+from contextlib import nullcontext
+
 import pytest
 import yaml
+
+import kws.pipeline as pipeline
 
 from kws.optimize.dendritic_prune_loop import search_fingerprint
 from kws.optimize.distill import distillation_fingerprint
@@ -44,6 +48,61 @@ def test_stages_cover_the_six_framework_steps():
         "quantize",
         "benchmark",
     )
+
+
+def test_extreme_prune_flag_routes_to_budgeted_compression_experiment(
+    tmp_path, monkeypatch
+):
+    output_dir = tmp_path / "extreme"
+    config = {
+        "output_dir": str(output_dir),
+        "data_config": "data.yaml",
+        "train_config": "train.yaml",
+        "source_checkpoint": "source.pt",
+        "teacher_checkpoint": "teacher.pt",
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        pipeline.sys,
+        "argv",
+        ["kws.pipeline", "--extreme-prune", "--dry-run", "--seed", "7"],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "load_yaml",
+        lambda path: (
+            config
+            if path == pipeline.DEFAULT_EXTREME_PRUNE_CONFIG
+            else (_ for _ in ()).throw(AssertionError(path))
+        ),
+    )
+    monkeypatch.setattr(pipeline, "run_session", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        pipeline,
+        "run_compression_experiment",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "run_pipeline",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("normal pipeline should not run")
+        ),
+    )
+
+    pipeline.main()
+
+    assert calls == [
+        (
+            (config,),
+            {
+                "dry_run": True,
+                "output_dir": str(output_dir),
+                "seed": 7,
+            },
+        )
+    ]
 
 
 def test_selection_minimizes_the_configured_cost_axis():

@@ -20,6 +20,7 @@ structured pruning because its search variable is channel width.
 """
 import argparse
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -49,6 +50,40 @@ from kws.utils.logging import run_session
 from kws.utils.seed import set_seed, with_seed
 
 logger = get_logger(__name__)
+
+
+_PRUNE_FINETUNE_IRRELEVANT_KEYS = frozenset(
+    {
+        "dendritic_schedule_epochs",
+        "resume_epochs",
+        "objective",
+        "deployment",
+        "perforatedai",
+    }
+)
+
+
+def prune_finetune_train_recipe(train_cfg: Mapping) -> dict:
+    """Settings that can affect a conventional prune/KD checkpoint."""
+    return {
+        key: value
+        for key, value in train_cfg.items()
+        if key not in _PRUNE_FINETUNE_IRRELEVANT_KEYS
+    }
+
+
+def prune_finetune_recipe(
+    checkpoint_path: str,
+    teacher_checkpoint: str,
+    train_cfg: Mapping,
+) -> dict:
+    """Canonical recipe shared by conventional and dendritic experiments."""
+    return {
+        "source_checkpoint": checkpoint_path,
+        "teacher_checkpoint": teacher_checkpoint,
+        "train": prune_finetune_train_recipe(train_cfg),
+        "pruning": train_cfg.get("pruning"),
+    }
 
 
 def _l1_topk_indices(weight: torch.Tensor, k: int) -> torch.Tensor:
@@ -293,6 +328,7 @@ def _resolve_prune_resume_from(
     output_dir: str | Path | None,
     out_checkpoint: str | Path,
     spec: SparsitySpec,
+    artifact_candidate: str | None = None,
 ) -> Path | None:
     """Resolve pruning's explicit or phase-standard training-state input."""
     if resume_from is not None:
@@ -303,10 +339,13 @@ def _resolve_prune_resume_from(
     layout = ArtifactLayout(output_dir) if output_dir is not None else None
     if layout is not None:
         latest_path = layout.checkpoint_path(
-            "sparsity", "prune_kd", "latest", candidate=spec.label
+            "sparsity",
+            "prune_kd",
+            "latest",
+            candidate=artifact_candidate or spec.label,
         )
         metrics_path = layout.metrics_path(
-            "sparsity", "prune_kd", candidate=spec.label
+            "sparsity", "prune_kd", candidate=artifact_candidate or spec.label
         )
     else:
         latest_path = Path(out_checkpoint).with_name("latest.pt")
@@ -360,6 +399,7 @@ def prune_and_fine_tune(
     output_dir: str | Path | None = None,
     resume: bool = False,
     resume_from: str | Path | None = None,
+    artifact_candidate: str | None = None,
     run_id: str | None = None,
 ) -> dict:
     """Framework steps 3a-3b: sparsify the student, then fine-tune it with KD.
@@ -373,10 +413,11 @@ def prune_and_fine_tune(
     device = get_device()
     layout = ArtifactLayout(output_dir) if output_dir is not None else None
     run_id = resolve_manifest_run_id(layout, run_id)
+    artifact_candidate = artifact_candidate or spec.label
     if layout is not None:
         layout.ensure_tree()
         out_checkpoint = layout.checkpoint_path(
-            "sparsity", "prune_kd", "best", candidate=spec.label
+            "sparsity", "prune_kd", "best", candidate=artifact_candidate
         )
     resume_path = _resolve_prune_resume_from(
         resume=resume,
@@ -384,6 +425,7 @@ def prune_and_fine_tune(
         output_dir=output_dir,
         out_checkpoint=out_checkpoint,
         spec=spec,
+        artifact_candidate=artifact_candidate,
     )
     resume_state = (
         _load_prune_resume_state(resume_path, device, expected_run_id=run_id)
@@ -449,17 +491,32 @@ def prune_and_fine_tune(
         block.pointwise.out_channels for block in sparsified.blocks
     ]
 
-    recipe = {
-        "source_sha256": file_sha256(checkpoint_path),
-        "teacher_sha256": (
-            file_sha256(teacher_checkpoint) if teacher_checkpoint is not None else None
-        ),
-        "data": data_cfg,
-        "model": pruned_model_cfg,
-        "spec": spec.as_dict(),
-        "train": train_cfg,
-        "distillation": kd.describe() if kd else None,
-    }
+    recipe = (
+        prune_finetune_recipe(checkpoint_path, teacher_checkpoint, train_cfg)
+        if teacher_checkpoint is not None
+        else {
+            "source_checkpoint": checkpoint_path,
+            "teacher_checkpoint": None,
+            "train": prune_finetune_train_recipe(train_cfg),
+            "pruning": train_cfg.get("pruning"),
+        }
+    )
+    # These stronger standalone-resume guards are additional to the shared
+    # phase-local keys consumed by the dendritic reuse validator.
+    recipe.update(
+        {
+            "source_sha256": file_sha256(checkpoint_path),
+            "teacher_sha256": (
+                file_sha256(teacher_checkpoint)
+                if teacher_checkpoint is not None
+                else None
+            ),
+            "data": data_cfg,
+            "model": pruned_model_cfg,
+            "spec": spec.as_dict(),
+            "distillation": kd.describe() if kd else None,
+        }
+    )
     if resume_state is not None and resume_path is not None:
         _validate_prune_resume_state(
             resume_state, source=resume_path, recipe=recipe
@@ -503,7 +560,11 @@ def prune_and_fine_tune(
         kd=kd,
         post_step=masks,
         extra_checkpoint_fields={
-            "sparsity": spec.as_dict(),
+            "stage": "pruned_kd_finetune",
+            # Keep the durable checkpoint compatible with the dendritic
+            # cycle's phase-local reuse validator. The richer label remains
+            # in this function's returned report.
+            "sparsity": train_cfg.get("pruning", spec.as_dict()),
             "sparsity_masks": masks.describe() if masks else None,
             "distillation": kd.describe() if kd else None,
         },
@@ -515,7 +576,7 @@ def prune_and_fine_tune(
         stage_specific_state={
             "sparsity_masks": masks.masks if masks is not None else None,
         },
-        artifact_candidate=spec.label,
+        artifact_candidate=artifact_candidate,
         run_id=run_id,
     )
     return {

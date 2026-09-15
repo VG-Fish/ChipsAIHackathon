@@ -565,10 +565,15 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
 
     monkeypatch.setattr(dendritic, "_make_optimizer_and_scheduler", make_optimizer)
     paired_optimizers = []
+
+    def save_pair(**kwargs):
+        paired_optimizers.append(kwargs["optimizer"])
+        return {"model_state_dict": kwargs["model"].state_dict()}
+
     monkeypatch.setattr(
         dendritic,
         "_save_pai_restart_pair",
-        lambda **kwargs: paired_optimizers.append(kwargs["optimizer"]),
+        save_pair,
     )
 
     def export(value, save_name):
@@ -603,6 +608,11 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
     assert paired_optimizers == [reset_optimizer]
     assert optimizer_lr_multipliers == [1.0, 0.25]
     assert estimated_conversions == ["blocks_and_linear"]
+    cycle_paths = list((run_dir / "cycle_checkpoints").glob("*.pt"))
+    assert [path.name for path in cycle_paths] == ["cycle_01_epoch_0001.pt"]
+    cycle_state = torch.load(cycle_paths[0], map_location="cpu", weights_only=False)
+    assert cycle_state["kind"] == "kws_pai_cycle_checkpoint"
+    assert cycle_state["dendrites_integrated"] == 1
 
 
 def test_post_pai_kd_materializes_best_checkpoint_when_zero_does_not_improve(

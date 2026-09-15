@@ -382,6 +382,52 @@ def test_fc_only_configuration_targets_exact_classifier(monkeypatch):
     ]
 
 
+def test_module_id_configuration_targets_only_requested_placements(monkeypatch):
+    from kws.optimize import dendritic
+
+    class FakePAIConfig:
+        def __init__(self):
+            self.values = {}
+
+        def __getattr__(self, name):
+            if not name.startswith("set_"):
+                raise AttributeError(name)
+
+            def setter(value):
+                self.values[name.removeprefix("set_")] = value
+
+            return setter
+
+    pc = FakePAIConfig()
+    monkeypatch.setattr(dendritic, "GPA", SimpleNamespace(pc=pc))
+    monkeypatch.setattr(dendritic, "disarm_pai_debugger", lambda: None)
+
+    dendritic.configure_perforatedai(
+        {
+            "testing_dendrite_capacity": False,
+            "conversion": "module_ids",
+            "module_ids_to_perforate": ["blocks.0", ".fc"],
+            "max_dendrites": 1,
+            "n_epochs_to_switch": 25,
+            "improvement_threshold": [0.001, 0.0001, 0.0],
+            "candidate_weight_initialization_multiplier": 0.01,
+            "initial_correlation_batches": 40,
+            "max_dendrite_tries": 2,
+            "forward_function": "tanh",
+        },
+        torch.device("cpu"),
+    )
+
+    assert pc.values["module_ids_to_perforate"] == [".blocks.0", ".fc"]
+    assert pc.values["modules_to_perforate"] == []
+    assert pc.values["modules_to_track"] == [
+        dendritic.DSConvBlock,
+        torch.nn.Conv2d,
+        torch.nn.BatchNorm2d,
+        torch.nn.Linear,
+    ]
+
+
 def test_configuration_without_conversion_uses_historical_selector(monkeypatch):
     from kws.optimize import dendritic
 
