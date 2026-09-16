@@ -173,6 +173,41 @@ the supervised comparison, first provide a teacher checkpoint trained on the
 same MFCC-32 frontend; distillation deliberately rejects a teacher/student
 feature-shape mismatch instead of comparing incompatible inputs.
 
+### Paper-faithful SparkNet C16 reproduction
+
+The paper's C16 result is a distinct benchmark, not a compression baseline:
+it uses MFCC-32, 1× unknown/silence balancing, a fixed silence set drawn from
+`_background_noise_`, SGD on `100 * CE + gate_sparsity`, and a
+warmup–hold–polynomial schedule. Run it without KD, pruning, or PAI:
+
+```bash
+uv run python -m kws.train \
+  --data-config configs/data/speech_commands_v2_mfcc32_paper.yaml \
+  --model-config configs/model/sparknet_c16_paper.yaml \
+  --train-config configs/train/sparknet_c16_paper.yaml \
+  --stage paper_replication \
+  --seed 0 \
+  --output-dir outputs/sparknet-paper-replication/c16-seed0
+```
+
+The expected paper reference is 95.7% SC2 test accuracy, 4,636 parameters,
+and 454.5K MACs measured with `thop`.
+
+The original balanced JSON manifests were not released. They came from NeMo's
+`process_speech_commands_data.py --class_split sub --rebalance`, so this
+config reproduces that script's rules against the official split lists rather
+than copying its outputs: `rounding: ceil` sizes `_unknown_` and `_silence_`
+as `ceil` of the keyword-class mean (3077 / 371 / 408 on v0.02), and
+`materialize: true` draws each split's silence once — gain-scaled one-second
+`_background_noise_` crops, from a seed-derived per-split stream — so
+evaluation is reproducible. The individual clips still differ from the
+authors', so record the measured result separately rather than claiming it is
+an exact evaluation of their hidden manifests.
+
+The paper's 95.7 ± 0.17 is a mean and standard deviation over several runs.
+Sweep `--seed` and compare the resulting mean and spread; a single run's
+number is not directly comparable.
+
 The run root contains `manifest.yaml`, append-only invocation logs under
 `logs/`, effective config snapshots under `metadata/configs/`, canonical
 epoch JSONL under `metrics/`, separate resumable `latest.pt` and deployable

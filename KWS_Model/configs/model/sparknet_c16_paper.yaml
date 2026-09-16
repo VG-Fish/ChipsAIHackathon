@@ -1,0 +1,9 @@
+# SparkNet C=16 exactly as configured in Svirsky et al. (Interspeech 2024).
+# MFCC-32 input and gate_channels=32 yield 4,636 learned parameters.
+family: sparknet
+name: sparknet_c16_paper
+channels: 16
+gate_channels: 32
+# The upstream objective is 100 * cross_entropy + 1 * gate_sparsity.
+# The paired training config supplies task_loss_scale: 100.
+sparsity_weight: 1.0

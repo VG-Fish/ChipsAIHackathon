@@ -78,20 +78,112 @@ def load_yaml(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def build_lr_scheduler(optimizer, total_steps: int, warmup_fraction: float):
-    warmup_steps = max(int(total_steps * warmup_fraction), 1)
+def build_lr_scheduler(
+    optimizer,
+    total_steps: int,
+    warmup_fraction: float,
+    *,
+    name: str = "cosine",
+    hold_fraction: float = 0.0,
+    min_lr: float = 0.0,
+    power: float = 2.0,
+):
+    """Build the configured per-step learning-rate schedule.
 
-    def lr_lambda(step):
-        if step < warmup_steps:
-            return step / warmup_steps
-        progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
-        # PAI phases can outlive the nominal epoch budget. Once the planned
-        # schedule is exhausted, hold the minimum learning rate instead of
-        # letting cosine continue oscillating back to a high rate.
-        progress = min(max(progress, 0.0), 1.0)
-        return 0.5 * (1 + math.cos(math.pi * progress))
+    ``cosine`` is the project's established default.  ``polynomial_hold`` is
+    a faithful, dependency-free implementation of NeMo's
+    ``PolynomialHoldDecayAnnealing`` used by SparkNet: a linear warmup, a
+    high-LR hold, then a polynomial decay to ``min_lr``.  The configuration
+    uses fractions of *all* steps, precisely as the upstream SparkNet YAML
+    does.
 
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    The SparkNet paper describes 5% warmup, 40% hold, and decay over "the
+    remaining 85%", which does not add up.  NeMo decays over whatever remains
+    (55% for those fractions), and that is what the authors actually ran, so
+    the arithmetic here follows the code rather than the prose.
+    """
+    if total_steps < 1:
+        raise ValueError("total_steps must be positive")
+    if not 0.0 <= warmup_fraction <= 1.0:
+        raise ValueError("warmup_fraction must be between 0 and 1")
+    if not 0.0 <= hold_fraction <= 1.0:
+        raise ValueError("hold_fraction must be between 0 and 1")
+    if min_lr < 0:
+        raise ValueError("min_lr must be non-negative")
+    if power <= 0:
+        raise ValueError("power must be positive")
+
+    normalized_name = name.lower()
+    if normalized_name == "cosine":
+        if min_lr != 0.0:
+            raise ValueError("the cosine scheduler does not support min_lr; use polynomial_hold")
+        if hold_fraction != 0.0:
+            raise ValueError("the cosine scheduler does not support hold_fraction")
+        warmup_steps = max(int(total_steps * warmup_fraction), 1)
+
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return step / warmup_steps
+            progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
+            # PAI phases can outlive the nominal epoch budget. Once the planned
+            # schedule is exhausted, hold the minimum learning rate instead of
+            # letting cosine continue oscillating back to a high rate.
+            progress = min(max(progress, 0.0), 1.0)
+            return 0.5 * (1 + math.cos(math.pi * progress))
+
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+    if normalized_name != "polynomial_hold":
+        raise ValueError(f"unsupported scheduler {name!r}; expected 'cosine' or 'polynomial_hold'")
+
+    warmup_steps = int(total_steps * warmup_fraction)
+    # NeMo's ``hold_ratio`` is a duration after warmup, not a cumulative
+    # fraction. Its scheduler converts it to an absolute boundary by adding
+    # warmup_steps (see PolynomialHoldDecayAnnealing in the paper's vendored
+    # NeMo source).
+    hold_steps = warmup_steps + int(total_steps * hold_fraction)
+    decay_steps = total_steps - max(warmup_steps, hold_steps)
+    if decay_steps <= 0:
+        raise ValueError("polynomial_hold leaves no steps for decay")
+
+    def polynomial_hold_lambda(step: int) -> float:
+        # This mirrors NeMo's WarmupHoldPolicy, including its nonzero first
+        # warmup update: (step + 1) / (warmup_steps + 1).
+        if warmup_steps > 0 and step <= warmup_steps:
+            return (step + 1) / (warmup_steps + 1)
+        if warmup_steps <= step < hold_steps:
+            return 1.0
+        if step > total_steps:
+            return min_lr / optimizer.param_groups[0]["initial_lr"]
+        progress = min(max((step - hold_steps) / decay_steps, 0.0), 1.0)
+        base_lr = optimizer.param_groups[0]["initial_lr"]
+        return (min_lr + (base_lr - min_lr) * ((1.0 - progress) ** power)) / base_lr
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_hold_lambda)
+
+
+def build_optimizer(parameters: Iterable[nn.Parameter], train_cfg: Mapping) -> torch.optim.Optimizer:
+    """Build the requested optimiser while preserving AdamW as the default."""
+    name = str(train_cfg.get("optimizer", "adamw")).lower()
+    if name == "adamw":
+        return torch.optim.AdamW(
+            parameters, lr=train_cfg["lr"], weight_decay=train_cfg["weight_decay"],
+        )
+    if name == "sgd":
+        return torch.optim.SGD(
+            parameters,
+            lr=train_cfg["lr"],
+            momentum=float(train_cfg.get("momentum", 0.0)),
+            weight_decay=train_cfg["weight_decay"],
+        )
+    raise ValueError(f"unsupported optimizer {name!r}; expected 'adamw' or 'sgd'")
+
+
+def _task_loss_scale(train_cfg: Mapping) -> float:
+    value = float(train_cfg.get("task_loss_scale", 1.0))
+    if value <= 0:
+        raise ValueError("task_loss_scale must be positive")
+    return value
 
 
 def evaluate_loss_acc(model, loader, device, criterion):
@@ -223,6 +315,9 @@ def run_finetune(
     if target_epochs < 0:
         raise ValueError("epochs must be non-negative")
     criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
+    task_loss_scale = _task_loss_scale(train_cfg)
+    if kd is not None and task_loss_scale != 1.0:
+        raise ValueError("task_loss_scale is not supported with knowledge distillation")
 
     active = list(parameters) if parameters is not None else _trainable(model.parameters())
     if kd is not None:
@@ -230,11 +325,15 @@ def run_finetune(
     if not active:
         raise ValueError(f"{label}: no trainable parameters were selected")
 
-    optimizer = torch.optim.AdamW(
-        active, lr=train_cfg["lr"], weight_decay=train_cfg["weight_decay"],
-    )
+    optimizer = build_optimizer(active, train_cfg)
     scheduler = build_lr_scheduler(
-        optimizer, max(target_epochs * len(train_loader), 1), train_cfg["warmup_fraction"],
+        optimizer,
+        max(target_epochs * len(train_loader), 1),
+        train_cfg["warmup_fraction"],
+        name=str(train_cfg.get("scheduler", "cosine")),
+        hold_fraction=float(train_cfg.get("hold_fraction", 0.0)),
+        min_lr=float(train_cfg.get("min_lr", 0.0)),
+        power=float(train_cfg.get("polynomial_power", 2.0)),
     )
 
     phase = phase or label
@@ -374,7 +473,7 @@ def run_finetune(
             optimizer.zero_grad()
             if kd is None:
                 logits = model(features)
-                losses = {"total": criterion(logits, labels)}
+                losses = {"total": task_loss_scale * criterion(logits, labels)}
             else:
                 feature_model = cast(FeatureModel, model)
                 student_features = (

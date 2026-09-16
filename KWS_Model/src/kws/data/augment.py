@@ -45,13 +45,22 @@ def time_shift(waveform: torch.Tensor, max_shift_samples: int, mode: str = "roll
     return shifted
 
 
-def add_white_noise(waveform: torch.Tensor, level_db_range: tuple[float, float]) -> torch.Tensor:
+def add_white_noise(waveform: torch.Tensor, level_db_range: tuple[float, float],
+                    integer_db: bool = False) -> torch.Tensor:
     """Add Gaussian noise whose standard deviation is ``10 ** (dB / 20)``.
 
     The level is relative to full scale, not to the signal, matching NeMo's
-    ``WhiteNoisePerturbation``.
+    ``WhiteNoisePerturbation``.  ``integer_db`` matches that class exactly: it
+    draws ``randint(min_level, max_level)``, i.e. whole decibels with the upper
+    bound excluded, rather than a continuous level.
     """
-    level_db = random.uniform(level_db_range[0], level_db_range[1])
+    if integer_db:
+        low, high = int(level_db_range[0]), int(level_db_range[1])
+        if high <= low:
+            raise ValueError("white_noise_db_range must span at least one whole decibel")
+        level_db = float(random.randrange(low, high))
+    else:
+        level_db = random.uniform(level_db_range[0], level_db_range[1])
     return waveform + torch.randn_like(waveform) * (10.0 ** (level_db / 20.0))
 
 
@@ -151,7 +160,8 @@ class WaveformAugmenter:
                  noise_probability: float = 0.75,
                  *, shift_mode: str = "roll", shift_probability: float = 1.0,
                  white_noise_probability: float = 0.0,
-                 white_noise_db_range: tuple[float, float] = (-90.0, -46.0)):
+                 white_noise_db_range: tuple[float, float] = (-90.0, -46.0),
+                 white_noise_integer_db: bool = False):
         if shift_mode not in TIME_SHIFT_MODES:
             raise ValueError(f"unknown time shift mode {shift_mode!r}")
         _check_probability("noise_probability", noise_probability)
@@ -166,6 +176,7 @@ class WaveformAugmenter:
         self.noise_probability = noise_probability
         self.white_noise_probability = white_noise_probability
         self.white_noise_db_range = tuple(white_noise_db_range)
+        self.white_noise_integer_db = white_noise_integer_db
         self.speed_resamplers = (
             {
                 rate: torchaudio.transforms.Resample(sample_rate, rate)
@@ -190,7 +201,9 @@ class WaveformAugmenter:
         if self.noise_waveforms and random.random() < self.noise_probability:
             waveform = mix_background_noise(waveform, self.noise_waveforms, self.snr_db_range)
         if self.white_noise_probability > 0 and random.random() < self.white_noise_probability:
-            waveform = add_white_noise(waveform, self.white_noise_db_range)
+            waveform = add_white_noise(
+                waveform, self.white_noise_db_range, self.white_noise_integer_db,
+            )
         return waveform
 
 
@@ -216,6 +229,7 @@ AUGMENTATION_DEFAULTS = {
     "background_noise_snr_db_range": [-5.0, 15.0],
     "white_noise_probability": 0.0,
     "white_noise_db_range": [-90.0, -46.0],
+    "white_noise_integer_db": False,
     "spec_augment": True,
 }
 
@@ -261,6 +275,7 @@ def build_augmenters(
         shift_probability=float_value(cfg["time_shift_probability"]),
         white_noise_probability=float_value(cfg["white_noise_probability"]),
         white_noise_db_range=float_pair(cfg["white_noise_db_range"], "white_noise_db_range"),
+        white_noise_integer_db=bool(cfg["white_noise_integer_db"]),
     )
     spec_augmenter = SpecAugmenter() if cfg["spec_augment"] else None
     return waveform_augmenter, spec_augmenter

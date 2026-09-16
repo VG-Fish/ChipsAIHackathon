@@ -1,3 +1,4 @@
+import math
 import random
 from pathlib import Path
 from unittest.mock import patch
@@ -187,6 +188,40 @@ def test_white_noise_level_is_relative_to_full_scale():
     waveform = torch.zeros(1, 160000)
     noisy = add_white_noise(waveform, level_db_range=(-40.0, -40.0))
     assert noisy.std().item() == pytest.approx(0.01, rel=0.02)
+
+
+def _recovered_noise_level_db(level_db_range, integer_db):
+    """Invert `waveform + randn * 10**(level/20)` to read back the drawn level."""
+    torch.manual_seed(0)
+    reference = torch.randn(1, 16)
+    torch.manual_seed(0)
+    noisy = add_white_noise(torch.zeros(1, 16), level_db_range, integer_db=integer_db)
+    return 20.0 * math.log10((noisy[0, 0] / reference[0, 0]).item())
+
+
+def test_integer_db_white_noise_matches_nemos_randint_draw():
+    """NeMo's WhiteNoisePerturbation draws randint(min, max): whole dB, max excluded."""
+    levels = set()
+    for seed in range(200):
+        random.seed(seed)
+        levels.add(_recovered_noise_level_db((-90, -46), integer_db=True))
+
+    assert len(levels) > 1
+    assert all(level == pytest.approx(round(level), abs=1e-6) for level in levels)
+    assert min(levels) >= -90
+    assert max(levels) <= -47  # randint's upper bound is excluded.
+
+
+def test_continuous_white_noise_remains_the_default():
+    random.seed(0)
+    level = _recovered_noise_level_db((-90, -46), integer_db=False)
+    assert -90 <= level <= -46
+    assert level != pytest.approx(round(level), abs=1e-6)
+
+
+def test_integer_db_white_noise_rejects_a_sub_decibel_range():
+    with pytest.raises(ValueError, match="at least one whole decibel"):
+        add_white_noise(torch.zeros(1, 16), (-46.5, -46.2), integer_db=True)
 
 
 def test_augmentation_block_rejects_unknown_options(tmp_path):

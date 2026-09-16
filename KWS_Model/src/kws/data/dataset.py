@@ -1,4 +1,5 @@
 """torch Dataset for the small-keyword-set KWS task: target keywords + unknown + silence."""
+import math
 import random
 import time
 from collections.abc import Collection, Mapping
@@ -27,6 +28,9 @@ logger = get_logger(__name__)
 class Entry:
     label: int
     rel_path: str | None  # None => synthesized silence sample
+    # Position in a materialized silence set; None when silence is redrawn on
+    # every access (the deployment-oriented default).
+    silence_index: int | None = None
 
 
 def build_label_map(target_keywords: list[str]) -> dict[str, int]:
@@ -41,13 +45,18 @@ class SpeechCommandsKWSDataset(Dataset):
                  sample_rate: int, clip_len: int, silence_sampler: SilenceSampler,
                  waveform_augmenter: WaveformAugmenter | None = None,
                  spec_augmenter: SpecAugmenter | None = None,
-                 cache_features: bool = False):
+                 cache_features: bool = False,
+                 silence_clips: list[torch.Tensor] | None = None):
         self.entries = entries
         self.dataset_root = dataset_root
         self.feature_extractor = feature_extractor
         self.sample_rate = sample_rate
         self.clip_len = clip_len
         self.silence_sampler = silence_sampler
+        # When present, silence was drawn once at build time (NeMo writes its
+        # silence clips to disk), so evaluation sees the same waveforms on
+        # every epoch and every run with the same seed.
+        self.silence_clips = silence_clips
         self.waveform_augmenter = waveform_augmenter
         self.spec_augmenter = spec_augmenter
         # A list keeps the index lookup cheap.  When requested, this cache also
@@ -65,6 +74,8 @@ class SpeechCommandsKWSDataset(Dataset):
 
     def _load_waveform(self, entry: Entry) -> torch.Tensor:
         if entry.rel_path is None:
+            if self.silence_clips is not None and entry.silence_index is not None:
+                return self.silence_clips[entry.silence_index]
             return self.silence_sampler.sample()
         waveform = load_waveform(self.dataset_root / entry.rel_path, self.sample_rate)
         if waveform.shape[-1] < self.clip_len:
@@ -148,7 +159,8 @@ def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
                     label_map: dict[str, int], unknown_pool: Collection[str],
                     unknown_ratio_to_avg_keyword_count: float,
                     silence_ratio_to_avg_keyword_count: float,
-                    rng: random.Random) -> list[Entry]:
+                    rng: random.Random, *, unknown_count: int | None = None,
+                    silence_count: int | None = None) -> list[Entry]:
     by_word: dict[str, list[str]] = {}
     for word, rel_path in split_index[split]:
         by_word.setdefault(word, []).append(rel_path)
@@ -163,9 +175,10 @@ def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
         entries.extend(Entry(label=label, rel_path=p) for p in paths)
 
     avg_keyword_count = sum(keyword_counts) / max(len(keyword_counts), 1)
-    unknown_count = unknown_sample_cap(
-        avg_keyword_count, unknown_ratio_to_avg_keyword_count,
-    )
+    if unknown_count is None:
+        unknown_count = unknown_sample_cap(
+            avg_keyword_count, unknown_ratio_to_avg_keyword_count,
+        )
     # Sets have process-dependent iteration order because of Python hash
     # randomization. Sort the pool before shuffling so a fixed ``rng`` seed
     # selects the same unknown examples in every process.
@@ -180,12 +193,40 @@ def _build_entries(split_index: dict[str, list[tuple[str, str]]], split: str,
     unknown_label = label_map[UNKNOWN_LABEL_NAME]
     entries.extend(Entry(label=unknown_label, rel_path=p) for p in unknown_paths)
 
-    num_silence = int(round(avg_keyword_count * silence_ratio_to_avg_keyword_count))
+    num_silence = (
+        int(round(avg_keyword_count * silence_ratio_to_avg_keyword_count))
+        if silence_count is None else silence_count
+    )
     silence_label = label_map[SILENCE_LABEL_NAME]
-    entries.extend(Entry(label=silence_label, rel_path=None) for _ in range(num_silence))
+    entries.extend(
+        Entry(label=silence_label, rel_path=None, silence_index=index)
+        for index in range(num_silence)
+    )
 
     rng.shuffle(entries)
     return entries
+
+
+CLASS_COUNT_ROUNDING = ("round", "ceil")
+
+
+def _class_count(class_cfg: Mapping, avg_keyword_count: float, *, class_name: str) -> int:
+    """Number of unknown/silence examples to draw for one split.
+
+    ``round`` is this project's default.  ``ceil`` reproduces NeMo's
+    ``process_speech_commands_data.py``, which sizes both balanced classes as
+    ``int(np.ceil(0.1 * num_total_samples))`` over the ten keyword classes --
+    i.e. the ceiling of the keyword-class mean.  That is where the SparkNet
+    manifests' 3077/371/408 come from, so deriving them keeps the recipe
+    correct for any keyword set rather than hard-coding one corpus's counts.
+    """
+    rounding = str(class_cfg.get("rounding", "round"))
+    if rounding not in CLASS_COUNT_ROUNDING:
+        raise ValueError(
+            f"{class_name}.rounding must be one of {CLASS_COUNT_ROUNDING}, got {rounding!r}"
+        )
+    exact = avg_keyword_count * class_cfg["target_ratio_to_avg_keyword_count"]
+    return math.ceil(exact) if rounding == "ceil" else int(round(exact))
 
 
 def build_datasets(
@@ -235,6 +276,9 @@ def build_datasets(
         noise_dir, sample_rate, dataset_cfg["clip_seconds"],
         silence_cfg["min_gain"], silence_cfg["max_gain"],
     )
+    materialize_silence = silence_cfg.get("materialize", False)
+    if not isinstance(materialize_silence, bool):
+        raise ValueError("silence.materialize must be a boolean")
 
     requested_splits = (TRAIN, VAL, TEST) if splits is None else tuple(splits)
     invalid_splits = set(requested_splits) - {TRAIN, VAL, TEST}
@@ -244,10 +288,23 @@ def build_datasets(
     datasets = {}
     rng = random.Random(seed)
     for split in requested_splits:
+        split_index_entries = split_index[split]
+        keyword_counts = [
+            sum(1 for word, _ in split_index_entries if word == keyword)
+            for keyword in target_keywords
+        ]
+        average_keyword_count = sum(keyword_counts) / max(len(keyword_counts), 1)
+        silence_count = _class_count(
+            silence_cfg, average_keyword_count, class_name="silence",
+        )
         entries = _build_entries(
             split_index, split, label_map, unknown_pool,
             unknown_cfg["target_ratio_to_avg_keyword_count"],
             silence_cfg["target_ratio_to_avg_keyword_count"], rng,
+            unknown_count=_class_count(
+                unknown_cfg, average_keyword_count, class_name="unknown",
+            ),
+            silence_count=silence_count,
         )
         is_train = split == TRAIN and augment
         waveform_augmenter, spec_augmenter = (
@@ -261,12 +318,23 @@ def build_datasets(
         cache_this_split = cache_features and (
             split != TRAIN or cache_train_features or not is_train
         )
+        # A string seed is hashed with SHA-512 by ``random.seed``, so unlike a
+        # tuple it is stable across processes (PYTHONHASHSEED randomizes str
+        # hashing).  Naming the split gives each one a disjoint silence draw.
+        silence_clips = (
+            silence_sampler.materialize_clips(
+                silence_count, random.Random(f"{seed}:silence:{split}"),
+            )
+            if materialize_silence
+            else None
+        )
         datasets[split] = SpeechCommandsKWSDataset(
             entries, dataset_root, feature_extractor, sample_rate, clip_len,
             silence_sampler, waveform_augmenter, spec_augmenter,
             # With cache_train_features enabled, this includes one fixed
             # augmented view of every training entry (including silence).
             cache_features=cache_this_split,
+            silence_clips=silence_clips,
         )
 
         if cache_this_split:

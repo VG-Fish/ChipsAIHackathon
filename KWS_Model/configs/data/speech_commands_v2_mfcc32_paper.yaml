@@ -1,0 +1,47 @@
+# Paper-faithful Google Speech Commands v2 setup for SparkNet reproduction.
+#
+# This intentionally differs from the deployment-oriented default. The SparkNet
+# reference config consumes `*_manifest_balanced.json` files produced by NeMo's
+# `scripts/dataset_processing/process_speech_commands_data.py --class_split sub
+# --rebalance`, so the class balance and silence construction below follow that
+# script rather than this project's usual choices.
+dataset:
+  url: "http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
+  md5: "6b74f3901214cb2c2934e98196829835"
+  root: "data/raw/speech_commands_v0.02"
+  sample_rate: 16000
+  clip_seconds: 1.0
+
+target_keywords: ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
+
+unknown:
+  target_ratio_to_avg_keyword_count: 1.0
+  # NeMo sizes this class as int(np.ceil(0.1 * num_total_samples)) across the
+  # ten keyword classes -- the ceiling of the keyword-class mean, not a rounded
+  # one. On v0.02 that yields 3077 / 371 / 408 for train / val / test.
+  rounding: ceil
+
+silence:
+  background_noise_dir: "_background_noise_"
+  target_ratio_to_avg_keyword_count: 1.0
+  rounding: ceil
+  # NeMo builds silence by cropping one second of `_background_noise_` and
+  # scaling it by rng.uniform(0.0, 1.0); the paper likewise describes the class
+  # as "silence or background noise". It writes those clips to disk once, so
+  # each split has a fixed set -- `materialize: true` reproduces that, which is
+  # what makes the reported test accuracy reproducible run to run.
+  materialize: true
+  min_gain: 0.0
+  max_gain: 1.0
+
+features:
+  # AudioToMFCCPreprocessor's torchaudio configuration in the reference code.
+  type: "mfcc"
+  n_mels: 32
+  win_length_ms: 25
+  hop_length_ms: 10
+  log_mels: true
+
+splits:
+  testing_list: "testing_list.txt"
+  validation_list: "validation_list.txt"

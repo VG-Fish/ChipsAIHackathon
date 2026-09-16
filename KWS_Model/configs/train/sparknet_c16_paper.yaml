@@ -1,0 +1,41 @@
+# Paper-faithful training recipe from cfg_labels_12_channels_16_data_v2.yaml.
+# This is intentionally a separate recipe; the existing light/AdamW recipes
+# remain the controls for deployment and pruning experiments.
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  # NeMo's WhiteNoisePerturbation draws randint(min, max): whole decibels,
+  # upper bound excluded.
+  white_noise_integer_db: true
+  spec_augment: false
+epochs: 200
+batch_size: 128
+num_workers: 0
+persistent_workers: false
+cache_features: false
+cache_train_features: false
+optimizer: sgd
+momentum: 0.9
+lr: 0.01
+weight_decay: 0.001
+label_smoothing: 0.0
+task_loss_scale: 100.0
+scheduler: polynomial_hold
+warmup_fraction: 0.05
+hold_fraction: 0.40
+# Section 3 says the LR then decays over "the remaining 85%", which cannot
+# hold alongside its own 5% warmup and 40% hold. NeMo's
+# PolynomialHoldDecayAnnealing decays over whatever is left -- 55% here --
+# so the reference config's behaviour is what this reproduces.
+polynomial_power: 2.0
+min_lr: 0.000001
+# The paper reports 95.7 +/- 0.17, a mean and standard deviation over several
+# runs, so a single seed is not directly comparable. Sweep --seed and compare
+# the resulting mean/std, not one number.
+seed: 0
