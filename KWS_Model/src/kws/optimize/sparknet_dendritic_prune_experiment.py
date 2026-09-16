@@ -27,7 +27,6 @@ from kws.models.registry import (
 )
 from kws.models.sparknet import SparkNet
 from kws.optimize.dendritic_config import (
-    UNLIMITED_DENDRITES,
     normalize_module_ids,
     placement_module_names,
     project_dendritic_cost,
@@ -39,7 +38,7 @@ from kws.utils.logging import run_session
 from kws.utils.profile import count_macs, deployed_parameter_count
 from kws.utils.seed import with_seed
 
-EXPECTED_MODULE_IDS = (".blocks.3", ".gate_conv", ".fc")
+SUPPORTED_MODULE_IDS = frozenset((".blocks.3", ".gate_conv", ".fc"))
 REPORT_NAME = "sparknet_dendritic_prune_experiment.yaml"
 
 
@@ -93,10 +92,16 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     pai = cfg.get("perforatedai")
     if not isinstance(pai, Mapping) or pai.get("conversion") != "module_ids":
         raise ValueError("perforatedai.conversion must be module_ids")
-    if tuple(normalize_module_ids(pai.get("module_ids"))) != EXPECTED_MODULE_IDS:
-        raise ValueError("PAI module_ids must be .blocks.3, .gate_conv, .fc")
-    if validate_max_dendrites(pai.get("max_dendrites")) != UNLIMITED_DENDRITES:
-        raise ValueError("perforatedai.max_dendrites must be -1 (unlimited)")
+    module_ids = normalize_module_ids(pai.get("module_ids"))
+    unsupported = set(module_ids).difference(SUPPORTED_MODULE_IDS)
+    if unsupported:
+        raise ValueError(
+            "PAI module_ids may only select .blocks.3, .gate_conv, and .fc; "
+            f"unsupported: {sorted(unsupported)}"
+        )
+    # A finite cap is useful for focused follow-up runs; ``-1`` remains the
+    # explicit unlimited sentinel used by the original experiment.
+    validate_max_dendrites(pai.get("max_dendrites"))
     if pai.get("testing_dendrite_capacity") is not False:
         raise ValueError("testing_dendrite_capacity must be false for the full run")
     if pai.get("max_dendrite_tries") != 3:

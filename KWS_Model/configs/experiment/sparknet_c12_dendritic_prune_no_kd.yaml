@@ -6,14 +6,14 @@ teacher_checkpoint: null
 data_config: configs/data/speech_commands_v2_mfcc32.yaml
 model_config: configs/model/sparknet_c12.yaml
 train_config: configs/train/sparknet_dendritic_prune_no_kd.yaml
-output_dir: outputs/sparknet-c12-dendritic-prune-no-kd-unlimited
+output_dir: outputs/sparknet-c12-dendritic-prune-no-kd-fc-only-d3
 objective:
   metric: validation_accuracy
   use_test: false
 perforatedai:
   conversion: module_ids
-  module_ids: [.blocks.3, .gate_conv, .fc]
-  max_dendrites: -1
+  module_ids: [.fc]
+  max_dendrites: 3
   testing_dendrite_capacity: false
   switch_mode: history
   history_lookback: 8

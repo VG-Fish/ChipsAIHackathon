@@ -44,12 +44,11 @@ pruning:
   keep_ratio: 0.5
   target_channels: 6
 
-# Use the slides' eight-epoch history window. max_dendrites=-1 is translated
-# at the runtime boundary to a large positive ceiling; PAI's no-improvement
-# history and three failed candidate tries terminate the run.
+# Use the slides' eight-epoch history window. This focused continuation only
+# perforates the classifier and caps the search at three dendrites.
 perforatedai:
   testing_dendrite_capacity: false
-  max_dendrites: -1
+  max_dendrites: 3
   switch_mode: history
   history_lookback: 8
   n_epochs_to_switch: 25
@@ -59,7 +58,7 @@ perforatedai:
   max_dendrite_tries: 3
   forward_function: tanh
   conversion: module_ids
-  module_ids: [.blocks.3, .gate_conv, .fc]
+  module_ids: [.fc]
   post_integration_lr_multiplier: 0.25
   enforce_base_weight_freeze: false
   freeze_base_batchnorm_in_dendrite_phase: true
