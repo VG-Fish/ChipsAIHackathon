@@ -1,0 +1,36 @@
+# SparkNet C16 -> C12/C10/C8 prune-versus-dendrite study, seed 3.
+#
+# Source is the paper-replication checkpoint from the same seed, so the prune
+# arm and the dendritic arm both start from a model trained on the corrected
+# data pipeline. Run once per seed; the five runs give the spread needed to
+# tell a real dendrite gain from run-to-run variance.
+source_checkpoint: outputs/sparknet-paper-replication/c16-seed3/models/checkpoints/paper_replication/best.pt
+source_validation_accuracy: 0.9523059617547807
+source_channels: 16
+widths: [12, 10, 8]
+teacher_checkpoint: null
+data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
+model_config: configs/model/sparknet_c16_paper.yaml
+train_config: configs/train/sparknet_c16_dendritic_prune_no_kd.yaml
+output_dir: outputs/sparknet-c16-dendritic-prune-no-kd-fc-only-d3/seed3
+objective:
+  metric: validation_accuracy
+  use_test: false
+perforatedai:
+  conversion: module_ids
+  module_ids: [.fc]
+  max_dendrites: 3
+  testing_dendrite_capacity: false
+  switch_mode: history
+  history_lookback: 8
+  n_epochs_to_switch: 25
+  improvement_threshold: [0.001, 0.0001, 0.0]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true
+pruning:
+  method: l1_filter

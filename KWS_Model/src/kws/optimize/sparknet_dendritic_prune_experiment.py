@@ -1,6 +1,6 @@
 """No-KD SparkNet channel-pruning versus dendritic-capacity experiment.
 
-Every candidate is pruned from the same Phase-B C12 checkpoint. The
+Every candidate is pruned from the same single source checkpoint. The
 conventional arm is the best supervised prune-fine-tune checkpoint created by
 ``run_cycle`` immediately before PAI wraps the model, so the dendritic arm is
 guaranteed to start from those exact weights. The test split is never loaded.
@@ -67,9 +67,13 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(cfg.get(key), str) or not cfg[key].strip():
             raise ValueError(f"{key} must be a non-empty path")
 
+    # The study is defined by pruning every candidate from one source width, not
+    # by that width being 12; the C16 paper-replication checkpoints are a valid
+    # source too.  ``source_channels`` is still cross-checked against the
+    # checkpoint's own model_cfg below, so a wrong value here cannot slip past.
     source_width = cfg.get("source_channels")
-    if source_width != 12:
-        raise ValueError("source_channels must be 12 for the targeted C12 run")
+    if isinstance(source_width, bool) or not isinstance(source_width, int) or source_width < 2:
+        raise ValueError("source_channels must be an integer width of at least 2")
     widths = cfg.get("widths")
     if (
         not isinstance(widths, list)
@@ -78,7 +82,10 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
         or widths != sorted(set(widths), reverse=True)
         or any(not 0 < width < source_width for width in widths)
     ):
-        raise ValueError("widths must be unique descending integers between 1 and 11")
+        raise ValueError(
+            "widths must be unique descending integers between 1 and "
+            f"{source_width - 1}"
+        )
 
     objective = cfg.get("objective")
     if not isinstance(objective, Mapping) or objective.get("metric") != "validation_accuracy":
@@ -276,7 +283,10 @@ def _load_inputs(
         or int(source_model_cfg.get("gate_channels", -1)) != 32
         or int(configured_model.get("gate_channels", -1)) != 32
     ):
-        raise ValueError("targeted run requires SparkNet C12 with gate width 32")
+        raise ValueError(
+            "targeted run requires a SparkNet source with gate width 32 whose "
+            f"checkpoint width matches source_channels={cfg['source_channels']}"
+        )
     if train_cfg.get("perforatedai") != cfg.get("perforatedai"):
         raise ValueError("train and experiment PAI settings must match exactly")
     if train_cfg.get("objective") != cfg.get("objective"):
@@ -293,7 +303,7 @@ def run_experiment(
     seed: int | None = None,
     cycle_runner: Any | None = None,
 ) -> dict[str, Any]:
-    """Plan or execute the no-KD C12 -> C10/C8/C6 experiment."""
+    """Plan or execute the no-KD prune-versus-dendrite experiment."""
     cfg = validate_config(config)
     selected_output = output_dir or cfg["output_dir"]
     layout = ArtifactLayout(selected_output).ensure_tree()
