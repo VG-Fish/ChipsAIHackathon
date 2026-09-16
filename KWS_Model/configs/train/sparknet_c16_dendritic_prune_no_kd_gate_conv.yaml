@@ -1,0 +1,89 @@
+# SparkNet C16 -> C12/C10/C8 prune/PAI experiment, gate_conv perforation.
+#
+# Mirrors sparknet_dendritic_prune_no_kd.yaml -- same 40-epoch prune fine-tune,
+# same 130-epoch dendritic horizon, same PAI block -- so the C16 arm stays
+# comparable to the C12 run. Two things differ, both forced by the source.
+#
+# 1. The data config is the paper one the C16 checkpoints were trained on
+#    (1x unknown/silence, ceil sizing, materialized silence). Fine-tuning on
+#    the 2x-balanced default would change the class prior underneath the model.
+# 2. task_loss_scale: 100. sparknet_c16_paper.yaml carries sparsity_weight: 1.0
+#    against the paper's 100 * CE + 1 * gate_sparsity, whereas sparknet_c12.yaml
+#    folds the same 100:1 ratio into sparsity_weight: 0.01 at task scale 1.
+#    Omitting it here would fine-tune at 1:1 and crush the learned gates.
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  white_noise_integer_db: true
+  spec_augment: false
+epochs: 40
+dendritic_schedule_epochs: 130
+batch_size: 256
+num_workers: 6
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+task_loss_scale: 100.0
+seed: 0
+
+# Adapt the active base parameters to the selected dendrites without a teacher.
+resume_epochs: 8
+
+objective:
+  metric: validation_accuracy
+  use_test: false
+
+deployment:
+  bits_per_weight: 8
+  latency_iterations: 50
+  profile_device: cpu
+
+# The runner overwrites keep_ratio/target_channels per candidate.
+pruning:
+  kind: structured
+  method: l1_filter
+  keep_ratio: 0.5
+  target_channels: 8
+
+# Eight-epoch history window, gate_conv perforation, three dendrites.
+perforatedai:
+  testing_dendrite_capacity: false
+  max_dendrites: 3
+  switch_mode: history
+  history_lookback: 8
+  n_epochs_to_switch: 25
+  improvement_threshold: [0.001, 0.0001, 0.0]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  conversion: module_ids
+  module_ids: [.gate_conv]
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true
+
+# Placement rationale. The .fc arm perforates Linear(32 -> 12), which reads a
+# mean-pooled, clamped gate occupancy in [0, 1] -- a near-binary duty-cycle
+# summary that 100 * CE already shaped to be linearly separable. A dendrite's
+# tanh branch is redundant there, and five seeds x two dendrites moved the
+# matched-budget plateau by +0.07 points. gate_conv is the actual bottleneck:
+# Conv2d(width -> 32, k=1) is the last place a nonlinear branch can widen the
+# representation BEFORE tanh + clamp discretizes it.
+#
+# Unlike .fc, gate_conv's shape depends on the pruned width (in_channels =
+# 12/10/8), so the per-dendrite cost is not constant across the sweep. That is
+# the deliberate trade: this arm is not width-comparable the way the .fc arm
+# is, so read it against its own matched-budget plateau per width, not across
+# widths.

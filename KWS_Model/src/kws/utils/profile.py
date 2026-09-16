@@ -13,6 +13,7 @@ convolutions to the MAC count exactly as they will on the device.
 from __future__ import annotations
 
 import statistics
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from time import perf_counter
 
@@ -43,6 +44,71 @@ class DeploymentCost:
 
 def _leaf_modules(model: nn.Module) -> list[nn.Module]:
     return [module for module in model.modules() if not list(module.children())]
+
+
+class _HookableForward:
+    """Route a module's direct ``.forward()`` calls back through ``__call__``.
+
+    A caller that invokes ``module.forward(x)`` instead of ``module(x)`` skips
+    PyTorch's hook machinery entirely, so a hook-based measurement never sees
+    that call. Replacing the instance's ``forward`` with this object sends such
+    a call through ``__call__`` so the hooks fire, while a pre-hook flag marks
+    calls that already arrived that way and lets them straight through -- so
+    every call is observed exactly once, however it was made.
+    """
+
+    def __init__(self, module: nn.Module) -> None:
+        self._module = module
+        self._forward = module.forward
+        self._arrived_through_call = False
+        self._handle = module.register_forward_pre_hook(self._mark_call)
+        module.forward = self
+
+    def _mark_call(self, _module, _inputs) -> None:
+        self._arrived_through_call = True
+
+    def __call__(self, *args, **kwargs):
+        if self._arrived_through_call:
+            self._arrived_through_call = False
+            return self._forward(*args, **kwargs)
+        return self._module(*args, **kwargs)
+
+    def restore(self) -> None:
+        self._handle.remove()
+        del self._module.forward
+
+
+@contextmanager
+def _hookable_branch_calls(model: nn.Module):
+    """Make every PAI branch observable by forward hooks during a probe.
+
+    PerforatedAI's clean inference wrapper runs its dendrite branches through
+    ``__call__`` but its base branch through ``layer_array[-1].forward(...)``.
+    Hooks therefore missed the base branch of every wrapped module, which made
+    a dendritic graph measure *cheaper* than the pruned graph it grew from --
+    the copied dendrite was counted and the original layer it copied was not.
+    """
+    routed: list[_HookableForward] = []
+    already_routed: set[int] = set()
+    for parent in model.modules():
+        layer_array = getattr(parent, "layer_array", None)
+        # PAI's training graph holds branches in ModuleList, its clean export
+        # in Sequential; both index the base branch out and call it directly.
+        if not isinstance(layer_array, (nn.ModuleList, nn.Sequential)):
+            continue
+        for branch in layer_array:
+            # One router per module, even if two parents share a branch: a
+            # second would capture the first as the real forward and leave the
+            # module without one when the probe restores them in order.
+            if id(branch) in already_routed:
+                continue
+            already_routed.add(id(branch))
+            routed.append(_HookableForward(branch))
+    try:
+        yield
+    finally:
+        for router in routed:
+            router.restore()
 
 
 def count_macs(model: nn.Module, input_shape: tuple[int, int]) -> int:
@@ -89,9 +155,12 @@ def count_macs(model: nn.Module, input_shape: tuple[int, int]) -> int:
         ):
             handles.append(module.register_forward_hook(residual_hook))
 
-    _run_probe(model, input_shape)
-    for handle in handles:
-        handle.remove()
+    try:
+        with _hookable_branch_calls(model):
+            _run_probe(model, input_shape)
+    finally:
+        for handle in handles:
+            handle.remove()
     return total[0]
 
 
@@ -169,7 +238,8 @@ def measure_peak_activation_bytes(
         handles.append(parent.register_forward_hook(residual_hook))
 
     try:
-        _run_probe(model, input_shape)
+        with _hookable_branch_calls(model):
+            _run_probe(model, input_shape)
     finally:
         for handle in [*branch_handles, *handles]:
             handle.remove()

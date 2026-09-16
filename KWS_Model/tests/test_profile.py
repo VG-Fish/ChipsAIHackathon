@@ -46,6 +46,63 @@ def test_dendrite_style_copies_are_counted_because_they_run_on_device():
     assert count_macs(TwoBranch(), (10, 10)) == 2 * single
 
 
+class _FakeCleanPAI(nn.Module):
+    """PerforatedAI's clean export, faithful to how it calls its branches.
+
+    Dendrites go through ``__call__`` and the base branch through a direct
+    ``layer_array[-1].forward(...)``, which is invisible to forward hooks.
+    """
+
+    def __init__(self, base=None):
+        super().__init__()
+        base = base if base is not None else nn.Linear(8, 4)
+        self.layer_array = nn.ModuleList([nn.Linear(8, 4), base])
+        self.skip_weights = nn.ParameterList([nn.Parameter(torch.zeros(1, 4))])
+
+    def forward(self, value):
+        dendrite = torch.tanh(self.layer_array[0](value))
+        base = self.layer_array[-1].forward(value)
+        return base + self.skip_weights[0][0] * dendrite
+
+
+def test_base_branch_is_counted_even_though_pai_calls_forward_directly():
+    branch_macs = count_macs(nn.Linear(8, 4), (1, 8))
+
+    # Both branches run on the device, and the skip edge scales the four
+    # dendrite outputs. Missing the base branch would make a one-dendrite
+    # graph look cheaper than the layer it was grown from.
+    assert count_macs(_FakeCleanPAI(), (1, 8)) == 2 * branch_macs + 4
+
+
+def test_peak_activation_sees_the_directly_called_base_branch():
+    # The wrapper holds its 8-element input and both 4-element branch outputs.
+    assert measure_peak_activation_bytes(
+        _FakeCleanPAI(), (1, 8), bytes_per_activation=1
+    ) == 8 + 4 + 4
+
+
+def test_a_branch_two_wrappers_share_keeps_its_forward_after_the_probe():
+    shared = nn.Linear(8, 4)
+
+    class TwoWrappers(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.left = _FakeCleanPAI(base=shared)
+            self.right = _FakeCleanPAI(base=shared)
+
+        def forward(self, value):
+            return self.left(value) + self.right(value)
+
+    model = TwoWrappers()
+    branch_macs = count_macs(nn.Linear(8, 4), (1, 8))
+
+    # Four branch calls and two skip edges. Rerouting the shared module once
+    # per wrapper would leave it with no ``forward`` at all afterwards, because
+    # the second reroute captures the first one as the real method.
+    assert count_macs(model, (1, 8)) == 4 * branch_macs + 2 * 4
+    assert model(torch.zeros(1, 8)).shape == (1, 4)
+
+
 def test_weight_memory_scales_with_the_deployed_precision():
     model = nn.Linear(10, 10, bias=False)  # 100 parameters
     assert weight_memory_bytes(model, bits_per_weight=32) == 400
