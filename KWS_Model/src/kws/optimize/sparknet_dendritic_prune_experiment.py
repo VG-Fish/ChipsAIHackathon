@@ -36,9 +36,29 @@ from kws.optimize.prune import prune_sparknet
 from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir
 from kws.utils.logging import run_session
 from kws.utils.profile import count_macs, deployed_parameter_count
-from kws.utils.seed import with_seed
+from kws.utils.seed import resolve_seed, with_seed
 
-SUPPORTED_MODULE_IDS = frozenset((".blocks.3", ".gate_conv", ".fc"))
+# SparkNet is four TCSBlocks; the placement surface is built from the indices
+# rather than spelled out so it cannot drift from the architecture.
+SPARKNET_BLOCK_INDICES = range(4)
+# The backbone is where the pruned capacity was removed, so it is where a
+# dendrite most plausibly buys it back; the earlier selection could only test
+# the last block as a whole plus the two heads.  Inside a TCSBlock the two
+# convolutions add different things: a ``pointwise`` dendrite adds
+# cross-channel mixing capacity, while a ``depthwise`` dendrite adds temporal
+# receptive-field capacity.  They are also cheap.  At C12 a pointwise dendrite
+# copies a 12x12 1x1 convolution for 144 parameters against ``.fc``'s 396 --
+# 2.75x cheaper, so three pointwise dendrites cost less than one classifier
+# dendrite and a fixed parameter budget buys far more placements in the
+# backbone than at the head.
+SUPPORTED_MODULE_IDS = frozenset(
+    (".gate_conv", ".fc")
+    + tuple(
+        f".blocks.{index}{suffix}"
+        for index in SPARKNET_BLOCK_INDICES
+        for suffix in ("", ".pointwise", ".depthwise")
+    )
+)
 REPORT_NAME = "sparknet_dendritic_prune_experiment.yaml"
 
 
@@ -99,11 +119,16 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     pai = cfg.get("perforatedai")
     if not isinstance(pai, Mapping) or pai.get("conversion") != "module_ids":
         raise ValueError("perforatedai.conversion must be module_ids")
-    module_ids = normalize_module_ids(pai.get("module_ids"))
+    # ``module_ids: []`` is a deliberate selection, not a missing one: it
+    # selects the configured-schedule no-dendrite arm, which runs the whole
+    # PAI schedule with nothing eligible to perforate.  An empty tuple trivially
+    # satisfies the support check below.
+    module_ids = normalize_module_ids(pai.get("module_ids"), allow_empty=True)
     unsupported = set(module_ids).difference(SUPPORTED_MODULE_IDS)
     if unsupported:
         raise ValueError(
-            "PAI module_ids may only select .blocks.3, .gate_conv, and .fc; "
+            "PAI module_ids may only select SparkNet blocks (whole, .pointwise, "
+            "or .depthwise), .gate_conv, and .fc; "
             f"unsupported: {sorted(unsupported)}"
         )
     # A finite cap is useful for focused follow-up runs; ``-1`` remains the
@@ -126,12 +151,62 @@ def dendritic_delta(pai: Mapping[str, Any], baseline: Mapping[str, Any]) -> dict
     }
 
 
-def report_metrics(pai: Mapping[str, Any], baseline: Mapping[str, Any]) -> dict[str, Any]:
-    """Compute raw accuracy gain and cost growth from the exact PAI starting point."""
+def report_metrics(
+    pai: Mapping[str, Any],
+    baseline: Mapping[str, Any],
+    *,
+    zero_dendrite_accuracy: float | None = None,
+    pai_search_accuracy: float | None = None,
+) -> dict[str, Any]:
+    """Compute accuracy/cost deltas without claiming an unmatched control is causal.
+
+    ``pai`` is the final exported model, after the optional base-only resume.
+    Its headline delta is therefore an end-to-end delta from the prune
+    fine-tune baseline, not a dendrite-only effect.  The PAI architecture-row
+    comparisons are retained separately because the smallest-parameter row in
+    ``best_arch_scores.csv`` is a search observation, not an independently
+    trained, epoch-matched no-dendrite counterfactual.
+    """
     result: dict[str, Any] = dendritic_delta(pai, baseline)
-    result["validation_accuracy_gain"] = float(pai["validation_accuracy"]) - float(
-        baseline["validation_accuracy"]
+    final_accuracy = float(pai["validation_accuracy"])
+    baseline_accuracy = float(baseline["validation_accuracy"])
+    result["validation_accuracy_gain_vs_prune_finetune"] = (
+        final_accuracy - baseline_accuracy
     )
+    result["validation_accuracy_gain"] = result[
+        "validation_accuracy_gain_vs_prune_finetune"
+    ]
+    result["validation_accuracy_gain_basis"] = "prune_finetune_baseline"
+    if zero_dendrite_accuracy is not None:
+        result["final_validation_accuracy_gain_vs_pai_zero_architecture"] = (
+            final_accuracy - float(zero_dendrite_accuracy)
+        )
+        result["pai_zero_architecture_comparison_basis"] = (
+            "minimum_parameter_row_in_best_arch_scores"
+        )
+    if pai_search_accuracy is not None:
+        search_accuracy = float(pai_search_accuracy)
+        result["pai_search_accuracy_gain_vs_prune_finetune"] = (
+            search_accuracy - baseline_accuracy
+        )
+        if zero_dendrite_accuracy is not None:
+            result["pai_search_accuracy_gain"] = (
+                search_accuracy - float(zero_dendrite_accuracy)
+            )
+            result["pai_search_accuracy_gain_vs_pai_zero_architecture"] = result[
+                "pai_search_accuracy_gain"
+            ]
+            result["pai_search_accuracy_gain_basis"] = (
+                "best_architecture_row_minus_minimum_parameter_row"
+            )
+        else:
+            result["pai_search_accuracy_gain"] = result[
+                "pai_search_accuracy_gain_vs_prune_finetune"
+            ]
+            result["pai_search_accuracy_gain_basis"] = "prune_finetune_baseline"
+    # Cost deltas stay measured against the pruned baseline: they describe what
+    # the deployed graph grew by, which is a cost question, not an accuracy
+    # control question.
     result["parameter_growth_fraction"] = (
         result["parameter_delta"] / int(baseline["deployed_params"])
     )
@@ -183,6 +258,11 @@ def _load_resume_report(layout: ArtifactLayout, report: Mapping[str, Any]) -> di
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f"could not load existing aggregate report: {report_path}") from exc
 
+    if saved.get("seed") != report.get("seed"):
+        raise ValueError(
+            "existing aggregate report has a different or unrecorded seed; "
+            "start a fresh output directory rather than mixing stochastic runs"
+        )
     expected_widths = report["widths"]
     if saved.get("widths") != expected_widths:
         raise ValueError("existing aggregate report has different candidate widths")
@@ -222,6 +302,7 @@ def _load_resume_report(layout: ArtifactLayout, report: Mapping[str, Any]) -> di
             # treated as a valid completed result.
             required_comparison = (
                 "validation_accuracy_gain",
+                "validation_accuracy_gain_vs_prune_finetune",
                 "parameter_delta",
                 "mac_delta",
                 "parameter_growth_fraction",
@@ -234,6 +315,14 @@ def _load_resume_report(layout: ArtifactLayout, report: Mapping[str, Any]) -> di
                 or not isinstance(comparison[key], numbers.Real)
                 for key in required_comparison
             ):
+                raise ValueError("completed candidate in existing aggregate report has an invalid comparison")
+            # The basis is a label, not a measurement, so it is checked apart
+            # from the numeric tuple above: adding it there would fail the
+            # ``numbers.Real`` test on every valid report.
+            if comparison.get("validation_accuracy_gain_basis") not in {
+                "zero_dendrite",
+                "prune_finetune_baseline",
+            }:
                 raise ValueError("completed candidate in existing aggregate report has an invalid comparison")
     if observed != expected:
         raise ValueError("existing aggregate report is missing expected candidates")
@@ -312,7 +401,17 @@ def run_experiment(
         raise FileExistsError(
             f"aggregate report already exists: {report_path}; pass resume=True to continue it"
         )
-    data_cfg, configured_model, train_cfg, checkpoint, source_model = _load_inputs(cfg, seed)
+    if "seed" in cfg:
+        resolve_seed(cfg)
+    configured_seed = seed
+    if configured_seed is None and "seed" in cfg:
+        configured_seed = resolve_seed(cfg)
+    data_cfg, configured_model, train_cfg, checkpoint, source_model = _load_inputs(
+        cfg, configured_seed
+    )
+    # Lightweight callers may omit a train-config seed; the shared seed
+    # resolver supplies the documented deterministic default in that case.
+    effective_seed = resolve_seed(train_cfg)
     source_path = str(cfg["source_checkpoint"])
     input_shape = checkpoint_input_shape(checkpoint)
     source_cost = _model_cost(source_model, input_shape)
@@ -324,6 +423,7 @@ def run_experiment(
         "status": "planned" if dry_run else "running",
         "dry_run": dry_run,
         "resume": resume,
+        "seed": effective_seed,
         "selection_split": "validation",
         "test_split_used": False,
         "knowledge_distillation": {"enabled": False, "teacher_checkpoint": None},
@@ -385,6 +485,10 @@ def run_experiment(
                 "training": "pai_no_kd",
                 "validation_accuracy": None,
                 "pai_search_validation_accuracy": None,
+                # PAI's minimum-parameter architecture row, filled in from the
+                # cycle result for an explicitly labeled within-search delta.
+                "zero_dendrite_validation_accuracy": None,
+                "zero_dendrite_params": None,
                 "deployed_params": None,
                 "macs": None,
                 "one_dendrite_cost_projection": projection,
@@ -437,7 +541,7 @@ def run_experiment(
             plan["train_cfg"],
             plan["candidate_name"],
             teacher_checkpoint=None,
-            seed=seed,
+            seed=effective_seed,
             output_dir=layout.root,
             # Aggregate recovery is intentionally tri-state: ``None`` lets
             # run_cycle reuse a canonical PAI sidecar when one exists, while
@@ -470,11 +574,25 @@ def run_experiment(
         selected_checkpoint = record["dendritic"]["checkpoint"]
         if (result.get("resume") or {}).get("status") == "complete":
             selected_checkpoint = result["resume"]["checkpoint"]
+        # A cycle that predates the control (or a stubbed runner) reports
+        # ``None`` here, which keeps the older prune-fine-tune basis below.
+        zero_dendrite_accuracy = result.get("zero_dendrite_val_acc")
+        zero_dendrite_params = result.get("zero_dendrite_params")
         record["dendritic"].update(
             {
                 **pai,
                 "pai_search_validation_accuracy": float(
                     result.get("pai_best_val_acc") or result["best_val_acc"]
+                ),
+                "zero_dendrite_validation_accuracy": (
+                    float(zero_dendrite_accuracy)
+                    if zero_dendrite_accuracy is not None
+                    else None
+                ),
+                "zero_dendrite_params": (
+                    int(zero_dendrite_params)
+                    if zero_dendrite_params is not None
+                    else None
                 ),
                 "checkpoint": selected_checkpoint,
                 "resume": result.get("resume"),
@@ -483,10 +601,13 @@ def run_experiment(
             }
         )
         baseline = record["baseline"]
-        comparison = report_metrics(pai, baseline)
-        comparison["pai_search_accuracy_gain"] = (
-            record["dendritic"]["pai_search_validation_accuracy"]
-            - float(baseline["validation_accuracy"])
+        control_accuracy = record["dendritic"]["zero_dendrite_validation_accuracy"]
+        search_accuracy = record["dendritic"]["pai_search_validation_accuracy"]
+        comparison = report_metrics(
+            pai,
+            baseline,
+            zero_dendrite_accuracy=control_accuracy,
+            pai_search_accuracy=search_accuracy,
         )
         record["comparison"] = comparison
         record["status"] = "complete"
@@ -553,11 +674,18 @@ def main() -> None:
         (config["train_config"], "train_config"),
         (config["source_checkpoint"], "source_checkpoint"),
     ]
+    session_seed = args.seed
+    if session_seed is None and "seed" in config:
+        session_seed = resolve_seed(config)
+    if session_seed is None:
+        session_seed = resolve_seed(
+            _load_yaml(config["train_config"], label="train config")
+        )
     with run_session(
         selected_output,
         command="kws.optimize.sparknet_dendritic_prune_experiment",
         argv=sys.argv,
-        seed=args.seed,
+        seed=session_seed,
         inputs=inputs,
     ):
         report = run_experiment(

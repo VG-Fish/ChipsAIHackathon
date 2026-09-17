@@ -72,6 +72,7 @@ from kws.optimize.kd import (
 )
 from kws.optimize.prune import prune_ds_cnn, prune_sparknet
 from kws.train import (
+    _task_loss_scale,
     build_lr_scheduler,
     collect_auxiliary_losses,
     evaluate_loss_acc,
@@ -849,6 +850,10 @@ class DendriticCycleResult:
     elapsed_seconds: float
     pai_best_val_acc: float | None = None
     pai_deployed_params: int | None = None
+    # PAI's minimum-parameter architecture row, recorded so reports can label
+    # the within-search comparison without re-deriving it.
+    zero_dendrite_val_acc: float | None = None
+    zero_dendrite_params: int | None = None
     cost: dict | None = None
     distillation: dict | None = None
     resume: dict | None = None
@@ -1099,11 +1104,13 @@ def _load_reusable_prune_finetune_checkpoint(
     return dict(best) if compatible else None
 
 
-def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
-    """Return the best validation score and its deployed parameter count.
+def _read_pai_arch_rows(save_name: str) -> list[tuple[float, int]]:
+    """Return every ``(validation score, parameter count)`` row PAI recorded.
 
-    PAI's architecture summary contains neuron-mode maxima only, so it avoids
-    treating the temporary candidate-correlation phase as a deployable model.
+    Both readers below go through here so they can never disagree about where
+    the summary lives or what its columns are called: a rename on one side
+    would otherwise silently make the headline result and its control come
+    from different files.
     """
     path = Path(save_name) / f"{Path(save_name).name}_best_arch_scores.csv"
     if not path.exists():
@@ -1117,7 +1124,40 @@ def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
             rows.append((float(row["Max Valid Scores"]), int(row["Param Counts"])))
     if not rows:
         raise ValueError(f"PAI architecture results are empty: {path}")
-    best_val_acc, deployed_params = max(rows, key=lambda item: item[0])
+    return rows
+
+
+def read_pai_architecture_results(save_name: str) -> tuple[float, int]:
+    """Return the best validation score and its deployed parameter count.
+
+    PAI's architecture summary contains neuron-mode maxima only, so it avoids
+    treating the temporary candidate-correlation phase as a deployable model.
+    """
+    best_val_acc, deployed_params = max(
+        _read_pai_arch_rows(save_name), key=lambda item: item[0]
+    )
+    return best_val_acc, deployed_params
+
+
+def read_pai_zero_dendrite_score(save_name: str) -> tuple[float, int]:
+    """Return PAI's minimum-parameter architecture row and its score.
+
+    Each later row of PAI's summary adds one dendrite and therefore strictly
+    more parameters, so the smallest ``Param Counts`` row is the search's
+    dendrite-free architecture row.  It is useful for an within-search
+    architecture delta, but it is not an independently trained, matched
+    no-dendrite counterfactual: the row is PAI's best score at that point in
+    the search and can have a different optimization history from the best
+    dendritic row.
+
+    The prune-fine-tune checkpoint is *not* that control.  It stops after its
+    own fixed fine-tune budget and never sees PAI's extra epochs or restarts,
+    so comparing against it credits the dendrites with the accuracy that the
+    longer schedule alone would have produced.
+    """
+    best_val_acc, deployed_params = min(
+        _read_pai_arch_rows(save_name), key=lambda item: item[1]
+    )
     return best_val_acc, deployed_params
 
 
@@ -1865,6 +1905,10 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     else:
         # Exact IDs allow experiments to isolate one block, convolution, or
         # classifier without expanding the class-based conversion surface.
+        # An empty list is not a malformed selection: it is the configuration
+        # for a separately run no-dendrite arm. PAI receives no eligible module;
+        # the resulting score must still be treated as an empirical arm, not as
+        # a proof that two runs followed an identical optimizer trajectory.
         GPA.pc.set_module_ids_to_perforate(list(pai_module_ids(config)))
         GPA.pc.set_modules_to_perforate([])
         GPA.pc.set_modules_to_track(
@@ -2294,6 +2338,9 @@ def run_cycle(
         )
 
     criterion = nn.CrossEntropyLoss(label_smoothing=train_cfg["label_smoothing"])
+    task_loss_scale = _task_loss_scale(train_cfg)
+    if kd is not None and task_loss_scale != 1.0:
+        raise ValueError("task_loss_scale is not supported with knowledge distillation")
     (
         optimizer,
         scheduler,
@@ -2343,7 +2390,9 @@ def run_cycle(
         # Keep the historical programmatic default for lightweight callers
         # whose PAI configuration is intentionally partial, while rejecting
         # malformed values whenever a limit is supplied.
-        else validate_max_dendrites(pai_cfg.get("max_dendrites", 1))
+        else pai_runtime_dendrite_limit(
+            validate_max_dendrites(pai_cfg.get("max_dendrites", 1))
+        )
     )
     resume_at_terminal_boundary = bool(
         resume_candidate
@@ -2417,13 +2466,16 @@ def run_cycle(
                 adapter_optimizer.zero_grad()
             if kd is None:
                 logits = model(features)
-                losses = {"total": criterion(logits, labels)}
+                losses = {"total": task_loss_scale * criterion(logits, labels)}
             else:
+                feature_model = cast(FeatureModel, model)
                 student_features = (
-                    model.forward_features(features) if kd.uses_features else None
+                    feature_model.forward_features(features)
+                    if kd.uses_features
+                    else None
                 )
                 logits = (
-                    model.classify_features(student_features)
+                    feature_model.classify_features(student_features)
                     if student_features is not None
                     else model(features)
                 )
@@ -2676,6 +2728,9 @@ def run_cycle(
 
     best_val_acc, deployed_params = read_pai_architecture_results(save_name)
     pai_best_val_acc = best_val_acc
+    # Same file, same successful parse: retain PAI's minimum-parameter
+    # architecture row for an explicitly labeled within-search comparison.
+    zero_dendrite_val_acc, zero_dendrite_params = read_pai_zero_dendrite_score(save_name)
 
     # Step 3d: adapt the active base weights to the selected dendrites.  The
     # teacher is genuinely optional; no-KD experiments still get the matched
@@ -2742,6 +2797,8 @@ def run_cycle(
         elapsed_seconds=monotonic() - started_at,
         pai_best_val_acc=pai_best_val_acc,
         pai_deployed_params=pai_deployed_params,
+        zero_dendrite_val_acc=zero_dendrite_val_acc,
+        zero_dendrite_params=zero_dendrite_params,
         cost=cost,
         distillation=kd.describe() if kd is not None else None,
         resume=resume_result,

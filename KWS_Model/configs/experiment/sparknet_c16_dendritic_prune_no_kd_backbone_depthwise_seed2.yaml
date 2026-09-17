@@ -1,9 +1,19 @@
-# SparkNet C16 -> C12/C10/C8 prune-versus-dendrite study, seed 2.
+# SparkNet C16 -> C12/C10/C8 backbone DEPTHWISE perforation study, seed 2.
 #
 # Source is the paper-replication checkpoint from the same seed, so the prune
 # arm and the dendritic arm both start from a model trained on the corrected
 # data pipeline. Run once per seed; the five runs give the spread needed to
 # tell a real dendrite gain from run-to-run variance.
+#
+# Placement. The .fc and .gate_conv arms both perforate at or past the gate
+# bottleneck, where a dendrite sees 32 time-averaged scalars. This arm tests
+# the untested hypothesis instead: put the dendrite back in the TCS backbone,
+# where structured pruning actually removed capacity and where it sees a full
+# time-resolved (C, T) tensor. The depthwise convs are the temporal half of
+# that test -- K=29 at .blocks.3 and K=19 at .blocks.2 -- so this arm adds
+# receptive field rather than channel mixing. It is the expensive half: at C12
+# the .blocks.3 depthwise alone is 348 parameters against .fc's 396, so run the
+# pointwise arm first. The two are kept separate so the results stay readable.
 source_checkpoint: outputs/sparknet-paper-replication/c16-seed2/models/checkpoints/paper_replication/best.pt
 source_validation_accuracy: 0.9469066366704162
 source_channels: 16
@@ -11,8 +21,8 @@ widths: [12, 10, 8]
 teacher_checkpoint: null
 data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
 model_config: configs/model/sparknet_c16_paper.yaml
-train_config: configs/train/sparknet_c16_dendritic_prune_no_kd.yaml
-output_dir: outputs/sparknet-c16-dendritic-prune-no-kd-fc-only-d1/seed2
+train_config: configs/train/sparknet_c16_dendritic_prune_no_kd_backbone_depthwise.yaml
+output_dir: outputs/sparknet-c16-dendritic-prune-no-kd-backbone-depthwise/seed2
 seed: 2
 objective:
   metric: validation_accuracy
@@ -23,14 +33,14 @@ objective:
 # parameters each; 37 of its 52 attempts were rejected regardless. Capping at
 # one gives up ~0.25 mean points and removes most of the 14.4-hour search. A
 # schedule ending in 0.0 would admit a dendrite that improves validation by
-# nothing at all, so the whole schedule is lifted with the cap. Placement is
-# untouched -- same module, same history window and switch schedule; only the
-# search budget moves. Caveat: this changes the recipe, and the completed
-# three-dendrite results under outputs/ were produced by the previous
-# max_dendrites: 3 with improvement_threshold: [0.001, 0.0001, 0.0].
+# nothing at all, so the whole schedule is lifted with the cap. The history
+# window and switch schedule are carried over verbatim from the .fc arm;
+# placement is the only other difference. Caveat: this changes the recipe, and
+# the completed three-dendrite results under outputs/ were produced by the
+# previous max_dendrites: 3 with improvement_threshold: [0.001, 0.0001, 0.0].
 perforatedai:
   conversion: module_ids
-  module_ids: [.fc]
+  module_ids: [.blocks.3.depthwise, .blocks.2.depthwise]
   max_dendrites: 1
   testing_dendrite_capacity: false
   switch_mode: history

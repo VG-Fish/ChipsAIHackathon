@@ -9,6 +9,7 @@ from kws.optimize.sparknet_dendritic_prune_experiment import (
     dendritic_delta,
     interpolate_pruning_curve,
     load_config,
+    report_metrics,
     run_experiment,
     validate_config,
 )
@@ -114,6 +115,7 @@ def test_pruning_curve_interpolation_refuses_extrapolation():
 
 def test_execution_dispatches_no_kd_cycle_from_each_exact_width(tmp_path, experiment_config):
     config = experiment_config
+    config["seed"] = 7
     calls = []
 
     def fake_cycle(
@@ -159,6 +161,8 @@ def test_execution_dispatches_no_kd_cycle_from_each_exact_width(tmp_path, experi
             ".blocks.3", ".gate_conv", ".fc"
         ]
         assert kwargs["teacher_checkpoint"] is None
+        assert kwargs["seed"] == 7
+        assert train_cfg["seed"] == 7
         # Aggregate resume is tri-state: a resumed aggregate lets each cycle
         # auto-select its canonical sidecar.
         assert kwargs["resume"] is None
@@ -167,6 +171,7 @@ def test_execution_dispatches_no_kd_cycle_from_each_exact_width(tmp_path, experi
         candidate["comparison"]["validation_accuracy_gain"] == pytest.approx(0.02)
         for candidate in report["candidates"]
     )
+    assert report["seed"] == 7
 
 
 def test_refuses_to_replace_existing_report_without_resume(tmp_path, experiment_config):
@@ -212,6 +217,39 @@ def test_resume_keeps_completed_widths_and_only_runs_remaining(tmp_path, experim
     assert [candidate["status"] for candidate in report["candidates"]] == ["complete"] * 3
 
 
+def test_resume_rejects_a_different_or_unrecorded_seed(tmp_path, experiment_config):
+    output_dir = tmp_path / "run"
+    experiment_config["seed"] = 3
+    run_experiment(
+        experiment_config,
+        output_dir=output_dir,
+        cycle_runner=lambda *args, **kwargs: _cycle_result(
+            args[2]["channels"], tmp_path
+        ),
+    )
+
+    experiment_config["seed"] = 4
+    with pytest.raises(ValueError, match="different or unrecorded seed"):
+        run_experiment(
+            experiment_config,
+            dry_run=True,
+            output_dir=output_dir,
+            resume=True,
+        )
+
+    report_path = output_dir / "reports" / "sparknet_dendritic_prune_experiment.yaml"
+    report = yaml.safe_load(report_path.read_text())
+    report.pop("seed")
+    report_path.write_text(yaml.safe_dump(report, sort_keys=False))
+    with pytest.raises(ValueError, match="different or unrecorded seed"):
+        run_experiment(
+            experiment_config,
+            dry_run=True,
+            output_dir=output_dir,
+            resume=True,
+        )
+
+
 def test_existing_completed_candidate_with_empty_comparison_is_rejected(
     tmp_path, experiment_config
 ):
@@ -249,3 +287,149 @@ def _cycle_result(width, tmp_path):
         },
         "resume": {"status": "skipped"},
     }
+
+
+def _retarget_module_ids(config, module_ids):
+    """Point both the experiment and its train config at one placement.
+
+    ``_load_inputs`` requires the two PAI blocks to match exactly, so a test
+    that changes the placement has to rewrite the train config file too.
+    """
+    pai = dict(config["perforatedai"])
+    pai["module_ids"] = list(module_ids)
+    config["perforatedai"] = pai
+    Path(config["train_config"]).write_text(
+        yaml.safe_dump(
+            {
+                "objective": {"metric": "validation_accuracy", "use_test": False},
+                "perforatedai": pai,
+            }
+        )
+    )
+    return config
+
+
+def test_backbone_and_empty_placements_are_accepted(experiment_config):
+    """Backbone convolutions are legal targets; ``[]`` is the control arm."""
+    assert validate_config(_retarget_module_ids(experiment_config, []))[
+        "perforatedai"
+    ]["module_ids"] == []
+    for module_id in (
+        ".blocks.3.pointwise",
+        ".blocks.0.depthwise",
+        ".blocks.2",
+        ".gate_conv",
+        ".fc",
+    ):
+        validate_config(_retarget_module_ids(experiment_config, [module_id]))
+    with pytest.raises(ValueError, match="unsupported"):
+        validate_config(_retarget_module_ids(experiment_config, [".blocks.4.pointwise"]))
+    with pytest.raises(ValueError, match="unsupported"):
+        validate_config(_retarget_module_ids(experiment_config, [".gate_bn"]))
+
+
+def test_pointwise_dendrites_are_cheaper_than_a_classifier_dendrite(
+    tmp_path, experiment_config
+):
+    """Two C12-derived pointwise copies cost far less than one ``.fc`` copy."""
+    pointwise = run_experiment(
+        _retarget_module_ids(
+            experiment_config, [".blocks.3.pointwise", ".blocks.2.pointwise"]
+        ),
+        dry_run=True,
+        output_dir=tmp_path / "pointwise",
+    )
+    classifier = run_experiment(
+        _retarget_module_ids(experiment_config, [".fc"]),
+        dry_run=True,
+        output_dir=tmp_path / "classifier",
+    )
+    control = run_experiment(
+        _retarget_module_ids(experiment_config, []),
+        dry_run=True,
+        output_dir=tmp_path / "control",
+    )
+
+    for pointwise_candidate, classifier_candidate, control_candidate in zip(
+        pointwise["candidates"], classifier["candidates"], control["candidates"]
+    ):
+        pointwise_cost = pointwise_candidate["dendritic"]["one_dendrite_cost_projection"]
+        classifier_cost = classifier_candidate["dendritic"]["one_dendrite_cost_projection"]
+        control_cost = control_candidate["dendritic"]["one_dendrite_cost_projection"]
+        width = pointwise_candidate["width"]
+        assert pointwise_cost["copied_params_per_dendrite"] == 2 * width * width
+        assert pointwise_cost["copied_params_per_dendrite"] < classifier_cost[
+            "copied_params_per_dendrite"
+        ]
+        # The control arm copies nothing, so its projection is the base cost.
+        assert tuple(control_cost["module_names"]) == ()
+        assert control_cost["projected_params"] == control_cost["base_params"]
+        assert control_cost["projected_macs"] == control_cost["base_macs"]
+
+
+def test_headline_gain_switches_basis_with_the_zero_dendrite_control():
+    pai = {"validation_accuracy": 0.92, "deployed_params": 120, "macs": 220}
+    baseline = {"validation_accuracy": 0.80, "deployed_params": 100, "macs": 200}
+
+    controlled = report_metrics(
+        pai,
+        baseline,
+        zero_dendrite_accuracy=0.915,
+        pai_search_accuracy=0.919,
+    )
+    uncontrolled = report_metrics(pai, baseline)
+
+    # The headline is always the final end-to-end delta; a PAI architecture row
+    # is not a matched no-dendrite counterfactual.
+    assert controlled["validation_accuracy_gain"] == pytest.approx(0.12)
+    assert controlled["validation_accuracy_gain_basis"] == "prune_finetune_baseline"
+    assert controlled["final_validation_accuracy_gain_vs_pai_zero_architecture"] == pytest.approx(0.005)
+    assert controlled["pai_search_accuracy_gain"] == pytest.approx(0.004)
+    assert controlled["pai_search_accuracy_gain_vs_pai_zero_architecture"] == pytest.approx(0.004)
+    # Without a PAI-row comparison the headline still keeps its baseline meaning.
+    assert uncontrolled["validation_accuracy_gain"] == pytest.approx(0.12)
+    assert uncontrolled["validation_accuracy_gain_basis"] == "prune_finetune_baseline"
+    for metrics in (controlled, uncontrolled):
+        assert metrics["validation_accuracy_gain_vs_prune_finetune"] == pytest.approx(0.12)
+        # Cost deltas stay measured against the pruned baseline either way.
+        assert metrics["parameter_delta"] == 20
+        assert metrics["mac_delta"] == 20
+        assert metrics["parameter_growth_fraction"] == pytest.approx(0.2)
+        assert metrics["mac_growth_fraction"] == pytest.approx(0.1)
+
+
+def test_cycle_zero_dendrite_row_becomes_the_reported_control(tmp_path, experiment_config):
+    def fake_cycle(checkpoint_path, data_cfg, model_cfg, train_cfg, save_name, **kwargs):
+        width = model_cfg["channels"]
+        result = _cycle_result(width, tmp_path)
+        result["zero_dendrite_val_acc"] = 0.795 + width / 1000
+        result["zero_dendrite_params"] = 100 * width - 5
+        return result
+
+    report = run_experiment(
+        experiment_config, output_dir=tmp_path / "run", cycle_runner=fake_cycle
+    )
+
+    for candidate in report["candidates"]:
+        width = candidate["width"]
+        dendritic = candidate["dendritic"]
+        comparison = candidate["comparison"]
+        assert dendritic["zero_dendrite_validation_accuracy"] == pytest.approx(
+            0.795 + width / 1000
+        )
+        assert dendritic["zero_dendrite_params"] == 100 * width - 5
+        assert comparison["validation_accuracy_gain_basis"] == "prune_finetune_baseline"
+        assert comparison["validation_accuracy_gain"] == pytest.approx(0.02)
+        assert comparison["final_validation_accuracy_gain_vs_pai_zero_architecture"] == pytest.approx(0.005)
+        assert comparison["validation_accuracy_gain_vs_prune_finetune"] == pytest.approx(0.02)
+        assert comparison["pai_search_accuracy_gain"] == pytest.approx(-0.005)
+        assert comparison["pai_search_accuracy_gain_vs_prune_finetune"] == pytest.approx(0.01)
+
+    # A report written with the control must survive its own resume check.
+    resumed = run_experiment(
+        experiment_config,
+        dry_run=True,
+        output_dir=tmp_path / "run",
+        resume=True,
+    )
+    assert [candidate["status"] for candidate in resumed["candidates"]] == ["complete"] * 3

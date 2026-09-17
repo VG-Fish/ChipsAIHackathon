@@ -12,19 +12,31 @@ teacher_checkpoint: null
 data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
 model_config: configs/model/sparknet_c16_paper.yaml
 train_config: configs/train/sparknet_c16_dendritic_prune_no_kd_gate_conv.yaml
-output_dir: outputs/sparknet-c16-dendritic-prune-no-kd-gate-conv-d3/seed3
+output_dir: outputs/sparknet-c16-dendritic-prune-no-kd-gate-conv-d1/seed3
+seed: 3
 objective:
   metric: validation_accuracy
   use_test: false
+# Search budget: one dendrite, and every threshold rung above the noise floor.
+# The completed unlimited search bought +0.18 from dendrite #2 and +0.07 from
+# #3, both inside that run's own ~0.4-point seed-noise floor, at a flat 396
+# parameters each; 37 of its 52 attempts were rejected regardless. Capping at
+# one gives up ~0.25 mean points and removes most of the 14.4-hour search. A
+# schedule ending in 0.0 would admit a dendrite that improves validation by
+# nothing at all, so the whole schedule is lifted with the cap. Placement is
+# untouched -- same module, same history window and switch schedule; only the
+# search budget moves. Caveat: this changes the recipe, and the completed
+# three-dendrite results under outputs/ were produced by the previous
+# max_dendrites: 3 with improvement_threshold: [0.001, 0.0001, 0.0].
 perforatedai:
   conversion: module_ids
   module_ids: [.gate_conv]
-  max_dendrites: 3
+  max_dendrites: 1
   testing_dendrite_capacity: false
   switch_mode: history
   history_lookback: 8
   n_epochs_to_switch: 25
-  improvement_threshold: [0.001, 0.0001, 0.0]
+  improvement_threshold: [0.005, 0.002, 0.001]
   candidate_weight_initialization_multiplier: 0.01
   initial_correlation_batches: 40
   max_dendrite_tries: 3

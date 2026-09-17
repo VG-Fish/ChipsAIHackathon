@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from typing import Any
 from typing import cast
 
+import pytest
 import torch
 import yaml
 
@@ -11,8 +12,10 @@ from kws.optimize.dendritic import (
     build_cycle_base,
     estimate_one_dendrite_params,
     read_pai_architecture_results,
+    read_pai_zero_dendrite_score,
     _restore_single_dendrite_skip_weights,
 )
+from kws.optimize.dendritic_config import normalize_module_ids
 from kws.optimize.dendritic_prune_loop import candidate_widths, judge_candidate
 
 
@@ -568,3 +571,52 @@ def test_completed_pai_tracker_boundary_is_export_only(monkeypatch):
 
     tracker.member_vars["doing_pai"] = False
     assert dendritic.pai_tracker_at_terminal_boundary(2)
+
+
+def test_zero_dendrite_score_reads_the_smallest_architecture(tmp_path):
+    """The minimum-parameter PAI architecture row is not the best row."""
+    run_dir = tmp_path / "pai_c12"
+    run_dir.mkdir()
+    # Rows are written in the order PAI accepted dendrites, so the control is
+    # identified by its parameter count rather than by its position or score.
+    (run_dir / "pai_c12_best_arch_scores.csv").write_text(
+        "Param Counts,Max Valid Scores,Train\n"
+        "2854,0.915718418514947,0.9073751654014903\n"
+        "4132,0.921311475409836,0.9131555122222996\n"
+        "5410,0.9234329797492767,0.9162662209531769\n"
+        "6688,0.925168756027001,0.9168233628154235\n"
+    )
+
+    accuracy, parameters = read_pai_zero_dendrite_score(str(run_dir))
+
+    assert parameters == 2854
+    assert accuracy == pytest.approx(0.915718418514947)
+    # The control is strictly weaker than the reported best row, which is the
+    # whole reason the headline gain has to be measured against it.
+    assert read_pai_architecture_results(str(run_dir)) == (0.925168756027001, 6688)
+
+
+def test_zero_dendrite_score_reports_missing_and_empty_results(tmp_path):
+    missing = tmp_path / "pai_absent"
+    missing.mkdir()
+    with pytest.raises(FileNotFoundError, match="PAI architecture results not found"):
+        read_pai_zero_dendrite_score(str(missing))
+
+    empty = tmp_path / "pai_empty"
+    empty.mkdir()
+    (empty / "pai_empty_best_arch_scores.csv").write_text(
+        "Param Counts,Max Valid Scores,Train\n"
+    )
+    with pytest.raises(ValueError, match="PAI architecture results are empty"):
+        read_pai_zero_dendrite_score(str(empty))
+
+
+def test_empty_module_ids_are_only_accepted_when_explicitly_allowed():
+    """``module_ids: []`` is the no-dendrite control; a missing key is a bug."""
+    assert normalize_module_ids([], allow_empty=True) == ()
+    assert normalize_module_ids((), allow_empty=True) == ()
+    with pytest.raises(ValueError, match="non-empty module_ids list"):
+        normalize_module_ids([])
+    for missing in (None, "", ".fc"):
+        with pytest.raises(ValueError, match="non-empty module_ids list"):
+            normalize_module_ids(missing, allow_empty=True)

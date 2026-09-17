@@ -1,0 +1,110 @@
+# SparkNet C16 (paper replication) -> C12/C10/C8, CONFIGURED-SCHEDULE-MATCHED
+# EMPIRICAL NO-DENDRITE ARM for the dendritic prune experiment.
+#
+# Identical to sparknet_c16_dendritic_prune_no_kd.yaml except for one key:
+# module_ids is the empty list. PAI still runs its entire schedule -- the same
+# epochs, the same switch cadence, the same post-integration LR restarts -- but
+# no module is eligible, so no dendrite is ever added. The result is an
+# empirical no-dendrite arm on the same configured schedule; it is not proof
+# that the two runs followed identical optimizer or learning-rate histories.
+#
+# Why this arm exists. The runner's reported `validation_accuracy_gain` is
+# measured against the 40-epoch prune fine-tune baseline, and the dendritic arm
+# has by then seen the longer PAI schedule plus its optional resume. That
+# baseline cannot isolate dendrite utility from the additional optimization.
+# This empty-placement arm is the useful empirical comparison. The
+# minimum-parameter row of PAI's own `_best_arch_scores.csv` is additional
+# within-search context, not a separately trained control. Neither comparison
+# proves an identical optimizer trajectory.
+#
+# Budget matching. epochs: 40, dendritic_schedule_epochs: 130 and
+# resume_epochs: 8 are copied from the dendritic arm and must stay EQUAL to it.
+# Equality is the invariant, not any particular number -- if the dendritic arm
+# changes its resume_epochs, this file changes with it, or the comparison
+# quietly turns back into a comparison of training budgets. The two arms are
+# therefore budget-matched before PAI even starts.
+#
+# Two things differ from sparknet_dendritic_prune_no_kd.yaml, both forced by
+# the source, and both inherited unchanged from the dendritic arm.
+#
+# 1. The data config is the paper one the C16 checkpoints were trained on
+#    (1x unknown/silence, ceil sizing, materialized silence). Fine-tuning on
+#    the 2x-balanced default would change the class prior underneath the model.
+# 2. task_loss_scale: 100. sparknet_c16_paper.yaml carries sparsity_weight: 1.0
+#    against the paper's 100 * CE + 1 * gate_sparsity, whereas sparknet_c12.yaml
+#    folds the same 100:1 ratio into sparsity_weight: 0.01 at task scale 1.
+#    Omitting it here would fine-tune at 1:1 and crush the learned gates.
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  white_noise_integer_db: true
+  spec_augment: false
+epochs: 40
+dendritic_schedule_epochs: 130
+batch_size: 256
+num_workers: 6
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+task_loss_scale: 100.0
+seed: 0
+
+# Adapt the active base parameters to the selected dendrites without a teacher.
+# There are no selected dendrites in this arm, but the phase still runs: it has
+# to, or the control would see fewer optimizer steps than the arm it controls
+# for. This value must equal the dendritic arm's.
+resume_epochs: 8
+
+objective:
+  metric: validation_accuracy
+  use_test: false
+
+deployment:
+  bits_per_weight: 8
+  latency_iterations: 50
+  profile_device: cpu
+
+# The runner overwrites keep_ratio/target_channels per candidate.
+pruning:
+  kind: structured
+  method: l1_filter
+  keep_ratio: 0.5
+  target_channels: 8
+
+# Eight-epoch history window, empty perforation set, no dendrites possible.
+#
+# Every key below is carried over verbatim from the dendritic arm -- including
+# max_dendrites and improvement_threshold, which are inert here -- so the two
+# PAI blocks differ in exactly one entry, module_ids. Keeping the dead keys
+# aligned rather than deleting them means a future diff of the two files shows
+# the single intended difference and nothing else.
+#
+# module_ids: [] hands PAI an empty perforation list. The schedule runs in
+# full; no module is ever a candidate; no dendrite is ever added.
+perforatedai:
+  testing_dendrite_capacity: false
+  max_dendrites: 1
+  switch_mode: history
+  history_lookback: 8
+  n_epochs_to_switch: 25
+  improvement_threshold: [0.005, 0.002, 0.001]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  conversion: module_ids
+  module_ids: []
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true

@@ -64,9 +64,22 @@ def projected_dendrite_count(max_dendrites: int) -> int:
     return 1 if max_dendrites == UNLIMITED_DENDRITES else max_dendrites
 
 
-def normalize_module_ids(values: object) -> tuple[str, ...]:
-    """Return exact PAI module IDs with one leading dot and no overlaps."""
-    if not isinstance(values, (list, tuple)) or not values:
+def normalize_module_ids(
+    values: object, *, allow_empty: bool = False
+) -> tuple[str, ...]:
+    """Return exact PAI module IDs with one leading dot and no overlaps.
+
+    ``allow_empty`` admits an explicitly empty selection, which is how the
+    configured-schedule no-dendrite arm is expressed: PAI still runs its full
+    schedule, but no module is eligible, so no dendrite is ever added.  A
+    missing key (``None``) or a non-list remains an error either way, because
+    those are configuration mistakes rather than a deliberate empty choice.
+    """
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("conversion=module_ids requires a non-empty module_ids list")
+    if not values:
+        if allow_empty:
+            return ()
         raise ValueError("conversion=module_ids requires a non-empty module_ids list")
     normalized: list[str] = []
     for value in values:
@@ -91,7 +104,13 @@ def normalize_module_ids(values: object) -> tuple[str, ...]:
 
 
 def placement_module_names(model: nn.Module, config: Mapping[str, Any]) -> tuple[str, ...]:
-    """Resolve a placement recipe to exact, validated module names."""
+    """Resolve a placement recipe to exact, validated module names.
+
+    An empty tuple is a valid result for ``conversion=module_ids`` with an
+    empty ``module_ids`` list: that is the no-dendrite control arm, which runs
+    the identical PAI epoch and LR-restart schedule with nothing eligible to
+    perforate, so the control shares the dendritic arm's optimizer trajectory.
+    """
     conversion = str(config.get("conversion", "blocks_and_linear"))
     if conversion not in CONVERSION_MODES:
         raise ValueError(
@@ -105,7 +124,9 @@ def placement_module_names(model: nn.Module, config: Mapping[str, Any]) -> tuple
         names = ["fc"]
     else:
         raw_ids = config.get("module_ids_to_perforate", config.get("module_ids"))
-        names = [value[1:] for value in normalize_module_ids(raw_ids)]
+        names = [
+            value[1:] for value in normalize_module_ids(raw_ids, allow_empty=True)
+        ]
 
     for name in names:
         try:
@@ -121,8 +142,11 @@ def pai_module_ids(config: Mapping[str, Any]) -> tuple[str, ...]:
     """Return exact module IDs for PAI when ``conversion=module_ids``."""
     if config.get("conversion") != "module_ids":
         return ()
+    # An empty tuple here is the no-dendrite control: PAI is handed an empty
+    # perforation list and therefore never finds a module to add a dendrite to.
     return normalize_module_ids(
-        config.get("module_ids_to_perforate", config.get("module_ids"))
+        config.get("module_ids_to_perforate", config.get("module_ids")),
+        allow_empty=True,
     )
 
 
@@ -160,8 +184,10 @@ def project_dendritic_cost(
     branch-to-parent scale, and the triangular set of branch-to-branch scales
     introduced when more than one dendrite is accepted.
     """
-    if max_dendrites < 1:
-        raise ValueError("max_dendrites must be at least 1")
+    projected_count = projected_dendrite_count(max_dendrites)
+    # An empty placement (the no-dendrite control arm) projects to the base
+    # cost by construction: nothing is copied, the hook loop below registers no
+    # hooks, and every per-dendrite term stays zero regardless of the cap.
     names = placement_module_names(model, placement)
     selected = set(names)
     copied_params = sum(
@@ -220,15 +246,15 @@ def project_dendritic_cost(
     base_macs = count_macs(model, input_shape)
     # D branches have D connections to the parent output plus one connection
     # for each earlier-to-later dendrite pair: D + D(D-1)/2 = D(D+1)/2.
-    scale_connections = max_dendrites * (max_dendrites + 1) // 2
+    scale_connections = projected_count * (projected_count + 1) // 2
     return DendriticCostProjection(
         base_params=base_params,
         base_macs=base_macs,
         projected_params=base_params
-        + max_dendrites * copied_params
+        + projected_count * copied_params
         + scale_connections * residual_params,
         projected_macs=base_macs
-        + max_dendrites * copied_macs
+        + projected_count * copied_macs
         + scale_connections * residual_macs,
         copied_params_per_dendrite=copied_params,
         copied_macs_per_dendrite=copied_macs,

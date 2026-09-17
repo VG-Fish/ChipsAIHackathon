@@ -1,0 +1,33 @@
+# SparkNet C=8 trained from scratch on the paper recipe -- the C16 reference
+# narrowed, not a re-tuned variant. On this project's MFCC-32 frontend
+# (32 bins x 101 frames) with 12 classes and gate_channels=32: 2,356 learned
+# parameters and 177,336 MACs, measured by building the model, not estimated.
+# The paper reports C8 at 2,292 parameters and 92.1%; the 64-parameter delta is
+# this project's own frontend and counting convention, not a different model.
+#
+# Pairs with configs/train/sparknet_c16_paper.yaml -- SGD momentum 0.9, 200
+# epochs, warmup-hold-polynomial. That recipe carries no width-dependent term,
+# so the only thing this arm changes against the 4,636-parameter C16 run is the
+# block width. Read it against C16's 95.7 +/- 0.17 headline, and remember the
+# paper reports a mean and standard deviation over several runs: sweep --seed.
+#
+# This is the cheapest arm and the one that matters for the deployment target.
+# 2,356 parameters at the paper's reported 92.1% would already clear the
+# ~3,800-parameter / ~92%-accuracy Edge Impulse reference for this project on
+# width scaling alone -- fewer parameters at no worse accuracy, with no pruning,
+# no distillation and no dendrites involved. Whether that holds under this
+# project's own frontend and data pipeline is exactly what this run tests, and
+# it is the control every compression result should be read against.
+family: sparknet
+name: sparknet_c8_paper
+channels: 8
+# The released checkpoints hard-code 32; see PLAN.md Open questions.
+gate_channels: 32
+# The upstream objective is 100 * cross_entropy + 1 * gate_sparsity, and the
+# training loop forms total = task_loss_scale * CE + sparsity_weight * sparsity.
+# The paired paper recipe supplies task_loss_scale: 100, so the sparsity term
+# has to carry weight 1.0 here to land on 100:1. The sibling non-paper
+# sparknet_c8.yaml folds the same ratio into sparsity_weight: 0.01 against a
+# task scale of 1; pairing that file with the paper recipe would weight the
+# sparsity term 100x too weakly, which is why this config exists separately.
+sparsity_weight: 1.0

@@ -56,14 +56,27 @@ pruning:
   keep_ratio: 0.5
   target_channels: 8
 
-# Eight-epoch history window, classifier-only perforation, three dendrites.
+# Eight-epoch history window, classifier-only perforation, one dendrite.
+#
+# Search budget. The historical classifier run allowed up to three dendrites;
+# this follow-up caps the search at one to isolate the first branch and bound
+# cost. At C12 the copied Linear module has 396 parameters before PAI's
+# residual scale terms. The positive threshold schedule avoids accepting a
+# branch with no measured validation improvement. This is a new recipe.
+#
+# Placement is untouched: the same .fc module, the same history window and
+# switch schedule as before. Only the search budget changes.
+#
+# Caveat: this changes the recipe. The completed three-dendrite results under
+# outputs/ were produced by the previous max_dendrites: 3 with
+# improvement_threshold: [0.001, 0.0001, 0.0], not by what is written here.
 perforatedai:
   testing_dendrite_capacity: false
-  max_dendrites: 3
+  max_dendrites: 1
   switch_mode: history
   history_lookback: 8
   n_epochs_to_switch: 25
-  improvement_threshold: [0.001, 0.0001, 0.0]
+  improvement_threshold: [0.005, 0.002, 0.001]
   candidate_weight_initialization_multiplier: 0.01
   initial_correlation_batches: 40
   max_dendrite_tries: 3

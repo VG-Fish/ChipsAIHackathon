@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from kws.optimize.dendritic import (
+    PaiPairStatus,
     is_confirmed_torn,
     pai_restart_pair_status,
     pai_restart_pair_statuses,
@@ -62,7 +63,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    suspects: list[tuple[Path, object]] = []
+    suspects: list[tuple[Path, PaiPairStatus]] = []
     for run_root in args.run_root:
         statuses = pai_restart_pair_statuses(run_root)
         if not statuses and not args.quiet:
@@ -108,7 +109,7 @@ def main() -> int:
     return 1 if torn else 0
 
 
-def _describe(status) -> str:
+def _describe(status: PaiPairStatus) -> str:
     return f"{status.sidecar.parents[1].name} epoch {status.completed_epoch}"
 
 

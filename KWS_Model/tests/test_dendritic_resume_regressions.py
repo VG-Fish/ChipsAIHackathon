@@ -714,6 +714,9 @@ def test_restructure_resets_optimizer_before_the_only_paired_save(
 
     monkeypatch.setattr(dendritic, "export_final_pai_model", export)
     monkeypatch.setattr(dendritic, "read_pai_architecture_results", lambda _name: (0.0, 6))
+    # ``run_cycle`` also reads PAI's minimum-parameter row, which lives in
+    # the same CSV this test never writes.
+    monkeypatch.setattr(dendritic, "read_pai_zero_dendrite_score", lambda _name: (0.0, 6))
     monkeypatch.setattr(
         dendritic,
         "profile_model",

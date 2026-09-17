@@ -1,8 +1,11 @@
-# SparkNet C16 -> C12/C10/C8 prune/PAI experiment, gate_conv perforation.
+# SparkNet C16 (paper replication) -> C12/C10/C8 prune/PAI experiment,
+# backbone POINTWISE perforation.
 #
-# Mirrors sparknet_dendritic_prune_no_kd.yaml -- same 40-epoch prune fine-tune,
-# same 130-epoch dendritic horizon, same PAI block -- so the C16 arm stays
-# comparable to the C12 run. Two things differ, both forced by the source.
+# Identical to sparknet_c16_dendritic_prune_no_kd.yaml in every respect except
+# perforatedai.module_ids -- same 40-epoch prune fine-tune, same 130-epoch
+# dendritic horizon, same search budget and thresholds -- so this arm and the
+# .fc arm differ only in where the dendrite goes. Two things differ from
+# sparknet_dendritic_prune_no_kd.yaml, both forced by the source.
 #
 # 1. The data config is the paper one the C16 checkpoints were trained on
 #    (1x unknown/silence, ceil sizing, materialized silence). Fine-tuning on
@@ -11,6 +14,24 @@
 #    against the paper's 100 * CE + 1 * gate_sparsity, whereas sparknet_c12.yaml
 #    folds the same 100:1 ratio into sparsity_weight: 0.01 at task scale 1.
 #    Omitting it here would fine-tune at 1:1 and crush the learned gates.
+#
+# Placement rationale. The .fc and .gate_conv arms both sit at or past the gate
+# bottleneck: .fc reads 32 mean-pooled scalars, and gate_conv is the single 1x1
+# layer above them. The untested hypothesis is that a dendrite belongs in the
+# TCS backbone instead -- that is where structured pruning actually removed
+# capacity, and a dendrite there sees a full time-resolved (C, T) tensor rather
+# than 32 numbers that have already been averaged over time.
+#
+# This arm is the CROSS-CHANNEL half of that test. The two 1x1 pointwise convs
+# are the only cross-channel mixing in a TCS block, which is precisely what
+# narrowing C16 -> C12/C10/C8 takes away, so this placement maps directly onto
+# what pruning removed. It is also the cheap half: at C12 each of
+# .blocks.3.pointwise and .blocks.2.pointwise is 12x12 = 144 parameters against
+# .fc's 396. Run this variant before the depthwise one.
+#
+# The depthwise arm is kept in a separate config rather than merged into one
+# module_ids list, because it tests temporal receptive field rather than
+# channel mixing; combining them would confound the two.
 augment: true
 augmentation:
   time_shift_ms: 100
@@ -56,15 +77,16 @@ pruning:
   keep_ratio: 0.5
   target_channels: 8
 
-# Eight-epoch history window, gate_conv perforation, one dendrite.
+# Eight-epoch history window, backbone pointwise perforation, one dendrite.
 #
 # Search budget. This placement has no completed matched sweep yet. One branch
-# is used to isolate placement and bound cost; at C12 the copied gate_conv has
-# 416 parameters before PAI's residual scale terms. The positive threshold
-# schedule avoids accepting a branch with no measured validation improvement.
+# is used to isolate placement and bound cost; at C12 the two copied pointwise
+# modules total 288 parameters before PAI's residual scale terms. The positive
+# threshold schedule avoids accepting a branch with no measured validation
+# improvement.
 #
-# Placement is untouched: the same .gate_conv module, the same history window
-# and switch schedule as before. Only the search budget changes.
+# Placement is the one thing this file changes against the .fc arm; the history
+# window, switch schedule and search budget are carried over verbatim.
 #
 # Caveat: this changes the recipe. The completed three-dendrite results under
 # outputs/ were produced by the previous max_dendrites: 3 with
@@ -81,21 +103,7 @@ perforatedai:
   max_dendrite_tries: 3
   forward_function: tanh
   conversion: module_ids
-  module_ids: [.gate_conv]
+  module_ids: [.blocks.3.pointwise, .blocks.2.pointwise]
   post_integration_lr_multiplier: 0.25
   enforce_base_weight_freeze: false
   freeze_base_batchnorm_in_dendrite_phase: true
-
-# Placement rationale. The .fc arm perforates Linear(32 -> 12), which reads a
-# mean-pooled, clamped gate occupancy in [0, 1] -- a near-binary duty-cycle
-# summary that 100 * CE already shaped to be linearly separable. A dendrite's
-# tanh branch is redundant there, and five seeds x two dendrites moved the
-# matched-budget plateau by +0.07 points. gate_conv is the actual bottleneck:
-# Conv2d(width -> 32, k=1) is the last place a nonlinear branch can widen the
-# representation BEFORE tanh + clamp discretizes it.
-#
-# Unlike .fc, gate_conv's shape depends on the pruned width (in_channels =
-# 12/10/8), so the per-dendrite cost is not constant across the sweep. That is
-# the deliberate trade: this arm is not width-comparable the way the .fc arm
-# is, so read it against its own matched-budget plateau per width, not across
-# widths.

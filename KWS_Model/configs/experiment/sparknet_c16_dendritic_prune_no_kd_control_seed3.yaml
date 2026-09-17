@@ -1,0 +1,53 @@
+# SparkNet C16 -> C12/C10/C8 configured-schedule-matched empirical
+# no-dendrite arm, seed 3.
+#
+# Source is the paper-replication checkpoint from the same seed, so this arm
+# and the dendritic arm start from the identical model. Run once per seed; the
+# five runs give the spread the dendritic arm has to beat to mean anything.
+#
+# module_ids: [] hands PAI an empty perforation list: the configured PAI schedule
+# runs, but nothing is eligible, so no dendrite is ever added. This is an
+# empirical no-dendrite arm, not proof of an identical optimizer trajectory.
+#
+# Why this arm exists. The runner's `validation_accuracy_gain` is reported
+# against the 40-epoch prune fine-tune baseline, while the dendritic arm has
+# seen the longer PAI schedule plus its optional resume. That baseline cannot
+# isolate dendrite utility from the additional optimization. This empty arm is
+# the useful empirical comparison; the minimum-parameter row of PAI's own
+# `_best_arch_scores.csv` is only within-search context. Neither establishes a
+# causal dendrite gain from a single search trajectory.
+source_checkpoint: outputs/sparknet-paper-replication/c16-seed3/models/checkpoints/paper_replication/best.pt
+source_validation_accuracy: 0.9523059617547807
+source_channels: 16
+widths: [12, 10, 8]
+teacher_checkpoint: null
+data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
+model_config: configs/model/sparknet_c16_paper.yaml
+train_config: configs/train/sparknet_c16_dendritic_prune_no_kd_control.yaml
+output_dir: outputs/sparknet-c16-dendritic-prune-no-kd-control/seed3
+seed: 3
+objective:
+  metric: validation_accuracy
+  use_test: false
+# max_dendrites and improvement_threshold below are inert in this arm -- with
+# an empty module_ids there is never a candidate to accept or reject -- but
+# they are carried over verbatim from the dendritic arm anyway, so a diff of
+# the two configs shows the single intended difference and nothing else.
+perforatedai:
+  conversion: module_ids
+  module_ids: []
+  max_dendrites: 1
+  testing_dendrite_capacity: false
+  switch_mode: history
+  history_lookback: 8
+  n_epochs_to_switch: 25
+  improvement_threshold: [0.005, 0.002, 0.001]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true
+pruning:
+  method: l1_filter

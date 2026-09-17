@@ -377,6 +377,14 @@ measured against for the final, dendrite-compressed model.
   | 5 quantization-aware distillation | yes | not run |
   | 6 export + benchmark | yes | not rerun; the checked-in report has no graph/cost artifact |
 
+  This table predates the later C16-derived `.fc` audit. That audit has
+  validation-only C12/C10/C8 artifacts under
+  `outputs/sparknet-c16-dendritic-prune-no-kd-fc-only-d3/`, including resume
+  and clean-graph cost records, but it is not a paper-test evaluation and its
+  directory-labeled five runs reused downstream seed 0. The runner/configs now
+  record and propagate each experiment seed; treat the old d3 outputs as
+  historical evidence, not as independently seeded replications.
+
   Two things worth knowing before the next sweep. First, the existing
   pre-restructure `dendritic_prune_w1*` runs carry no KD pre-fine-tune, corrected
   freeze trail, KD resume, or cost record. They are retained as historical
@@ -601,8 +609,11 @@ uv run python -m kws.optimize.sparknet_dendritic_prune_experiment \
 standalone dendritic command retains its historical DS-CNN teacher default.
 For each width the runner saves one supervised prune-fine-tune baseline, starts
 PAI from that exact best checkpoint, and performs a supervised post-PAI resume.
-PAI uses full mode, unlimited dendrites, three candidate retries, and the
-slides' eight-epoch history lookback rather than a fixed dendrite schedule.
+PAI uses the cap, threshold schedule, candidate retries, and eight-epoch
+history lookback written in the selected YAML; these settings are part of the
+experiment identity. In particular, the current checked-in C12 config uses a
+one-dendrite cap, while the historical C16 `.fc` artifacts above used three.
+Do not compare those output families as one sweep.
 The report records raw validation gain, gain above the measured pruning-only
 curve when its parameter range brackets the dendritic model, and parameter/MAC
 growth. It records costs but applies no budget admission or rejection.

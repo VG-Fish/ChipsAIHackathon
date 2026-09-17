@@ -104,6 +104,19 @@ def test_projection_charges_triangular_skip_cost_for_multiple_dendrites():
     )
 
 
+def test_direct_unlimited_projection_uses_one_dendrite_lower_bound():
+    projection = project_dendritic_cost(
+        _model().eval(), (8, 8), {"conversion": "fc_only"}, max_dendrites=-1
+    )
+
+    assert projection.max_dendrites == -1
+    assert projection.scale_connections == 1
+    assert projection.projected_params - projection.base_params == (
+        projection.copied_params_per_dendrite
+        + projection.residual_params_per_dendrite
+    )
+
+
 def test_unlimited_dendrites_uses_one_dendrite_for_cost_admission():
     assert validate_max_dendrites(UNLIMITED_DENDRITES) == -1
     assert projected_dendrite_count(UNLIMITED_DENDRITES) == 1
