@@ -23,6 +23,7 @@ import csv
 import hashlib
 import os
 import sys
+import tempfile
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -33,6 +34,7 @@ from typing import Any, cast
 import torch
 import torch.nn as nn
 import yaml
+from safetensors.torch import save_file
 
 from kws.optimize.pai_import import import_pai_module
 from kws.optimize.dendritic_config import (
@@ -84,6 +86,7 @@ from kws.utils.device import get_device
 from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir, sha256_path
 from kws.utils.checkpointing import (
     MetricsRecorder,
+    atomic_copy_file,
     atomic_torch_save,
     capture_rng_state,
     move_optimizer_state_to_device,
@@ -97,6 +100,25 @@ from kws.utils.seed import set_seed, with_seed
 logger = get_logger(__name__)
 
 FRAMEWORK_CYCLE_VERSION = 3
+
+# PAI's own tracker writes ``<candidate>/latest.pt`` at validation, and the
+# restart pair is committed at the end of the same epoch's bookkeeping.  While
+# both halves shared that one path, the on-disk file belonged to epoch N for
+# the last seconds of the epoch while the newest sidecar still attested epoch
+# N-1, and a SIGKILL in that window destroyed the attested bytes for good: the
+# digest guard then refused to resume a candidate whose files were all present
+# and uncorrupted.  The attested half therefore lives under a name PAI never
+# writes, published atomically immediately before the sidecar that signs it, so
+# the last complete pair always survives a hard kill.
+PAI_NATIVE_LATEST_STEM = "latest"
+KWS_NATIVE_LATEST_STEM = "kws_native_latest"
+# Sidecars written before the split attest PAI's own ``latest.pt``.  They keep
+# the old tear risk until their next paired save, but they stay resumable --
+# rejecting them would strand every candidate that is mid-flight today.
+ATTESTABLE_NATIVE_NAMES = (
+    f"{KWS_NATIVE_LATEST_STEM}.pt",
+    f"{PAI_NATIVE_LATEST_STEM}.pt",
+)
 
 
 def _add_auxiliary_losses(
@@ -215,6 +237,201 @@ def _select_pai_resume_sidecar(
     return None
 
 
+def _attested_native_path(
+    run_dir: Path, state: Mapping[str, Any], *, source: Path
+) -> Path:
+    """Resolve the native PAI blob one sidecar attests, inside its candidate.
+
+    ``native_pai_latest`` is stored run-root relative when the run has an
+    artifact layout so a complete run root stays movable, and absolute for
+    standalone candidates.  Either way the attested file has to be one of this
+    candidate's own native names; anything else is a sidecar pointing outside
+    the candidate it claims to belong to.
+    """
+    expected_run_dir = run_dir.resolve()
+    recorded_raw = Path(state["native_pai_latest"])
+    if recorded_raw.is_absolute():
+        recorded = recorded_raw.expanduser().resolve()
+    else:
+        run_root = expected_run_dir.parent.parent.parent
+        recorded = (run_root / recorded_raw).resolve()
+    if (
+        recorded.parent != expected_run_dir
+        or recorded.name not in ATTESTABLE_NATIVE_NAMES
+    ):
+        expected = ", ".join(
+            str(expected_run_dir / name) for name in ATTESTABLE_NATIVE_NAMES
+        )
+        raise ValueError(
+            f"PAI sidecar {source} references native state {recorded}, "
+            f"expected one of {expected}"
+        )
+    return recorded
+
+
+def _rebuild_attested_native_state(
+    run_dir: Path, state: dict[str, Any], *, publish: bool = True
+) -> Path | None:
+    """Regenerate the attested native blob from the sidecar that signs it.
+
+    ``_save_pai_restart_pair`` hands PAI a model to serialize and stores *that
+    same* ``model.state_dict()`` in the sidecar, in one commit.  The sidecar
+    therefore carries a second copy of every byte the native half holds.  When
+    a hard kill leaves the native file belonging to a later epoch than the
+    newest sidecar, the attested bytes are not actually lost: re-serializing
+    the sidecar's own model state reproduces the attested file exactly.
+
+    The rebuild is published only if it hashes to the digest the sidecar
+    attests, so this never invents state.  It either restores precisely the
+    pair that was committed -- preserving the guard's whole point, that the
+    weights match the optimizer, scheduler, RNG and loader states beside them
+    -- or it declines and lets the caller refuse.  A candidate written by a PAI
+    build with ``using_safe_tensors`` off will simply not match and falls
+    through to that refusal.
+
+    The result is published under the KWS-owned name even when the sidecar
+    attested PAI's own ``latest.pt``: healing a legacy candidate then also
+    moves it off the shared path that tore it, and never writes through a file
+    PAI owns.
+    """
+    model_state = state.get("model_state_dict")
+    if not isinstance(model_state, Mapping) or not model_state:
+        return None
+    target = run_dir.resolve() / f"{KWS_NATIVE_LATEST_STEM}.pt"
+    with tempfile.TemporaryDirectory() as scratch:
+        # Staged outside the candidate so that merely asking whether a tear is
+        # repairable never touches the run being inspected.
+        staged = Path(scratch) / target.name
+        try:
+            save_file(
+                {key: value.contiguous() for key, value in model_state.items()},
+                str(staged),
+            )
+        except Exception:  # noqa: BLE001 - any failure here is just "cannot heal"
+            return None
+        if sha256_path(staged) != state["native_pai_latest_sha256"]:
+            return None
+        if not publish:
+            return target
+        atomic_copy_file(staged, target)
+    recorded = Path(state["native_pai_latest"])
+    state["native_pai_latest"] = str(recorded.with_name(target.name))
+    return target
+
+
+def _torn_pair_recovery_hint(run_dir: Path) -> str:
+    """Name what an operator can actually fall back to on a torn pair.
+
+    The per-switch snapshots are model state only -- no optimizer, scheduler,
+    RNG or loader state and therefore no ``--resume-from`` sidecar -- so the
+    hint says what the newest one is rather than implying the flag accepts it.
+    """
+    snapshots = sorted(run_dir.glob("cycle_checkpoints/cycle_*_epoch_*.pt"))
+    if not snapshots:
+        return (
+            "no cycle_checkpoints snapshot exists either, so the only "
+            "defensible recovery is to move the candidate aside and re-run "
+            "this width"
+        )
+    return (
+        f"newest evaluation snapshot: {snapshots[-1]}, which carries model "
+        "state only and is not a resumable sidecar"
+    )
+
+
+@dataclass(frozen=True)
+class PaiPairStatus:
+    """Whether one candidate's attested PAI/KWS pair is still reassemblable."""
+
+    sidecar: Path
+    native: Path | None
+    completed_epoch: int | None
+    paired: bool
+    detail: str
+    # An unpaired candidate whose sidecar can still reproduce the bytes it
+    # attests resumes without help, so it is not an operator problem.
+    repairable: bool = False
+
+
+def pai_restart_pair_status(sidecar_path: Path, run_dir: Path) -> PaiPairStatus:
+    """Check one candidate's pair the way a resume would, without resuming.
+
+    ``completed_epoch`` matching the seed's last logged epoch does not prove a
+    candidate is resumable: a torn pair passes that check and only fails at the
+    next launch, by which time a supervisor has already handed the slot to
+    another seed.  The digest is the real test, so monitoring runs this instead
+    of reading the epoch.  It never raises -- an unreadable or malformed
+    sidecar is itself a reportable state, not a crash.
+    """
+    try:
+        state = torch.load(sidecar_path, map_location="cpu", weights_only=False)
+    except Exception as error:  # noqa: BLE001 - any read failure is reportable
+        return PaiPairStatus(sidecar_path, None, None, False, f"unreadable: {error}")
+    if not isinstance(state, dict) or "native_pai_latest" not in state:
+        return PaiPairStatus(sidecar_path, None, None, False, "not a PAI sidecar")
+    completed_epoch = state.get("completed_epoch")
+    completed_epoch = (
+        int(completed_epoch) if isinstance(completed_epoch, int) else None
+    )
+    try:
+        native = _attested_native_path(run_dir, state, source=sidecar_path)
+    except (ValueError, TypeError) as error:
+        return PaiPairStatus(
+            sidecar_path, None, completed_epoch, False, str(error)
+        )
+    digest = state.get("native_pai_latest_sha256")
+    unpaired: str | None = None
+    if not native.is_file():
+        unpaired = "attested native file missing"
+    elif sha256_path(native) != digest:
+        unpaired = "native digest does not match the sidecar"
+    if unpaired is not None:
+        try:
+            healable = (
+                _rebuild_attested_native_state(run_dir, state, publish=False)
+                is not None
+            )
+        except Exception:  # noqa: BLE001 - reporting must not crash the monitor
+            healable = False
+        detail = (
+            f"{unpaired}; the sidecar can rebuild it on the next resume"
+            if healable
+            else f"{unpaired}; {_torn_pair_recovery_hint(run_dir)}"
+        )
+        return PaiPairStatus(
+            sidecar_path, native, completed_epoch, False, detail, healable
+        )
+    return PaiPairStatus(sidecar_path, native, completed_epoch, True, "paired")
+
+
+def is_confirmed_torn(first: PaiPairStatus, later: PaiPairStatus) -> bool:
+    """Decide whether two readings of one pair prove it is really unpaired.
+
+    A candidate still training reads as torn throughout the window between
+    PAI's own ``latest.pt`` write and that epoch's pair -- roughly a fifth of
+    a legacy candidate's run time -- so a single sample cannot tell a live
+    writer from a dead one.  A live writer advances ``completed_epoch``; a
+    candidate whose process is gone does not.  Sample the two readings far
+    enough apart to span an epoch and that difference is decisive.
+    """
+    if later.paired or later.repairable:
+        return False
+    return later.completed_epoch == first.completed_epoch
+
+
+def pai_restart_pair_statuses(run_root: Path) -> list[PaiPairStatus]:
+    """Check every candidate in one run root that has committed a pair."""
+    sidecars = sorted(
+        (run_root / "models" / "checkpoints" / "sparsity").glob("*/pai/latest.pt")
+    )
+    return [
+        pai_restart_pair_status(
+            sidecar, run_root / "pai" / "candidates" / sidecar.parents[1].name
+        )
+        for sidecar in sidecars
+    ]
+
+
 def _load_pai_sidecar(
     sidecar_path: Path,
     run_dir: Path,
@@ -300,34 +517,61 @@ def _load_pai_sidecar(
             f"PAI sidecar {sidecar_path} must contain two loader generator states"
         )
 
-    expected_native = (run_dir / "latest.pt").resolve()
-    recorded_native_raw = Path(state["native_pai_latest"])
-    if recorded_native_raw.is_absolute():
-        recorded_native = recorded_native_raw.expanduser().resolve()
-    else:
-        run_root = expected_run_dir.parent.parent.parent
-        recorded_native = (run_root / recorded_native_raw).resolve()
-    if recorded_native != expected_native:
-        raise ValueError(
-            f"PAI sidecar {sidecar_path} references native state "
-            f"{recorded_native}, expected {expected_native}"
-        )
+    expected_native = _attested_native_path(run_dir, state, source=sidecar_path)
     native_digest = state["native_pai_latest_sha256"]
     if not isinstance(native_digest, str) or len(native_digest) != 64:
         raise ValueError(f"PAI sidecar {sidecar_path} has no valid native digest")
+    unusable: str | None = None
     if not expected_native.is_file() or expected_native.is_symlink():
-        raise ValueError(
+        unusable = (
             f"PAI native latest checkpoint is missing or unsafe: {expected_native}"
         )
-    if sha256_path(expected_native) != native_digest:
-        raise ValueError(
+    elif sha256_path(expected_native) != native_digest:
+        unusable = (
             f"PAI native latest state does not match sidecar {sidecar_path}; "
             "refusing to resume an unpaired candidate"
+        )
+    if unusable is not None:
+        # The sidecar signs a copy of the native state it also carries, so a
+        # tear is repairable from the sidecar alone -- and only ever to bytes
+        # that hash to the digest below.
+        if _rebuild_attested_native_state(run_dir, state) is None:
+            raise ValueError(f"{unusable} ({_torn_pair_recovery_hint(run_dir)})")
+        logger.warning(
+            "Rebuilt the attested PAI native state for %s from sidecar %s at "
+            "epoch %s; the blob on disk did not match the digest it signs.",
+            run_dir,
+            sidecar_path,
+            state["completed_epoch"],
         )
     # The digest check above already proves this native file is the exact one
     # this sidecar attested.  It is a safetensors blob with no run_id of its
     # own, so there is nothing further to validate by loading it here.
     return state
+
+
+def _load_paired_native_state(
+    model: nn.Module, run_dir: Path, state: Mapping[str, Any], sidecar_path: Path
+) -> nn.Module:
+    """Restore the native half of the pair this sidecar attests.
+
+    ``load_system(net, folder, name)`` reads ``<folder>/<name>.pt``, which is
+    the same contract ``save_system`` writes on.  The name comes from the
+    sidecar rather than a constant so a candidate always reloads the exact
+    bytes its digest signed, whether that is the KWS-owned copy or -- for a
+    sidecar written before the split -- PAI's own latest.
+    """
+    load_system = getattr(UPA, "load_system", None)
+    if not callable(load_system):
+        raise RuntimeError("installed PerforatedAI has no supported load_system API")
+    native = _attested_native_path(run_dir, state, source=sidecar_path)
+    restored = cast(Callable[..., Any], load_system)(
+        model,
+        str(run_dir),
+        native.stem,
+        load_from_restart=True,
+    )
+    return restored if restored is not None else model
 
 
 def _restore_pai_tracker_state(model_state: Mapping[str, Any]) -> None:
@@ -525,13 +769,22 @@ def _save_pai_restart_pair(
     # directory is the folder and "latest" is the name.  Passing the candidate
     # leaf as the name instead writes <parent>/<candidate>.pt and leaves the
     # path asserted below missing.
-    cast(Callable[..., Any], save_system)(model, str(run_dir), "latest")
+    cast(Callable[..., Any], save_system)(model, str(run_dir), PAI_NATIVE_LATEST_STEM)
 
-    native_latest = (run_dir / "latest.pt").resolve()
-    if not native_latest.is_file() or native_latest.is_symlink():
+    pai_latest = (run_dir / f"{PAI_NATIVE_LATEST_STEM}.pt").resolve()
+    if not pai_latest.is_file() or pai_latest.is_symlink():
         raise RuntimeError(
-            f"PerforatedAI did not create the required native checkpoint: {native_latest}"
+            f"PerforatedAI did not create the required native checkpoint: {pai_latest}"
         )
+    # PAI keeps overwriting its own latest.pt for its internal bookkeeping, at
+    # validation time and from a different owner than this function.  Attesting
+    # that shared path is what made a hard kill mid-epoch unrecoverable, so the
+    # attested half is this KWS-owned copy: both halves of the pair are now
+    # written back to back by one owner, and the rename makes the copy visible
+    # only once it is complete.
+    native_latest = atomic_copy_file(
+        pai_latest, run_dir / f"{KWS_NATIVE_LATEST_STEM}.pt"
+    ).resolve()
     # The native file is safetensors (PAI's using_safe_tensors defaults on), so
     # it cannot carry our run_id and must not be rewritten through torch.save --
     # PAI's load_net reads it back with safetensors.load_file.  The sidecar's
@@ -2011,21 +2264,10 @@ def run_cycle(
             maximizing_score=True,
         ).to(device)
         if pai_state is not None:
-            assert pai_state is not None
-            load_system = getattr(UPA, "load_system", None)
-            if not callable(load_system):
-                raise RuntimeError(
-                    "installed PerforatedAI has no supported load_system API"
-                )
-            # Mirror of the save contract: load_net reads <folder>/<name>.pt.
-            restored = cast(Callable[..., Any], load_system)(
-                model,
-                str(run_dir),
-                "latest",
-                load_from_restart=True,
-            )
-            if restored is not None:
-                model = restored.to(device)
+            assert resume_sidecar is not None
+            model = _load_paired_native_state(
+                model, run_dir, pai_state, resume_sidecar
+            ).to(device)
             _restore_pai_tracker_state(pai_state["model_state_dict"])
             logger.info("Loaded paired PAI restart state for %s", run_dir)
     logger.info("PAI-wrapped initial parameter count: %d", UPA.count_params(model))
@@ -2372,7 +2614,9 @@ def run_cycle(
             loaders=(train_loader, val_loader),
             pai_run_dir_ref=(layout.relative(run_dir) if layout is not None else None),
             native_pai_latest_ref=(
-                layout.relative(run_dir / "latest.pt") if layout is not None else None
+                layout.relative(run_dir / f"{KWS_NATIVE_LATEST_STEM}.pt")
+                if layout is not None
+                else None
             ),
             run_id=run_id,
             training_complete=bool(training_complete),

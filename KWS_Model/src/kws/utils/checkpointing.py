@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import uuid
 from pathlib import Path
 from collections.abc import Mapping
@@ -84,6 +85,31 @@ def atomic_torch_save(path: str | Path, value: Any) -> Path:
     finally:
         temporary.unlink(missing_ok=True)
     return destination
+
+
+def atomic_copy_file(source: str | Path, destination: str | Path) -> Path:
+    """Publish a byte-identical copy of ``source`` at ``destination``.
+
+    The copy is staged beside its destination and renamed into place, so a
+    process killed at any point leaves either the previous published file or
+    the complete new one -- never a half-written blob.  Callers that attest a
+    file by digest need that: an in-place rewrite would destroy the attested
+    bytes before the attestation naming them is superseded.
+    """
+    origin = Path(source)
+    target = Path(destination)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        with origin.open("rb") as reader, temporary.open("wb") as writer:
+            shutil.copyfileobj(reader, writer)
+            writer.flush()
+            os.fsync(writer.fileno())
+        temporary.replace(target)
+        _fsync_directory(target.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
 
 
 def _fsync_directory(directory: Path) -> None:

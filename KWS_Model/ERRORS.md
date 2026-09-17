@@ -1100,3 +1100,65 @@ git diff --check
   correct count.
 - **Resolution:** Updated the expectation and documented that repeated silence
   accesses reuse the cached augmented feature. No production defect found.
+
+---
+## 2026-09-16 — torn PAI/KWS restart pair made a killed candidate unresumable
+
+- **Symptom:** `outputs/sparknet-c16-dendritic-prune-no-kd-fc-only-d3/seed2`,
+  candidate `sparknet_c10_multilayer`, killed at epoch 656 by the macOS
+  low-memory killer, refused to resume with
+  `ValueError: PAI native latest state does not match sidecar ...; refusing to
+  resume an unpaired candidate`, exiting ~12 s after launch. Every file it
+  needed was present and uncorrupted.
+- **Diagnosis:** `<candidate>/latest.pt` had two writers per epoch —
+  `GPA.pai_tracker.add_validation_score` right after validation, and
+  `_save_pai_restart_pair` at the end of the same epoch's bookkeeping. Between
+  them the on-disk native blob belonged to epoch N while the newest sidecar
+  still attested epoch N−1, so a SIGKILL in that window destroyed the attested
+  bytes. At 7–9 s epochs that window was 15–25 % of run time. Full analysis in
+  `PAI_TORN_CHECKPOINT_PAIR.md`.
+- **Resolution:** The attested half moved to a KWS-owned
+  `<candidate>/kws_native_latest.pt`, published with the new
+  `atomic_copy_file` immediately before the sidecar that signs it, so both
+  halves are written back to back by one owner and the last complete pair
+  survives any kill. PAI keeps writing its own `latest.pt` untouched. Resume
+  takes the PAI `save_name` from the sidecar, so sidecars written before the
+  split still resume against `latest.pt` and migrate themselves at their next
+  paired save; no format version bumped, so no in-flight `recipe_fingerprint`
+  changed. A digest mismatch now names the newest `cycle_checkpoints/`
+  snapshot, stating that it is model state only and not a resumable sidecar.
+- **Detection:** `scripts/check_pai_restart_pairs.py` verifies the digest
+  rather than `completed_epoch` and exits 1 on a confirmed torn pair, for the
+  run monitor. It re-reads an unpaired candidate after `--confirm-after`
+  seconds because a *legacy* candidate genuinely reads as torn inside the
+  window — sampling seed1's live `sparknet_c8_multilayer` three times over four
+  seconds gave `paired`, `TORN`, `paired`. A live writer advances
+  `completed_epoch`; a dead one does not.
+- **Repair:** a torn pair turned out not to be data loss. The sidecar stores
+  the same `model.state_dict()` PAI serializes in that commit, so re-serializing
+  it reproduces the attested native file exactly — confirmed against all eight
+  real candidates in the sweep, matching each recorded
+  `native_pai_latest_sha256` byte for byte. `_load_pai_sidecar` now rebuilds a
+  missing or mismatched native half from the sidecar
+  (`_rebuild_attested_native_state`) and publishes it **only if it hashes to
+  the attested digest**, so the guarantee is unchanged: either the weights are
+  provably the ones committed with that optimizer, scheduler, RNG and loader
+  state, or the resume is still refused. The rebuild lands under the KWS-owned
+  name, which also migrates a legacy candidate off the shared path; PAI's own
+  `latest.pt` is never written through. Monitoring reports such a candidate as
+  rebuildable rather than torn, and `is_confirmed_torn` no longer fires on it.
+  seed2's `sparknet_c10_multilayer` was verified to resume at epoch 655 from
+  its own sidecar, so neither proposed recovery (re-run the width, re-attest
+  the digest) was needed or applied. Processes already running at 2026-09-16
+  15:23 can still write a torn pair, but whatever they leave is rebuilt by the
+  next process that resumes it.
+
+### Verification
+
+```text
+.venv/bin/python -m pytest tests/            # 341 passed
+.venv/bin/python -m compileall -q src tests scripts
+git diff --check
+.venv/bin/python scripts/check_pai_restart_pairs.py \
+  outputs/sparknet-c16-dendritic-prune-no-kd-fc-only-d3/seed*
+```

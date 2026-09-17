@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 import torch
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 
 from kws.optimize import dendritic
 
@@ -394,7 +394,9 @@ def test_pai_pair_save_persists_kd_state_and_requires_matching_native_digest(
     )
     assert loaded_legacy["training_complete"] is False
 
-    (run_dir / "latest.pt").write_bytes(b"corrupt replacement")
+    # The digest guard binds the sidecar to the KWS-owned copy it attested, not
+    # to PAI's own latest.pt, which PAI overwrites on its own schedule.
+    (run_dir / "kws_native_latest.pt").write_bytes(b"corrupt replacement")
     with pytest.raises(ValueError, match="does not match sidecar"):
         dendritic._load_pai_sidecar(
             sidecar_path, run_dir, "recipe", torch.device("cpu")
@@ -981,3 +983,366 @@ def test_cycle_rejects_the_known_bad_base_freeze_before_starting_work():
             },
             "unused-candidate",
         )
+
+
+def _save_one_pair(tmp_path, monkeypatch, *, completed_epoch=1, native_value=0.0):
+    """Commit one real PAI/KWS restart pair through the production writer."""
+    run_dir = tmp_path / "candidate"
+    run_dir.mkdir(exist_ok=True)
+    sidecar_path = tmp_path / "kws_latest.pt"
+    saved = _save_one_pair_into(
+        run_dir,
+        sidecar_path,
+        monkeypatch,
+        completed_epoch=completed_epoch,
+        native_value=native_value,
+    )
+    return run_dir, sidecar_path, saved
+
+
+def _save_one_pair_into(
+    run_dir, sidecar_path, monkeypatch, *, completed_epoch=1, native_value=0.0
+):
+    model = torch.nn.Linear(2, 2)
+    # PAI serializes the very model whose state_dict the sidecar stores in the
+    # same commit.  The fixture has to preserve that identity: it is what lets
+    # an attested native blob be rebuilt from the sidecar alone.
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.fill_(native_value)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
+
+    def save_system(saved_model, folder, name):
+        target = Path(folder) / f"{name}.pt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        save_file(
+            {
+                key: value.contiguous()
+                for key, value in saved_model.state_dict().items()
+            },
+            target,
+        )
+
+    monkeypatch.setattr(dendritic.UPA, "save_system", save_system)
+    saved = dendritic._save_pai_restart_pair(
+        model=model,
+        run_dir=run_dir,
+        pai_run_name=run_dir.name,
+        sidecar_path=sidecar_path,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        kd=None,
+        adapter_optimizer=None,
+        adapter_scheduler=None,
+        phase_trail=[{"epoch": 0, "mode": "n"}],
+        completed_epoch=completed_epoch,
+        global_step=4,
+        history_length=1,
+        last_metric_digest="metrics-digest",
+        teacher_checkpoint=None,
+        recipe_fingerprint="recipe",
+        loaders=(SimpleNamespace(generator=None), SimpleNamespace(generator=None)),
+    )
+    return saved
+
+
+def test_attested_pair_survives_pai_overwriting_its_own_latest_mid_epoch(
+    tmp_path, monkeypatch
+):
+    # PAI's tracker writes <candidate>/latest.pt at validation, one step before
+    # the epoch's pair is committed.  A kill inside that window used to destroy
+    # the bytes the newest sidecar had signed, so the candidate could never be
+    # resumed.  The attested half must be a file PAI does not write.
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+
+    save_file({"native": torch.full((1,), 9.0)}, run_dir / "latest.pt")
+
+    loaded = dendritic._load_pai_sidecar(
+        sidecar_path, run_dir, "recipe", torch.device("cpu")
+    )
+    assert loaded["completed_epoch"] == 1
+
+
+def test_resume_loads_the_native_half_the_sidecar_attests(tmp_path, monkeypatch):
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    state = dendritic._load_pai_sidecar(
+        sidecar_path, run_dir, "recipe", torch.device("cpu")
+    )
+    requested = []
+
+    def load_system(net, folder, name, **kwargs):
+        requested.append((Path(folder), name, kwargs))
+        return net
+
+    monkeypatch.setattr(dendritic.UPA, "load_system", load_system)
+    model = torch.nn.Linear(2, 2)
+
+    assert (
+        dendritic._load_paired_native_state(model, run_dir, state, sidecar_path)
+        is model
+    )
+    assert requested == [
+        (run_dir, "kws_native_latest", {"load_from_restart": True})
+    ]
+
+
+def test_legacy_sidecar_attesting_pais_own_latest_still_resumes(tmp_path, monkeypatch):
+    # Candidates written before the split attest <candidate>/latest.pt.  They
+    # keep the old tear risk, but refusing them would strand every in-flight run.
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    legacy_native = run_dir / "latest.pt"
+    state = torch.load(sidecar_path, map_location="cpu", weights_only=False)
+    state["native_pai_latest"] = str(legacy_native)
+    state["native_pai_latest_sha256"] = dendritic.sha256_path(legacy_native)
+    torch.save(state, sidecar_path)
+
+    loaded = dendritic._load_pai_sidecar(
+        sidecar_path, run_dir, "recipe", torch.device("cpu")
+    )
+    assert (
+        dendritic._attested_native_path(run_dir, loaded, source=sidecar_path)
+        == legacy_native.resolve()
+    )
+
+
+def test_sidecar_rejects_a_native_reference_outside_the_candidate(
+    tmp_path, monkeypatch
+):
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    intruder = tmp_path / "kws_native_latest.pt"
+    intruder.write_bytes((run_dir / "kws_native_latest.pt").read_bytes())
+    state = torch.load(sidecar_path, map_location="cpu", weights_only=False)
+    state["native_pai_latest"] = str(intruder)
+    torch.save(state, sidecar_path)
+
+    with pytest.raises(ValueError, match="references native state"):
+        dendritic._load_pai_sidecar(
+            sidecar_path, run_dir, "recipe", torch.device("cpu")
+        )
+
+
+def test_torn_pair_error_names_the_newest_cycle_snapshot(tmp_path, monkeypatch):
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    snapshots = run_dir / "cycle_checkpoints"
+    snapshots.mkdir()
+    (snapshots / "cycle_01_epoch_0007.pt").write_bytes(b"first")
+    (snapshots / "cycle_02_epoch_0311.pt").write_bytes(b"newest")
+    (run_dir / "kws_native_latest.pt").write_bytes(b"corrupt replacement")
+    _make_tear_unrepairable(sidecar_path)
+
+    with pytest.raises(ValueError, match="cycle_02_epoch_0311.pt"):
+        dendritic._load_pai_sidecar(
+            sidecar_path, run_dir, "recipe", torch.device("cpu")
+        )
+
+
+def test_torn_pair_error_says_so_when_no_snapshot_exists(tmp_path, monkeypatch):
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    (run_dir / "kws_native_latest.pt").write_bytes(b"corrupt replacement")
+    _make_tear_unrepairable(sidecar_path)
+
+    with pytest.raises(ValueError, match="no cycle_checkpoints snapshot"):
+        dendritic._load_pai_sidecar(
+            sidecar_path, run_dir, "recipe", torch.device("cpu")
+        )
+
+
+def test_pair_status_reports_an_intact_pair_without_the_cycle_recipe(
+    tmp_path, monkeypatch
+):
+    run_dir, sidecar_path, _ = _save_one_pair(
+        tmp_path, monkeypatch, completed_epoch=655
+    )
+
+    status = dendritic.pai_restart_pair_status(sidecar_path, run_dir)
+
+    assert status.paired is True
+    assert status.completed_epoch == 655
+    assert status.native == (run_dir / "kws_native_latest.pt").resolve()
+
+
+def test_pair_status_reports_a_torn_pair_instead_of_raising(tmp_path, monkeypatch):
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    (run_dir / "kws_native_latest.pt").write_bytes(b"corrupt replacement")
+
+    status = dendritic.pai_restart_pair_status(sidecar_path, run_dir)
+
+    assert status.paired is False
+    assert status.completed_epoch == 1
+    assert "digest" in status.detail
+
+
+def test_run_pair_statuses_cover_every_candidate_with_a_committed_sidecar(
+    tmp_path, monkeypatch
+):
+    # A candidate that has not committed a pair yet has nothing attested and so
+    # nothing to tear; only candidates with a sidecar are a liveness concern.
+    run_root = tmp_path / "seed2"
+    intact_dir = run_root / "pai" / "candidates" / "intact"
+    torn_dir = run_root / "pai" / "candidates" / "torn"
+    (run_root / "pai" / "candidates" / "not_started_yet").mkdir(parents=True)
+    for candidate_dir in (intact_dir, torn_dir):
+        candidate_dir.mkdir(parents=True)
+        sidecar = (
+            run_root
+            / "models"
+            / "checkpoints"
+            / "sparsity"
+            / candidate_dir.name
+            / "pai"
+            / "latest.pt"
+        )
+        sidecar.parent.mkdir(parents=True)
+        _save_one_pair_into(
+            candidate_dir, sidecar, monkeypatch, completed_epoch=655
+        )
+    (torn_dir / "kws_native_latest.pt").write_bytes(b"clobbered by PAI")
+
+    statuses = dendritic.pai_restart_pair_statuses(run_root)
+
+    assert [
+        (status.sidecar.parents[1].name, status.paired) for status in statuses
+    ] == [("intact", True), ("torn", False)]
+    assert all(status.completed_epoch == 655 for status in statuses)
+
+
+def test_a_live_candidate_inside_the_vulnerable_window_is_not_reported_as_torn():
+    # A candidate still training reads as torn for the 1-2 s between PAI's own
+    # latest.pt write and the epoch's pair, so one sample cannot distinguish a
+    # live writer from a dead one.  An advancing epoch can.
+    sidecar = Path("sidecar.pt")
+    first = dendritic.PaiPairStatus(sidecar, None, 464, False, "digest mismatch")
+    later = dendritic.PaiPairStatus(sidecar, None, 465, False, "digest mismatch")
+
+    assert dendritic.is_confirmed_torn(first, later) is False
+
+
+def test_a_stalled_candidate_that_stays_unpaired_is_reported_as_torn():
+    sidecar = Path("sidecar.pt")
+    first = dendritic.PaiPairStatus(sidecar, None, 655, False, "digest mismatch")
+    later = dendritic.PaiPairStatus(sidecar, None, 655, False, "digest mismatch")
+
+    assert dendritic.is_confirmed_torn(first, later) is True
+
+
+def test_a_pair_that_healed_by_the_second_reading_is_not_torn():
+    sidecar = Path("sidecar.pt")
+    first = dendritic.PaiPairStatus(sidecar, None, 655, False, "digest mismatch")
+    later = dendritic.PaiPairStatus(sidecar, None, 655, True, "paired")
+
+    assert dendritic.is_confirmed_torn(first, later) is False
+
+
+def _make_tear_unrepairable(sidecar_path):
+    """Leave a sidecar whose own model state can no longer reproduce its digest.
+
+    Rebuilding the attested blob from the sidecar heals an ordinary tear, so a
+    test about the *unrecoverable* case has to destroy the second copy too.
+    """
+    state = torch.load(sidecar_path, map_location="cpu", weights_only=False)
+    state["model_state_dict"] = {"weight": torch.zeros(2, 2)}
+    torch.save(state, sidecar_path)
+
+
+def test_a_torn_pair_is_rebuilt_from_the_sidecars_own_model_state(
+    tmp_path, monkeypatch
+):
+    # The sidecar stores the same state_dict PAI serialized in the same commit,
+    # so the attested bytes are never really lost: they can be regenerated and
+    # checked against the digest that names them.
+    run_dir, sidecar_path, saved = _save_one_pair(
+        tmp_path, monkeypatch, native_value=1.5
+    )
+    attested = run_dir / "kws_native_latest.pt"
+    save_file({"native": torch.full((1,), 9.0)}, attested)
+
+    loaded = dendritic._load_pai_sidecar(
+        sidecar_path, run_dir, "recipe", torch.device("cpu")
+    )
+
+    assert loaded["completed_epoch"] == 1
+    assert dendritic.sha256_path(attested) == saved["native_pai_latest_sha256"]
+    assert bool(load_file(attested)["weight"].eq(1.5).all())
+
+
+def test_a_missing_native_half_is_rebuilt_from_the_sidecar(tmp_path, monkeypatch):
+    run_dir, sidecar_path, saved = _save_one_pair(tmp_path, monkeypatch)
+    (run_dir / "kws_native_latest.pt").unlink()
+
+    dendritic._load_pai_sidecar(sidecar_path, run_dir, "recipe", torch.device("cpu"))
+
+    assert (
+        dendritic.sha256_path(run_dir / "kws_native_latest.pt")
+        == saved["native_pai_latest_sha256"]
+    )
+
+
+def test_a_legacy_torn_pair_is_rebuilt_under_the_kws_owned_name(tmp_path, monkeypatch):
+    # A pre-split sidecar attests PAI's own latest.pt.  Healing it must not
+    # write through PAI's file: the attested bytes are published under the name
+    # KWS owns and the sidecar is repointed there, which also migrates the
+    # candidate off the shared path that tore it.
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch, native_value=2.5)
+    legacy_native = run_dir / "latest.pt"
+    legacy_digest = dendritic.sha256_path(legacy_native)
+    state = torch.load(sidecar_path, map_location="cpu", weights_only=False)
+    state["native_pai_latest"] = str(legacy_native)
+    state["native_pai_latest_sha256"] = legacy_digest
+    torch.save(state, sidecar_path)
+    (run_dir / "kws_native_latest.pt").unlink()
+    save_file({"native": torch.full((1,), 9.0)}, legacy_native)
+
+    loaded = dendritic._load_pai_sidecar(
+        sidecar_path, run_dir, "recipe", torch.device("cpu")
+    )
+
+    repaired = dendritic._attested_native_path(run_dir, loaded, source=sidecar_path)
+    assert repaired == (run_dir / "kws_native_latest.pt").resolve()
+    assert dendritic.sha256_path(repaired) == legacy_digest
+    assert load_file(legacy_native)["native"].item() == 9.0
+
+
+def test_a_sidecar_that_cannot_reproduce_its_digest_still_refuses_to_resume(
+    tmp_path, monkeypatch
+):
+    run_dir, sidecar_path, _ = _save_one_pair(tmp_path, monkeypatch)
+    (run_dir / "kws_native_latest.pt").write_bytes(b"corrupt replacement")
+    _make_tear_unrepairable(sidecar_path)
+
+    with pytest.raises(ValueError, match="refusing to resume an unpaired candidate"):
+        dendritic._load_pai_sidecar(
+            sidecar_path, run_dir, "recipe", torch.device("cpu")
+        )
+
+
+def test_a_tear_the_sidecar_can_heal_is_not_reported_as_torn(tmp_path, monkeypatch):
+    # Monitoring exists to say "this candidate cannot resume".  A tear the
+    # sidecar heals by itself resumes fine, so paging on it is a false alarm.
+    run_dir, sidecar_path, _ = _save_one_pair(
+        tmp_path, monkeypatch, completed_epoch=655
+    )
+    (run_dir / "kws_native_latest.pt").write_bytes(b"clobbered by PAI")
+    before = sorted(path.name for path in run_dir.iterdir())
+
+    status = dendritic.pai_restart_pair_status(sidecar_path, run_dir)
+
+    assert status.paired is False
+    assert status.repairable is True
+    assert dendritic.is_confirmed_torn(status, status) is False
+    # Looking at a candidate must not change it.
+    assert sorted(path.name for path in run_dir.iterdir()) == before
+    assert (run_dir / "kws_native_latest.pt").read_bytes() == b"clobbered by PAI"
+
+
+def test_a_tear_the_sidecar_cannot_heal_is_still_confirmed_torn(tmp_path, monkeypatch):
+    run_dir, sidecar_path, _ = _save_one_pair(
+        tmp_path, monkeypatch, completed_epoch=655
+    )
+    (run_dir / "kws_native_latest.pt").write_bytes(b"clobbered by PAI")
+    _make_tear_unrepairable(sidecar_path)
+
+    status = dendritic.pai_restart_pair_status(sidecar_path, run_dir)
+
+    assert status.repairable is False
+    assert dendritic.is_confirmed_torn(status, status) is True

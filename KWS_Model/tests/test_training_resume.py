@@ -314,3 +314,48 @@ def test_auxiliary_losses_are_weighted_into_the_total_and_logged(tmp_path):
     record = result.history[-1]
     assert record["train_constant"] == pytest.approx(2.0)
     assert record["train_loss"] == pytest.approx(task_loss + 0.5 * 2.0, abs=1e-6)
+
+
+def test_atomic_copy_file_publishes_exact_bytes_and_leaves_no_temporary(tmp_path):
+    from kws.utils.checkpointing import atomic_copy_file
+
+    source = tmp_path / "source.bin"
+    source.write_bytes(bytes(range(256)) * 8)
+    destination = tmp_path / "nested" / "destination.bin"
+
+    returned = atomic_copy_file(source, destination)
+
+    assert returned == destination
+    assert destination.read_bytes() == source.read_bytes()
+    assert sorted(path.name for path in destination.parent.iterdir()) == [
+        "destination.bin"
+    ]
+
+
+def test_atomic_copy_file_replaces_the_destination_only_after_the_copy_completes(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    from kws.utils.checkpointing import atomic_copy_file
+
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"new bytes")
+    destination = tmp_path / "destination.bin"
+    destination.write_bytes(b"previous bytes")
+    observed: dict[str, bytes] = {}
+    original_replace = Path.replace
+
+    def recording_replace(self, target):
+        observed["staged"] = self.read_bytes()
+        observed["published"] = Path(target).read_bytes()
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", recording_replace)
+
+    atomic_copy_file(source, destination)
+
+    # A kill before the rename must leave the previous attested bytes intact.
+    assert observed["staged"] == b"new bytes"
+    assert observed["published"] == b"previous bytes"
+    assert destination.read_bytes() == b"new bytes"
