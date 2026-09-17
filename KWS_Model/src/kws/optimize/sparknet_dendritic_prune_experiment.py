@@ -95,27 +95,38 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(source_width, bool) or not isinstance(source_width, int) or source_width < 2:
         raise ValueError("source_channels must be an integer width of at least 2")
     widths = cfg.get("widths")
+    pruning = cfg.get("pruning")
+    pruning_method = pruning.get("method") if isinstance(pruning, Mapping) else None
     if (
         not isinstance(widths, list)
         or not widths
         or any(isinstance(width, bool) or not isinstance(width, int) for width in widths)
         or widths != sorted(set(widths), reverse=True)
-        or any(not 0 < width < source_width for width in widths)
+        or any(not 0 < width <= source_width for width in widths)
     ):
         raise ValueError(
             "widths must be unique descending integers between 1 and "
-            f"{source_width - 1}"
+            f"{source_width}"
         )
+    if pruning_method == "identity":
+        if widths != [source_width]:
+            raise ValueError(
+                "pruning.method=identity requires widths to contain only source_channels"
+            )
+    elif pruning_method == "l1_filter":
+        if any(width >= source_width for width in widths):
+            raise ValueError(
+                "pruning.method=l1_filter requires every width to be narrower "
+                "than source_channels"
+            )
+    else:
+        raise ValueError("pruning.method must be identity or l1_filter")
 
     objective = cfg.get("objective")
     if not isinstance(objective, Mapping) or objective.get("metric") != "validation_accuracy":
         raise ValueError("objective.metric must be validation_accuracy")
     if objective.get("use_test") is not False:
         raise ValueError("objective.use_test must be false")
-    pruning = cfg.get("pruning")
-    if not isinstance(pruning, Mapping) or pruning.get("method") != "l1_filter":
-        raise ValueError("pruning.method must be l1_filter")
-
     pai = cfg.get("perforatedai")
     if not isinstance(pai, Mapping) or pai.get("conversion") != "module_ids":
         raise ValueError("perforatedai.conversion must be module_ids")
@@ -437,13 +448,19 @@ def run_experiment(
             **source_cost,
         },
         "widths": list(cfg["widths"]),
+        "pruning": dict(cfg["pruning"]),
         "perforatedai": dict(cfg["perforatedai"]),
         "candidates": [],
     }
 
     plans: list[dict[str, Any]] = []
     for width in cfg["widths"]:
-        pruned = prune_sparknet(source_model, int(width)).eval()
+        identity_width = int(width) == int(cfg["source_channels"])
+        pruned = (
+            copy.deepcopy(source_model)
+            if identity_width
+            else prune_sparknet(source_model, int(width))
+        ).eval()
         baseline_cost = _model_cost(pruned, input_shape)
         target_model_cfg = dict(configured_model)
         target_model_cfg["name"] = f"sparknet_c{width}"
@@ -451,7 +468,7 @@ def run_experiment(
         cycle_train_cfg = copy.deepcopy(train_cfg)
         cycle_train_cfg["pruning"] = {
             "kind": "structured",
-            "method": "l1_filter",
+            "method": "identity" if identity_width else "l1_filter",
             "keep_ratio": float(width) / int(cfg["source_channels"]),
             "target_channels": int(width),
         }
@@ -469,7 +486,11 @@ def run_experiment(
             "prune_fraction": 1.0 - float(width) / int(cfg["source_channels"]),
             "status": "planned",
             "baseline": {
-                "training": "supervised_no_kd",
+                "training": (
+                    "supervised_no_kd_identity_finetune"
+                    if identity_width
+                    else "supervised_no_kd"
+                ),
                 "validation_accuracy": None,
                 **baseline_cost,
                 "checkpoint": layout.relative(

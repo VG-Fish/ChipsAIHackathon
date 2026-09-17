@@ -272,6 +272,42 @@ def targets_from_checkpoints(paths: Iterable[Path]) -> list[Target]:
     return targets
 
 
+def targets_from_selection_manifest(path: Path) -> list[Target]:
+    """Load targets frozen by validation without performing any selection."""
+    payload = json.loads(Path(path).read_text())
+    if not isinstance(payload, dict):
+        raise ValueError(f"selection manifest must be an object: {path}")
+    if payload.get("selection_split") != "validation":
+        raise ValueError("selection manifest must use the validation split")
+    if payload.get("test_split_used") is not False:
+        raise ValueError("selection manifest indicates prior test use")
+    raw_targets = payload.get("targets")
+    if not isinstance(raw_targets, list) or not raw_targets:
+        raise ValueError("selection manifest contains no targets")
+
+    targets: list[Target] = []
+    for raw in raw_targets:
+        if not isinstance(raw, dict):
+            raise ValueError("selection target must be an object")
+        checkpoint = Path(str(raw["checkpoint"]))
+        if not checkpoint.exists():
+            raise ValueError(f"selected checkpoint is missing: {checkpoint}")
+        targets.append(
+            Target(
+                checkpoint=checkpoint,
+                arm=str(raw["arm"]),
+                width=int(raw["width"]),
+                seed=int(raw["seed"]),
+                validation_accuracy=float(raw["validation_accuracy"]),
+                pai_dir=Path(str(raw["pai_dir"])) if raw.get("pai_dir") else None,
+                run_root=(
+                    Path(str(raw["run_root"])) if raw.get("run_root") else None
+                ),
+            )
+        )
+    return targets
+
+
 def _pai_metadata(pai_dir: Path, input_shape: tuple[int, int]) -> dict[str, Any]:
     """Recover class counts for a PAI export, which carries none of its own.
 
@@ -508,6 +544,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--selection-manifest",
+        type=Path,
+        default=None,
+        help=(
+            "Evaluate only checkpoints frozen by validation in this manifest; "
+            "cannot be combined with checkpoint paths or --run-glob."
+        ),
+    )
+    parser.add_argument(
         "--data-config",
         type=Path,
         default=Path(DEFAULT_DATA_CONFIG),
@@ -533,11 +578,18 @@ def main() -> int:
     args = parser.parse_args()
 
     targets: list[Target] = []
-    for pattern in args.run_glob:
-        for run_root in sorted(Path().glob(pattern)):
-            targets.extend(targets_from_report(run_root))
-    if args.checkpoints:
-        targets.extend(targets_from_checkpoints(args.checkpoints))
+    if args.selection_manifest is not None:
+        if args.run_glob or args.checkpoints:
+            parser.error(
+                "--selection-manifest cannot be combined with checkpoints or --run-glob"
+            )
+        targets = targets_from_selection_manifest(args.selection_manifest)
+    else:
+        for pattern in args.run_glob:
+            for run_root in sorted(Path().glob(pattern)):
+                targets.extend(targets_from_report(run_root))
+        if args.checkpoints:
+            targets.extend(targets_from_checkpoints(args.checkpoints))
 
     if not targets:
         print("nothing to evaluate: pass checkpoint paths or --run-glob")
@@ -555,6 +607,13 @@ def main() -> int:
             )
             print(f"  {_describe(target):<62} val={validation}  {target.checkpoint}")
         return 0
+
+    if args.selection_manifest is not None and args.output is None:
+        parser.error("--selection-manifest requires --output for a durable test report")
+    if args.selection_manifest is not None and args.output.exists():
+        parser.error(
+            f"test report already exists: {args.output}; refusing repeated evaluation"
+        )
 
     results = evaluate(targets, args.data_config, args.eval_seed)
     summary = summarize(results)

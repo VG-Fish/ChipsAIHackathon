@@ -111,6 +111,39 @@ def test_cycle_base_structurally_prunes_sparknet_to_exact_target(tmp_path):
         assert model(torch.zeros(2, 1, *input_shape)).shape == (2, 12)
 
 
+def test_cycle_base_preserves_a_from_scratch_sparknet_at_identity_width(tmp_path):
+    source_cfg = {
+        "family": "sparknet",
+        "name": "sparknet_c8_paper",
+        "channels": 8,
+        "gate_channels": 32,
+        "sparsity_weight": 1.0,
+    }
+    input_shape = (32, 101)
+    source = SparkNet(32, 12, channels=8, gate_channels=32, input_shape=input_shape)
+    checkpoint_path = tmp_path / "sparknet_c8.pt"
+    torch.save(
+        {
+            "model_state_dict": source.state_dict(),
+            "model_cfg": source_cfg,
+            "input_shape": input_shape,
+            "num_classes": 12,
+        },
+        checkpoint_path,
+    )
+
+    model, _, model_cfg = build_cycle_base(
+        str(checkpoint_path),
+        keep_ratio=1.0,
+        target_model_cfg=source_cfg,
+    )
+
+    assert model_cfg == source_cfg
+    assert model.state_dict().keys() == source.state_dict().keys()
+    for name, value in source.state_dict().items():
+        assert torch.equal(model.state_dict()[name], value)
+
+
 def test_read_pai_architecture_results_selects_best_deployable_row(tmp_path):
     run_dir = tmp_path / "pai_w18"
     run_dir.mkdir()

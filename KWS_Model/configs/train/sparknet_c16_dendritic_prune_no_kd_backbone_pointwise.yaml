@@ -2,7 +2,7 @@
 # backbone POINTWISE perforation.
 #
 # Identical to sparknet_c16_dendritic_prune_no_kd.yaml in every respect except
-# perforatedai.module_ids -- same 40-epoch prune fine-tune, same 130-epoch
+# perforatedai.module_ids -- same 40-epoch prune fine-tune, same 30-epoch
 # dendritic horizon, same search budget and thresholds -- so this arm and the
 # .fc arm differ only in where the dendrite goes. Two things differ from
 # sparknet_dendritic_prune_no_kd.yaml, both forced by the source.
@@ -32,6 +32,24 @@
 # The depthwise arm is kept in a separate config rather than merged into one
 # module_ids list, because it tests temporal receptive field rather than
 # channel mixing; combining them would confound the two.
+#
+# BUDGET (2026-09-17). This study runs this recipe 75 times -- 5 arms x 3
+# widths x 5 seeds -- so the dendritic horizon is set from what the phases
+# actually consume rather than from a generous upper bound.
+#
+# The PAI loop has no epoch cap: it runs until PAI reports the search finished.
+# What ends a phase is the cosine schedule reaching zero, after which the
+# weights stop moving and n_epochs_to_switch runs out. So
+# dendritic_schedule_epochs is the real per-phase length, and a run costs about
+# three phases of it (base, dendrite, integrated base) plus the tail. At the
+# previous 130 that is ~450 dendritic epochs per run, ~39 h for the matrix on
+# this machine. At 30 it is ~150, and the horizon is still five times the
+# 8-epoch history window the switch decision reads.
+#
+# This is a recipe change against the earlier three-dendrite runs under
+# outputs/, and it is applied identically to all five arm configs, so the
+# placement comparison this study exists to make is unaffected -- every arm
+# gets the same budget.
 augment: true
 augmentation:
   time_shift_ms: 100
@@ -44,9 +62,9 @@ augmentation:
   white_noise_integer_db: true
   spec_augment: false
 epochs: 40
-dendritic_schedule_epochs: 130
+dendritic_schedule_epochs: 30
 batch_size: 256
-num_workers: 6
+num_workers: 8
 persistent_workers: true
 prefetch_factor: 2
 cache_features: true
@@ -96,7 +114,7 @@ perforatedai:
   max_dendrites: 1
   switch_mode: history
   history_lookback: 8
-  n_epochs_to_switch: 25
+  n_epochs_to_switch: 10
   improvement_threshold: [0.005, 0.002, 0.001]
   candidate_weight_initialization_multiplier: 0.01
   initial_correlation_batches: 40

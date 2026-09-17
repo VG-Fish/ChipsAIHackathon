@@ -896,7 +896,14 @@ def build_cycle_base(
             if target_model_cfg is not None
             else round(source_channels * keep_ratio)
         )
-        pruned = prune_sparknet(model, target_channels)
+        if target_channels == source_channels:
+            if keep_ratio != 1.0:
+                raise ValueError(
+                    "an identity-width SparkNet cycle requires keep_ratio=1.0"
+                )
+            pruned = model
+        else:
+            pruned = prune_sparknet(model, target_channels)
     else:  # guarded by model_family, kept explicit for future families
         raise ValueError(f"unsupported dendritic pruning family: {family!r}")
 

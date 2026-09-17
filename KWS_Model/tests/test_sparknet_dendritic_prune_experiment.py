@@ -90,6 +90,27 @@ def test_recipe_is_validation_only_and_dry_run(tmp_path, experiment_config):
     )
 
 
+def test_from_scratch_source_can_run_an_identity_width_cycle(
+    tmp_path, experiment_config
+):
+    """A trained C12 source must reach PAI without being pruned to C11 first."""
+    experiment_config["widths"] = [12]
+    experiment_config["pruning"] = {"method": "identity"}
+
+    report = run_experiment(
+        experiment_config,
+        dry_run=True,
+        output_dir=tmp_path / "identity-run",
+    )
+
+    candidate = report["candidates"][0]
+    assert candidate["width"] == 12
+    assert candidate["prune_fraction"] == 0.0
+    assert candidate["baseline"]["deployed_params"] == report["source"][
+        "deployed_params"
+    ]
+
+
 def test_recipe_rejects_teacher():
     config = load_config(CONFIG)
     config["teacher_checkpoint"] = "teacher.pt"

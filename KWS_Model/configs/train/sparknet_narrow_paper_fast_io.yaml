@@ -1,0 +1,63 @@
+# The paper recipe, unchanged, with the data pipeline turned up.
+#
+# Every number that touches the optimization -- SGD momentum 0.9, lr 0.01,
+# weight decay 1e-3, 100 * CE + gate_sparsity, the warmup-hold-polynomial
+# schedule, batch_size 128, 200 epochs -- is copied verbatim from
+# sparknet_c16_paper.yaml.  The three keys that differ (num_workers,
+# persistent_workers, cache_features) only decide who computes the MFCCs and
+# whether the fixed validation features are recomputed every epoch.  They do
+# not enter the loss, the gradient or the schedule.
+#
+# Why this file exists rather than an edit to the paper config: the paper
+# config is the record of the completed C16 replication, and dataloader worker
+# count is visible in results because torch derives each worker's augmentation
+# RNG from the base seed and the worker id.  Editing it in place would silently
+# make that committed run unreproducible; a separate file keeps the deviation
+# explicit and greppable.
+#
+# Measured on this machine at C12: 18.8 s/epoch with the paper's num_workers: 0,
+# 3.2 s/epoch here.  The 15-run scratch sweep is ~2.7 h instead of ~16 h.  MFCC
+# extraction was the whole cost; the network is far too small to be the wall.
+
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  # NeMo's WhiteNoisePerturbation draws randint(min, max): whole decibels,
+  # upper bound excluded.
+  white_noise_integer_db: true
+  spec_augment: false
+epochs: 200
+batch_size: 128
+num_workers: 8
+persistent_workers: true
+prefetch_factor: 2
+# Validation features are deterministic, so caching them is a pure saving.
+# Training features are NOT cached: time shift and white noise are waveform
+# augmentations, and a cached train tensor would freeze them.
+cache_features: true
+cache_train_features: false
+optimizer: sgd
+momentum: 0.9
+lr: 0.01
+weight_decay: 0.001
+label_smoothing: 0.0
+task_loss_scale: 100.0
+scheduler: polynomial_hold
+warmup_fraction: 0.05
+hold_fraction: 0.40
+# Section 3 says the LR then decays over "the remaining 85%", which cannot
+# hold alongside its own 5% warmup and 40% hold. NeMo's
+# PolynomialHoldDecayAnnealing decays over whatever is left -- 55% here --
+# so the reference config's behaviour is what this reproduces.
+polynomial_power: 2.0
+min_lr: 0.000001
+# The paper reports 95.7 +/- 0.17, a mean and standard deviation over several
+# runs, so a single seed is not directly comparable. Sweep --seed and compare
+# the resulting mean/std, not one number.
+seed: 0
