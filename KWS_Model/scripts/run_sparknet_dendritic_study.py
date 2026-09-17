@@ -33,7 +33,7 @@ from typing import Any, Sequence
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-WIDTHS = (12, 10, 8)
+WIDTHS = (12, 10, 8, 6, 4, 2)
 SEEDS = (0, 1, 2, 3, 4)
 ARM_ORDER = ("pointwise", "fc", "gate_conv", "depthwise", "control")
 # The empty-placement arm rides to test at every width whether or not it wins;
@@ -140,22 +140,87 @@ def _report_complete(run: ArmRun) -> bool:
     return isinstance(payload, dict) and payload.get("status") == "complete"
 
 
+def _missing_baselines(scratch_root: Path) -> list[tuple[int, int]]:
+    """Return the (width, seed) baselines the sweep has not finished.
+
+    Both markers are required, exactly as the sweep's own skip test requires
+    them: an interrupted run leaves a best.pt from a schedule that never ran
+    to completion, and treating that as a baseline would quietly seed the
+    study with a half-trained network.
+    """
+    missing: list[tuple[int, int]] = []
+    for width in WIDTHS:
+        for seed in SEEDS:
+            run = scratch_root / f"c{width}-seed{seed}"
+            if not (
+                (run / "models/checkpoints/paper_replication/best.pt").exists()
+                and (run / "metrics/summaries.yaml").exists()
+            ):
+                missing.append((width, seed))
+    return missing
+
+
 def run_baselines(study_root: Path, *, dry_run: bool) -> None:
     scratch_root = Path(study_root) / "scratch"
     if dry_run:
         print(
-            f"plan 15 paper-recipe scratch runs -> {scratch_root} "
+            f"plan {len(WIDTHS) * len(SEEDS)} paper-recipe scratch runs "
+            f"-> {scratch_root} "
             f"(widths={WIDTHS}, seeds={SEEDS})"
         )
         return
     env = os.environ.copy()
     env["OUTPUT_ROOT"] = str(scratch_root)
+    # The sweep script carries its own WIDTHS/SEEDS defaults.  Left unset they
+    # silently disagree with the constants above, and every arm at a missing
+    # width then fails on a baseline that was never trained -- so pass them
+    # rather than trusting two copies to stay in step.
+    env["WIDTHS"] = " ".join(str(width) for width in WIDTHS)
+    env["SEEDS"] = " ".join(str(seed) for seed in SEEDS)
     # The paper recipe with its dataloader turned up: same optimizer, same
     # schedule, same 200 epochs, but the MFCCs are computed by 8 workers
     # instead of the training process.  That is the difference between a 2.7 h
-    # sweep and a 16 h one, and it blocks all 75 arm runs behind it.
+    # sweep and a 16 h one, and it blocks all 150 arm runs behind it.
     env["TRAIN_CONFIG"] = SCRATCH_TRAIN_CONFIG
-    _run(["bash", "scripts/run_sparknet_scratch_sweep.sh"], env=env)
+
+    # The sweep continues past a failed run and exits non-zero at the end.
+    # Propagating that would kill the launcher over one bad baseline -- after
+    # it had already paid for all the others -- so take the exit code as a
+    # hint and the filesystem as the truth.  Completed runs are skipped on a
+    # second pass, so the retry only costs whatever is actually missing.
+    command = ["bash", "scripts/run_sparknet_scratch_sweep.sh"]
+    for attempt in (1, 2):
+        try:
+            _run(command, env=env)
+        except subprocess.CalledProcessError as error:
+            print(
+                f"scratch sweep attempt {attempt} exited {error.returncode}",
+                file=sys.stderr,
+            )
+        missing = _missing_baselines(scratch_root)
+        if not missing:
+            return
+        if attempt == 1:
+            print(
+                f"retrying {len(missing)} incomplete scratch run(s)",
+                file=sys.stderr,
+            )
+
+    # Do not raise: the widths that did train should still get their arms, and
+    # run_arms already fails each cell whose baseline is absent.  main() then
+    # refuses to freeze a selection over the incomplete matrix.
+    print(f"\n{len(missing)} scratch baseline(s) did not complete:", file=sys.stderr)
+    for width, seed in missing:
+        run = scratch_root / f"c{width}-seed{seed}"
+        state = "partial output present" if run.exists() else "never started"
+        print(f"  C{width} seed{seed}: {state} ({run})", file=sys.stderr)
+    print(
+        "a partial run cannot be restarted in place -- kws.train refuses to "
+        "write a fresh phase over existing metrics.  Remove the directory to "
+        "retrain it cleanly, or pass --resume-dir to continue it (which gives "
+        "that seed a different schedule history than the others).",
+        file=sys.stderr,
+    )
 
 
 def run_arms(study_root: Path, *, dry_run: bool) -> list[str]:

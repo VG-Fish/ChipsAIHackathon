@@ -1,0 +1,30 @@
+# SparkNet C=6 trained from scratch on the paper recipe -- the C16 reference
+# narrowed, not a re-tuned variant. On this project's MFCC-32 frontend
+# (32 bins x 101 frames) with 12 classes and gate_channels=32: 1,906 learned
+# parameters and 134,714 MACs, measured by building the model, not estimated.
+#
+# Unlike C12/C10/C8, this width is BELOW anything the SparkNet paper reports,
+# so there is no published accuracy to read this arm against. Whatever it
+# scores is this project's own measurement and must be cited as such; do not
+# attribute a C6 number to the paper.
+#
+# Pairs with configs/train/sparknet_c16_paper.yaml -- SGD momentum 0.9, 200
+# epochs, warmup-hold-polynomial. That recipe carries no width-dependent term,
+# so the only thing this arm changes against the 4,636-parameter C16 run is the
+# block width.
+#
+# Added 2026-09-17 to extend the dendrite placement study below C8. The point
+# of going this narrow is that a dendrite's value should grow as capacity gets
+# scarce: at C12 the two copied pointwise modules are 12x12 each against a
+# 3,400-parameter base, but at C6 they are 6x6 against 1,906. If structured
+# capacity beats uniform width anywhere, it should be at the narrow end.
+family: sparknet
+name: sparknet_c6_paper
+channels: 6
+# The released checkpoints hard-code 32; see PLAN.md Open questions.
+gate_channels: 32
+# The upstream objective is 100 * cross_entropy + 1 * gate_sparsity, and the
+# training loop forms total = task_loss_scale * CE + sparsity_weight * sparsity.
+# The paired paper recipe supplies task_loss_scale: 100, so the sparsity term
+# has to carry weight 1.0 here to land on 100:1.
+sparsity_weight: 1.0
