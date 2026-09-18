@@ -131,9 +131,9 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(pai, Mapping) or pai.get("conversion") != "module_ids":
         raise ValueError("perforatedai.conversion must be module_ids")
     # ``module_ids: []`` is a deliberate selection, not a missing one: it
-    # selects the configured-schedule no-dendrite arm, which runs the whole
-    # PAI schedule with nothing eligible to perforate.  An empty tuple trivially
-    # satisfies the support check below.
+    # selects the standard fine-tuning control and is dispatched before PAI
+    # configuration or mode switching. An empty tuple trivially satisfies the
+    # support check below.
     module_ids = normalize_module_ids(pai.get("module_ids"), allow_empty=True)
     unsupported = set(module_ids).difference(SUPPORTED_MODULE_IDS)
     if unsupported:
@@ -402,9 +402,14 @@ def run_experiment(
     output_dir: str | Path | None = None,
     seed: int | None = None,
     cycle_runner: Any | None = None,
+    control_runner: Any | None = None,
 ) -> dict[str, Any]:
     """Plan or execute the no-KD prune-versus-dendrite experiment."""
     cfg = validate_config(config)
+    module_ids = normalize_module_ids(
+        cfg["perforatedai"].get("module_ids"), allow_empty=True
+    )
+    is_standard_control = not module_ids
     selected_output = output_dir or cfg["output_dir"]
     layout = ArtifactLayout(selected_output).ensure_tree()
     report_path = layout.report_path(REPORT_NAME)
@@ -503,7 +508,11 @@ def run_experiment(
                 ),
             },
             "dendritic": {
-                "training": "pai_no_kd",
+                "training": (
+                    "standard_finetune_control"
+                    if is_standard_control
+                    else "pai_no_kd"
+                ),
                 "validation_accuracy": None,
                 "pai_search_validation_accuracy": None,
                 # PAI's minimum-parameter architecture row, filled in from the
@@ -513,8 +522,20 @@ def run_experiment(
                 "deployed_params": None,
                 "macs": None,
                 "one_dendrite_cost_projection": projection,
-                "checkpoint": layout.relative(
-                    layout.pai_candidate_path(candidate_name) / "final_clean_pai.pt"
+                "checkpoint": (
+                    layout.relative(
+                        layout.checkpoint_path(
+                            "sparsity",
+                            "standard_control",
+                            "best",
+                            candidate=candidate_name,
+                        )
+                    )
+                    if is_standard_control
+                    else layout.relative(
+                        layout.pai_candidate_path(candidate_name)
+                        / "final_clean_pai.pt"
+                    )
                 ),
             },
             "comparison": None,
@@ -540,11 +561,20 @@ def run_experiment(
     _write_report(layout, report)
 
     # Importing this module initializes the optional compiled PAI runtime, so
-    # it remains below the dry-run return.
-    if cycle_runner is None:
-        from kws.optimize.dendritic import run_cycle
+    # it remains below the dry-run return. The empty-placement arm has its own
+    # conventional lifecycle and must never enter PerforatedAI mode switching.
+    if is_standard_control:
+        if control_runner is None:
+            from kws.optimize.dendritic import run_standard_control
 
-        cycle_runner = run_cycle
+            control_runner = run_standard_control
+        selected_runner = control_runner
+    else:
+        if cycle_runner is None:
+            from kws.optimize.dendritic import run_cycle
+
+            cycle_runner = run_cycle
+        selected_runner = cycle_runner
 
     run_id = layout.manifest_run_id
     completed_widths = {
@@ -555,7 +585,7 @@ def run_experiment(
     for plan in plans:
         if plan["record"]["width"] in completed_widths:
             continue
-        cycle = cycle_runner(
+        cycle = selected_runner(
             source_path,
             data_cfg,
             plan["model_cfg"],
@@ -592,7 +622,9 @@ def run_experiment(
             "deployed_params": int(result["deployed_params"]),
             "macs": int(cost["macs"]),
         }
-        selected_checkpoint = record["dendritic"]["checkpoint"]
+        selected_checkpoint = result.get("checkpoint") or record["dendritic"][
+            "checkpoint"
+        ]
         if (result.get("resume") or {}).get("status") == "complete":
             selected_checkpoint = result["resume"]["checkpoint"]
         # A cycle that predates the control (or a stubbed runner) reports
@@ -602,8 +634,12 @@ def run_experiment(
         record["dendritic"].update(
             {
                 **pai,
-                "pai_search_validation_accuracy": float(
-                    result.get("pai_best_val_acc") or result["best_val_acc"]
+                "pai_search_validation_accuracy": (
+                    None
+                    if is_standard_control
+                    else float(
+                        result.get("pai_best_val_acc") or result["best_val_acc"]
+                    )
                 ),
                 "zero_dendrite_validation_accuracy": (
                     float(zero_dendrite_accuracy)

@@ -70,10 +70,10 @@ def normalize_module_ids(
     """Return exact PAI module IDs with one leading dot and no overlaps.
 
     ``allow_empty`` admits an explicitly empty selection, which is how the
-    configured-schedule no-dendrite arm is expressed: PAI still runs its full
-    schedule, but no module is eligible, so no dendrite is ever added.  A
-    missing key (``None``) or a non-list remains an error either way, because
-    those are configuration mistakes rather than a deliberate empty choice.
+    no-dendrite arm is expressed. The experiment dispatcher routes that arm to
+    ordinary fine-tuning before any PAI lifecycle begins. A missing key
+    (``None``) or a non-list remains an error either way, because those are
+    configuration mistakes rather than a deliberate empty choice.
     """
     if not isinstance(values, (list, tuple)):
         raise ValueError("conversion=module_ids requires a non-empty module_ids list")
@@ -107,9 +107,8 @@ def placement_module_names(model: nn.Module, config: Mapping[str, Any]) -> tuple
     """Resolve a placement recipe to exact, validated module names.
 
     An empty tuple is a valid result for ``conversion=module_ids`` with an
-    empty ``module_ids`` list: that is the no-dendrite control arm, which runs
-    the identical PAI epoch and LR-restart schedule with nothing eligible to
-    perforate, so the control shares the dendritic arm's optimizer trajectory.
+    empty ``module_ids`` list: that is the no-dendrite control arm. Its caller
+    must route it to the standard-control lifecycle rather than PAI.
     """
     conversion = str(config.get("conversion", "blocks_and_linear"))
     if conversion not in CONVERSION_MODES:
@@ -142,8 +141,8 @@ def pai_module_ids(config: Mapping[str, Any]) -> tuple[str, ...]:
     """Return exact module IDs for PAI when ``conversion=module_ids``."""
     if config.get("conversion") != "module_ids":
         return ()
-    # An empty tuple here is the no-dendrite control: PAI is handed an empty
-    # perforation list and therefore never finds a module to add a dendrite to.
+    # An empty tuple here is the no-dendrite control marker. The experiment
+    # dispatcher consumes it before invoking a PAI runner.
     return normalize_module_ids(
         config.get("module_ids_to_perforate", config.get("module_ids")),
         allow_empty=True,

@@ -2,11 +2,11 @@
 # EMPIRICAL NO-DENDRITE ARM for the dendritic prune experiment.
 #
 # Identical to sparknet_c16_dendritic_prune_no_kd.yaml except for one key:
-# module_ids is the empty list. PAI still runs its entire schedule -- the same
-# epochs, the same switch cadence, the same post-integration LR restarts -- but
-# no module is eligible, so no dendrite is ever added. The result is an
-# empirical no-dendrite arm on the same configured schedule; it is not proof
-# that the two runs followed identical optimizer or learning-rate histories.
+# module_ids is the empty list. The experiment dispatcher treats that value as
+# a standard fine-tuning control and never enters PAI. Its nominal post-prune
+# budget is schedule_epochs * (2 * max_dendrites + 1) + resume_epochs: 98
+# epochs here. This matches the configured n-p-n-plus-resume budget, not the
+# adaptive PAI tail or the exact optimizer/LR trajectory.
 #
 # Why this arm exists. The runner's reported `validation_accuracy_gain` is
 # measured against the 40-epoch prune fine-tune baseline, and the dendritic arm
@@ -22,7 +22,7 @@
 # Equality is the invariant, not any particular number -- if the dendritic arm
 # changes its resume_epochs, this file changes with it, or the comparison
 # quietly turns back into a comparison of training budgets. The two arms are
-# therefore budget-matched before PAI even starts.
+# therefore nominally budget-matched before either lifecycle starts.
 #
 # Two things differ from sparknet_dendritic_prune_no_kd.yaml, both forced by
 # the source, and both inherited unchanged from the dendritic arm.
@@ -78,10 +78,8 @@ warmup_fraction: 0.05
 task_loss_scale: 100.0
 seed: 0
 
-# Adapt the active base parameters to the selected dendrites without a teacher.
-# There are no selected dendrites in this arm, but the phase still runs: it has
-# to, or the control would see fewer optimizer steps than the arm it controls
-# for. This value must equal the dendritic arm's.
+# Included in the standard control's nominal epoch formula. This value must
+# equal the dendritic arm's resume budget.
 resume_epochs: 8
 
 objective:
@@ -100,16 +98,14 @@ pruning:
   keep_ratio: 0.5
   target_channels: 8
 
-# Eight-epoch history window, empty perforation set, no dendrites possible.
+# Empty perforation set: select the conventional control lifecycle.
 #
 # Every key below is carried over verbatim from the dendritic arm -- including
-# max_dendrites and improvement_threshold, which are inert here -- so the two
-# PAI blocks differ in exactly one entry, module_ids. Keeping the dead keys
-# aligned rather than deleting them means a future diff of the two files shows
-# the single intended difference and nothing else.
+# max_dendrites, which determines the nominal control budget; the remaining
+# PAI-only settings are inert here. Keeping them aligned means a future diff of
+# the two files shows the single intended placement difference.
 #
-# module_ids: [] hands PAI an empty perforation list. The schedule runs in
-# full; no module is ever a candidate; no dendrite is ever added.
+# module_ids: [] bypasses PAI and runs ordinary supervised fine-tuning.
 perforatedai:
   testing_dendrite_capacity: false
   max_dendrites: 1

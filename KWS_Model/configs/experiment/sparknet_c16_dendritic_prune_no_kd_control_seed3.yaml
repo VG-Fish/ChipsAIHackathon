@@ -5,9 +5,9 @@
 # and the dendritic arm start from the identical model. Run once per seed; the
 # five runs give the spread the dendritic arm has to beat to mean anything.
 #
-# module_ids: [] hands PAI an empty perforation list: the configured PAI schedule
-# runs, but nothing is eligible, so no dendrite is ever added. This is an
-# empirical no-dendrite arm, not proof of an identical optimizer trajectory.
+# module_ids: [] selects ordinary supervised fine-tuning for the nominal
+# n-p-n-plus-resume epoch budget. PAI is never initialized for this arm, and
+# the comparison does not claim an identical optimizer trajectory.
 #
 # Why this arm exists. The runner's `validation_accuracy_gain` is reported
 # against the 40-epoch prune fine-tune baseline, while the dendritic arm has

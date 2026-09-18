@@ -861,6 +861,8 @@ class DendriticCycleResult:
     phase_trail: list[dict] = field(default_factory=list)
     cycle_checkpoints: list[str] = field(default_factory=list)
     run_id: str | None = None
+    checkpoint: str | None = None
+    training_lifecycle: str = "perforatedai"
 
 
 def load_yaml(path: str) -> dict:
@@ -1995,6 +1997,294 @@ def _restructure_lr_multiplier(
         post_integration_multiplier
         if dendrite_integrated or (previous_mode == "p" and next_mode == "n")
         else 1.0
+    )
+
+
+def standard_control_epoch_budget(train_cfg: Mapping[str, Any]) -> int:
+    """Return the nominal PAI-plus-resume budget for a conventional control.
+
+    A successful PAI search with ``d`` dendrites traverses one initial neuron
+    phase and, for each dendrite, one candidate phase plus one integrated
+    neuron phase.  The zero-dendrite control trains conventionally for the same
+    nominal number of phase epochs, then includes the configured post-search
+    resume budget.  History-switch tail epochs are data-dependent and cannot be
+    matched prospectively, so this is deliberately a nominal budget.
+    """
+    schedule_epochs = int(train_cfg["dendritic_schedule_epochs"])
+    resume_epochs = int(train_cfg.get("resume_epochs", 0))
+    max_dendrites = validate_max_dendrites(
+        train_cfg["perforatedai"]["max_dendrites"]
+    )
+    if schedule_epochs < 1:
+        raise ValueError("dendritic_schedule_epochs must be positive")
+    if resume_epochs < 0:
+        raise ValueError("resume_epochs must be non-negative")
+    if max_dendrites < 0:
+        raise ValueError(
+            "a standard control requires a finite perforatedai.max_dendrites"
+        )
+    return schedule_epochs * (2 * max_dendrites + 1) + resume_epochs
+
+
+def run_standard_control(
+    checkpoint_path: str,
+    data_cfg: dict,
+    model_cfg: dict,
+    train_cfg: dict,
+    save_name: str,
+    *,
+    teacher_checkpoint: str | None = None,
+    seed: int | None = None,
+    output_dir: str | Path | None = None,
+    resume: bool | None = None,
+    resume_from: str | Path | None = None,
+    prune_finetune_candidate: str | None = None,
+    run_id: str | None = None,
+) -> DendriticCycleResult:
+    """Run the empty-placement arm as ordinary PyTorch fine-tuning.
+
+    The control shares the source, pruning/identity adaptation, data, seed, and
+    nominal epoch budget with its dendritic peer.  It deliberately owns a
+    separate checkpoint phase and never reads PAI's native or KWS sidecars, so
+    a failed historical empty-wrapper attempt cannot steer the retry back into
+    PerforatedAI mode switching.
+    """
+    if teacher_checkpoint is not None:
+        raise ValueError("the standard no-dendrite control is supervised no-KD")
+    train_cfg = with_seed(train_cfg, seed)
+    pai_cfg = train_cfg["perforatedai"]
+    if pai_cfg.get("conversion") != "module_ids" or pai_module_ids(pai_cfg):
+        raise ValueError(
+            "run_standard_control requires conversion=module_ids with module_ids=[]"
+        )
+    if resume_from is not None:
+        logger.info(
+            "Ignoring generic resume_from=%s for the standard control; only its "
+            "dedicated conventional latest checkpoint is eligible",
+            resume_from,
+        )
+
+    started_at = monotonic()
+    set_seed(train_cfg["seed"])
+    if train_cfg.get("pruning", {}).get("kind", "structured") != "structured":
+        raise ValueError("the standard control supports structured/identity candidates only")
+
+    layout = ArtifactLayout(output_dir) if output_dir is not None else None
+    run_id = resolve_manifest_run_id(layout, run_id)
+    requested_save_name = Path(save_name).expanduser()
+    if layout is not None:
+        if requested_save_name.is_absolute():
+            run_dir = layout._descendant(requested_save_name)
+            expected_parent = layout.root / "pai" / "candidates"
+            if run_dir.parent != expected_parent:
+                raise ValueError(
+                    f"control candidate path must be directly below {expected_parent}: "
+                    f"{save_name!s}"
+                )
+        else:
+            if (
+                requested_save_name.name != str(requested_save_name)
+                or ".." in requested_save_name.parts
+                or requested_save_name.name in {"", ".", ".."}
+            ):
+                raise ValueError(
+                    "control candidate name must be a single logical name: "
+                    f"{save_name!s}"
+                )
+            run_dir = layout.pai_candidate_path(requested_save_name.name)
+    else:
+        run_dir = requested_save_name.resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    device = get_device()
+    base, checkpoint, model_cfg = build_cycle_base(
+        checkpoint_path,
+        train_cfg["pruning"]["keep_ratio"],
+        target_model_cfg=model_cfg,
+        expected_run_id=(
+            run_id
+            if run_id is not None
+            and (
+                layout is None
+                or Path(checkpoint_path).expanduser().resolve().is_relative_to(layout.root)
+            )
+            else None
+        ),
+    )
+    base = base.to(device)
+    base_params = sum(parameter.numel() for parameter in base.parameters())
+    input_shape = checkpoint_input_shape(checkpoint)
+    fingerprint = cycle_fingerprint(
+        checkpoint_path, None, data_cfg, model_cfg, train_cfg
+    )
+    if run_id is None:
+        run_id = uuid.uuid4().hex
+
+    datasets, label_map = build_datasets(
+        data_cfg,
+        augment=train_cfg["augment"],
+        seed=train_cfg["seed"],
+        cache_features=bool(train_cfg.get("cache_features", True)),
+        cache_train_features=bool(train_cfg.get("cache_train_features", False)),
+        augmentation=train_cfg.get("augmentation"),
+        splits=(TRAIN, VAL),
+    )
+
+    pre_candidate = prune_finetune_candidate or run_dir.name
+    pre_phase = "prune_supervised"
+    pre_checkpoint = (
+        layout.checkpoint_path("sparsity", pre_phase, "best", candidate=pre_candidate)
+        if layout is not None
+        else run_dir / f"{pre_phase}.pt"
+    )
+    pre_latest = (
+        layout.checkpoint_path("sparsity", pre_phase, "latest", candidate=pre_candidate)
+        if layout is not None
+        else pre_checkpoint.with_name(f"{pre_phase}_latest.pt")
+    )
+    reusable_pre = _load_reusable_prune_finetune_checkpoint(
+        pre_checkpoint,
+        pre_latest,
+        checkpoint_path=checkpoint_path,
+        teacher_checkpoint=None,
+        model_cfg=model_cfg,
+        train_cfg=train_cfg,
+        expected_run_id=run_id,
+    )
+    if reusable_pre is not None:
+        base.load_state_dict(reusable_pre["model_state_dict"], strict=True)
+        prune_finetune = {
+            "status": "complete",
+            "reused": True,
+            "best_val_acc": float(reusable_pre["val_acc"]),
+            "checkpoint": str(pre_checkpoint),
+            "distillation": reusable_pre.get("distillation"),
+        }
+    else:
+        pre_result = train_model(
+            base,
+            datasets,
+            label_map,
+            model_cfg,
+            train_cfg,
+            pre_checkpoint,
+            device,
+            checkpoint["num_keywords"],
+            extra_checkpoint_fields={
+                "stage": "pruned_supervised_finetune",
+                "sparsity": train_cfg.get("pruning"),
+                "distillation": None,
+            },
+            output_dir=output_dir,
+            stage="sparsity",
+            phase=pre_phase,
+            artifact_candidate=pre_candidate if output_dir is not None else None,
+            resume_from=pre_latest if pre_latest.exists() else None,
+            run_id=run_id,
+            recipe=_prune_finetune_recipe(checkpoint_path, None, train_cfg),
+        )
+        best_pruned = torch.load(
+            pre_checkpoint, map_location=device, weights_only=False
+        )
+        base.load_state_dict(best_pruned["model_state_dict"], strict=True)
+        prune_finetune = {
+            "status": "complete",
+            "reused": False,
+            "best_val_acc": pre_result.best_val_acc,
+            "checkpoint": str(pre_checkpoint),
+            "distillation": None,
+        }
+
+    control_epochs = standard_control_epoch_budget(train_cfg)
+    control_train_cfg = {**train_cfg, "epochs": control_epochs}
+    control_phase = "standard_control"
+    control_checkpoint = (
+        layout.checkpoint_path(
+            "sparsity", control_phase, "best", candidate=run_dir.name
+        )
+        if layout is not None
+        else run_dir / "final_standard_control.pt"
+    )
+    control_latest = (
+        layout.checkpoint_path(
+            "sparsity", control_phase, "latest", candidate=run_dir.name
+        )
+        if layout is not None
+        else control_checkpoint.with_name("standard_control_latest.pt")
+    )
+    selected_resume = (
+        control_latest if resume is not False and control_latest.exists() else None
+    )
+    control_result = train_model(
+        base,
+        datasets,
+        label_map,
+        model_cfg,
+        control_train_cfg,
+        control_checkpoint,
+        device,
+        checkpoint["num_keywords"],
+        extra_checkpoint_fields={
+            "stage": "standard_finetune_control",
+            "sparsity": train_cfg.get("pruning"),
+            "distillation": None,
+            "control_epoch_budget": control_epochs,
+        },
+        output_dir=output_dir,
+        stage="sparsity",
+        phase=control_phase,
+        artifact_candidate=run_dir.name if output_dir is not None else None,
+        resume_from=selected_resume,
+        run_id=run_id,
+        recipe={
+            "lifecycle": "standard_finetune_control",
+            "source_checkpoint": str(checkpoint_path),
+            "data": data_cfg,
+            "model": model_cfg,
+            "train": control_train_cfg,
+        },
+    )
+    best_control = torch.load(
+        control_checkpoint, map_location=device, weights_only=False
+    )
+    base.load_state_dict(best_control["model_state_dict"], strict=True)
+
+    profile_device = torch.device(
+        train_cfg.get("deployment", {}).get("profile_device", "cpu")
+    )
+    cost = profile_model(
+        base.to(profile_device),
+        input_shape,
+        device=profile_device,
+        bits_per_weight=int(train_cfg.get("deployment", {}).get("bits_per_weight", 32)),
+        latency_iterations=int(
+            train_cfg.get("deployment", {}).get("latency_iterations", 50)
+        ),
+    ).as_dict()
+    return DendriticCycleResult(
+        save_name=str(run_dir),
+        block_channels=list(
+            model_cfg.get("block_channels")
+            or [model_cfg["channels"]]
+            * len(cast(nn.ModuleList, base.get_submodule("blocks")))
+        ),
+        base_params=base_params,
+        deployed_params=int(cost["params"]),
+        best_val_acc=float(control_result.best_val_acc),
+        epochs=control_epochs,
+        elapsed_seconds=monotonic() - started_at,
+        cost=cost,
+        prune_finetune=prune_finetune,
+        phase_trail=[
+            {
+                "epoch": 0,
+                "mode": "standard_control",
+                "nominal_epoch_budget": control_epochs,
+            }
+        ],
+        run_id=run_id,
+        checkpoint=str(control_checkpoint),
+        training_lifecycle="standard_finetune_control",
     )
 
 

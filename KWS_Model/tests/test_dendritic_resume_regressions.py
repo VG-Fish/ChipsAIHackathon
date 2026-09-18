@@ -988,6 +988,292 @@ def test_cycle_rejects_the_known_bad_base_freeze_before_starting_work():
         )
 
 
+def _stub_standard_control_boundaries(tmp_path, monkeypatch, *, resume_state=None):
+    class TinyControlModel(torch.nn.Module):
+        input_shape = (1, 2)
+
+        def __init__(self):
+            super().__init__()
+            self.blocks = torch.nn.ModuleList([torch.nn.Linear(2, 2)])
+            self.fc = torch.nn.Linear(2, 2)
+
+        def forward(self, value):
+            return self.fc(self.blocks[0](value))
+
+    model = TinyControlModel()
+    model_cfg = {
+        "family": "sparknet",
+        "name": "sparknet_c2",
+        "channels": 2,
+        "gate_channels": 32,
+    }
+    checkpoint = {
+        "input_shape": model.input_shape,
+        "num_classes": 2,
+        "num_keywords": 1,
+    }
+    shared_state = {
+        name: torch.full_like(value, 3)
+        for name, value in model.state_dict().items()
+    }
+    train_cfg = {
+        "seed": 3,
+        "epochs": 40,
+        "lr": 0.001,
+        "dendritic_schedule_epochs": 30,
+        "resume_epochs": 8,
+        "pruning": {"kind": "structured", "keep_ratio": 1.0},
+        "augment": False,
+        "cache_features": True,
+        "label_smoothing": 0.0,
+        "perforatedai": {
+            "conversion": "module_ids",
+            "module_ids": [],
+            "max_dendrites": 1,
+        },
+        "deployment": {
+            "profile_device": "cpu",
+            "bits_per_weight": 32,
+            "latency_iterations": 1,
+        },
+    }
+
+    monkeypatch.setattr(dendritic, "get_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(
+        dendritic,
+        "build_cycle_base",
+        lambda *_args, **_kwargs: (model, checkpoint, model_cfg),
+    )
+    monkeypatch.setattr(dendritic, "cycle_fingerprint", lambda *_args: "recipe")
+    monkeypatch.setattr(
+        dendritic,
+        "build_datasets",
+        lambda *_args, **_kwargs: (
+            {dendritic.TRAIN: [], dendritic.VAL: []},
+            {"keyword": 0},
+        ),
+    )
+    monkeypatch.setattr(
+        dendritic,
+        "_load_reusable_prune_finetune_checkpoint",
+        lambda *_args, **_kwargs: {
+            "model_state_dict": shared_state,
+            "val_acc": 0.71,
+            "distillation": None,
+        },
+    )
+
+    training_calls = []
+
+    def fake_train_model(
+        value,
+        _datasets,
+        label_map,
+        configured_model,
+        configured_train,
+        checkpoint_path,
+        _device,
+        num_keywords,
+        **kwargs,
+    ):
+        resume_from = kwargs.get("resume_from")
+        if resume_from is not None:
+            resume_payload = torch.load(
+                resume_from, map_location="cpu", weights_only=False
+            )
+            value.load_state_dict(resume_payload["best_model_state_dict"])
+        with torch.no_grad():
+            for parameter in value.parameters():
+                parameter.add_(2)
+        training_calls.append(
+            {
+                "epochs": configured_train["epochs"],
+                "phase": kwargs.get("phase"),
+                "resume_from": resume_from,
+            }
+        )
+        checkpoint_path = Path(checkpoint_path)
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "model_state_dict": value.state_dict(),
+                "model_family": "sparknet",
+                "model_cfg": configured_model,
+                "input_shape": value.input_shape,
+                "num_classes": value.fc.out_features,
+                "label_map": label_map,
+                "num_keywords": num_keywords,
+                "val_acc": 0.82,
+                "seed": configured_train["seed"],
+                "run_id": kwargs.get("run_id"),
+                "stage": "standard_finetune_control",
+                "resumed_from": str(resume_from) if resume_from is not None else None,
+            },
+            checkpoint_path,
+        )
+        return SimpleNamespace(
+            best_val_acc=0.82,
+            final_val_acc=0.82,
+            epochs=configured_train["epochs"],
+            history=[{"val_acc": 0.82}],
+            global_step=0,
+            completed_epoch=configured_train["epochs"],
+            run_id=kwargs.get("run_id"),
+        )
+
+    monkeypatch.setattr(dendritic, "train_model", fake_train_model)
+    monkeypatch.setattr(
+        dendritic,
+        "profile_model",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            as_dict=lambda: {
+                "params": 12,
+                "macs": 20,
+                "weight_bytes": 48,
+                "latency_ms_p50": 0.1,
+            }
+        ),
+    )
+
+    def reject_pai(*_args, **_kwargs):
+        raise AssertionError("standard control touched the PerforatedAI lifecycle")
+
+    for name in (
+        "configure_perforatedai",
+        "_select_pai_resume_sidecar",
+        "_load_pai_sidecar",
+        "_load_paired_native_state",
+        "read_pai_architecture_results",
+        "read_pai_zero_dendrite_score",
+        "export_final_pai_model",
+    ):
+        monkeypatch.setattr(dendritic, name, reject_pai)
+    monkeypatch.setattr(dendritic.UPA, "perforate_model", reject_pai)
+    monkeypatch.setattr(dendritic.UPA, "count_params", reject_pai)
+    monkeypatch.setattr(
+        dendritic.GPA,
+        "pai_tracker",
+        SimpleNamespace(
+            add_validation_score=reject_pai,
+            add_extra_score=reject_pai,
+            set_optimizer_instance=reject_pai,
+        ),
+    )
+
+    output_dir = tmp_path / "run"
+    candidate = "sparknet_c2_multilayer"
+    layout = dendritic.ArtifactLayout(output_dir)
+    own_latest = layout.checkpoint_path(
+        "sparsity", "standard_control", "latest", candidate=candidate
+    )
+    if resume_state is not None:
+        own_latest.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "best_model_state_dict": resume_state,
+                "best_metric_value": 0.79,
+                "completed_epoch": 25,
+            },
+            own_latest,
+        )
+
+    # Reproduce the failed run's stale PAI artifacts. A conventional control
+    # must ignore both the KWS sidecar and PAI's native candidate checkpoint.
+    stale_pai_state = {
+        name: torch.full_like(value, 11)
+        for name, value in model.state_dict().items()
+    }
+    pai_sidecar = layout.checkpoint_path(
+        "sparsity", "pai", "latest", candidate=candidate
+    )
+    pai_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"model_state_dict": stale_pai_state}, pai_sidecar)
+    pai_candidate = layout.pai_candidate_path(candidate)
+    pai_candidate.mkdir(parents=True, exist_ok=True)
+    torch.save({"model_state_dict": stale_pai_state}, pai_candidate / "latest.pt")
+
+    return model_cfg, train_cfg, output_dir, candidate, training_calls, own_latest
+
+
+def test_standard_control_reuses_prune_finetune_and_emits_plain_checkpoint(
+    tmp_path, monkeypatch
+):
+    model_cfg, train_cfg, output_dir, candidate, calls, _own_latest = (
+        _stub_standard_control_boundaries(tmp_path, monkeypatch)
+    )
+
+    result = dendritic.run_standard_control(
+        "source.pt",
+        {},
+        model_cfg,
+        train_cfg,
+        candidate,
+        output_dir=output_dir,
+        resume=False,
+    )
+
+    expected_best = dendritic.ArtifactLayout(output_dir).checkpoint_path(
+        "sparsity", "standard_control", "best", candidate=candidate
+    )
+    saved = torch.load(expected_best, map_location="cpu", weights_only=False)
+    assert result.checkpoint == str(expected_best)
+    assert result.training_lifecycle == "standard_finetune_control"
+    assert result.best_val_acc == pytest.approx(0.82)
+    assert result.epochs == 98
+    assert result.deployed_params == 12
+    assert result.cost["macs"] == 20
+    assert result.pai_best_val_acc is None
+    assert result.pai_deployed_params is None
+    assert result.zero_dendrite_val_acc is None
+    assert result.zero_dendrite_params is None
+    assert result.prune_finetune["reused"] is True
+    assert result.prune_finetune["best_val_acc"] == pytest.approx(0.71)
+    assert calls == [{"epochs": 98, "phase": "standard_control", "resume_from": None}]
+    # The fake trainer adds two to its starting weights. Five proves the
+    # control began from the shared prune-finetune state (three), not the
+    # source model (one) or stale PAI artifact (eleven).
+    assert all(
+        torch.equal(value, torch.full_like(value, 5))
+        for value in saved["model_state_dict"].values()
+    )
+
+
+def test_standard_control_resume_uses_only_its_conventional_latest(
+    tmp_path, monkeypatch
+):
+    resume_state = {
+        "blocks.0.weight": torch.full((2, 2), 7.0),
+        "blocks.0.bias": torch.full((2,), 7.0),
+        "fc.weight": torch.full((2, 2), 7.0),
+        "fc.bias": torch.full((2,), 7.0),
+    }
+    model_cfg, train_cfg, output_dir, candidate, calls, own_latest = (
+        _stub_standard_control_boundaries(
+            tmp_path, monkeypatch, resume_state=resume_state
+        )
+    )
+
+    result = dendritic.run_standard_control(
+        "source.pt",
+        {},
+        model_cfg,
+        train_cfg,
+        candidate,
+        output_dir=output_dir,
+        resume=True,
+    )
+
+    saved = torch.load(result.checkpoint, map_location="cpu", weights_only=False)
+    assert saved["resumed_from"] == str(own_latest)
+    assert calls[0]["resume_from"] == own_latest
+    # The selected conventional state is seven and the fake trainer adds two.
+    # Eleven would mean the stale PAI candidate was selected instead.
+    assert all(
+        torch.equal(value, torch.full_like(value, 9))
+        for value in saved["model_state_dict"].values()
+    )
+
+
 def _save_one_pair(tmp_path, monkeypatch, *, completed_epoch=1, native_value=0.0):
     """Commit one real PAI/KWS restart pair through the production writer."""
     run_dir = tmp_path / "candidate"

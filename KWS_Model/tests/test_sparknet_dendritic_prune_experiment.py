@@ -5,6 +5,7 @@ import torch
 import yaml
 
 from kws.models.sparknet import SparkNet
+from kws.optimize import dendritic
 from kws.optimize.sparknet_dendritic_prune_experiment import (
     dendritic_delta,
     interpolate_pruning_curve,
@@ -193,6 +194,69 @@ def test_execution_dispatches_no_kd_cycle_from_each_exact_width(tmp_path, experi
         for candidate in report["candidates"]
     )
     assert report["seed"] == 7
+
+
+@pytest.mark.parametrize(
+    ("module_ids", "expected_lifecycle"),
+    [
+        ([], "control"),
+        ([".fc"], "pai"),
+    ],
+)
+def test_empty_placement_uses_only_standard_control_lifecycle(
+    tmp_path, experiment_config, module_ids, expected_lifecycle
+):
+    """The no-dendrite control must never enter PerforatedAI's lifecycle."""
+    config = _retarget_module_ids(experiment_config, module_ids)
+    lifecycle_calls = []
+
+    def runner(lifecycle):
+        def run(_checkpoint, _data, model, _train, _save_name, **_kwargs):
+            lifecycle_calls.append(lifecycle)
+            result = _cycle_result(model["channels"], tmp_path)
+            result["checkpoint"] = str(
+                tmp_path / f"{lifecycle}-c{model['channels']}.pt"
+            )
+            if lifecycle == "control":
+                result["pai_best_val_acc"] = None
+                result["pai_deployed_params"] = None
+            return result
+
+        return run
+
+    report = run_experiment(
+        config,
+        output_dir=tmp_path / expected_lifecycle,
+        cycle_runner=runner("pai"),
+        control_runner=runner("control"),
+    )
+
+    assert report["status"] == "complete"
+    assert lifecycle_calls == [expected_lifecycle] * len(config["widths"])
+    for candidate in report["candidates"]:
+        dendritic_result = candidate["dendritic"]
+        if expected_lifecycle == "control":
+            assert dendritic_result["training"] == "standard_finetune_control"
+            assert dendritic_result["pai_search_validation_accuracy"] is None
+            assert dendritic_result["checkpoint"] == str(
+                tmp_path / f"control-c{candidate['width']}.pt"
+            )
+        else:
+            assert dendritic_result["training"] == "pai_no_kd"
+            assert dendritic_result["pai_search_validation_accuracy"] == pytest.approx(
+                0.79 + candidate["width"] / 1000
+            )
+
+
+def test_standard_control_epoch_budget_matches_pai_and_resume_phases():
+    train_cfg = {
+        "dendritic_schedule_epochs": 30,
+        "resume_epochs": 8,
+        "perforatedai": {"max_dendrites": 1},
+    }
+
+    # One dendrite attempt has an n-p-n schedule, then the ordinary resume.
+    assert dendritic.standard_control_epoch_budget(train_cfg) == 30 * 3 + 8
 
 
 def test_refuses_to_replace_existing_report_without_resume(tmp_path, experiment_config):
