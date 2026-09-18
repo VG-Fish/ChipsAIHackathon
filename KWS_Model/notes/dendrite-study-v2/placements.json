@@ -1,0 +1,1451 @@
+{
+  "fc": {
+    "module_ids": [
+      ".fc"
+    ],
+    "widths": {
+      "16": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 4636,
+        "base_macs": 396304,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 5044,
+        "projected_macs_1d": 396700,
+        "pai": {
+          "params_before_wrap": 4636,
+          "params_after_wrap": 5032,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "12": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 3400,
+        "base_macs": 277124,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 3808,
+        "projected_macs_1d": 277520,
+        "pai": {
+          "params_before_wrap": 3400,
+          "params_after_wrap": 3796,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "10": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 2854,
+        "base_macs": 224806,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 3262,
+        "projected_macs_1d": 225202,
+        "pai": {
+          "params_before_wrap": 2854,
+          "params_after_wrap": 3250,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "8": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 2356,
+        "base_macs": 177336,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 2764,
+        "projected_macs_1d": 177732,
+        "pai": {
+          "params_before_wrap": 2356,
+          "params_after_wrap": 2752,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "6": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 1906,
+        "base_macs": 134714,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 2314,
+        "projected_macs_1d": 135110,
+        "pai": {
+          "params_before_wrap": 1906,
+          "params_after_wrap": 2302,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "4": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 1504,
+        "base_macs": 96940,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 1912,
+        "projected_macs_1d": 97336,
+        "pai": {
+          "params_before_wrap": 1504,
+          "params_after_wrap": 1900,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "2": {
+        "resolved_module_names": [
+          "fc"
+        ],
+        "per_module": {
+          "fc": {
+            "type": "Linear",
+            "params": 396,
+            "shape": [
+              12,
+              32
+            ],
+            "groups": null
+          }
+        },
+        "base_params": 1150,
+        "base_macs": 64014,
+        "copied_params_per_dendrite": 396,
+        "copied_macs_per_dendrite": 384,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 12,
+        "projected_params_1d": 1558,
+        "projected_macs_1d": 64410,
+        "pai": {
+          "params_before_wrap": 1150,
+          "params_after_wrap": 1546,
+          "neuron_modules": [
+            {
+              "neuron_module": "fc",
+              "inner_type": "Linear",
+              "inner_params": 396
+            }
+          ],
+          "n_wrapped": 1
+        }
+      }
+    }
+  },
+  "pointwise": {
+    "module_ids": [
+      ".blocks.3.pointwise",
+      ".blocks.2.pointwise"
+    ],
+    "widths": {
+      "16": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 256,
+            "shape": [
+              16,
+              16,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 256,
+            "shape": [
+              16,
+              16,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 4636,
+        "base_macs": 396304,
+        "copied_params_per_dendrite": 512,
+        "copied_macs_per_dendrite": 51712,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 5180,
+        "projected_macs_1d": 451248,
+        "pai": {
+          "params_before_wrap": 4636,
+          "params_after_wrap": 5148,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 256
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 256
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "12": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 144,
+            "shape": [
+              12,
+              12,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 144,
+            "shape": [
+              12,
+              12,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 3400,
+        "base_macs": 277124,
+        "copied_params_per_dendrite": 288,
+        "copied_macs_per_dendrite": 29088,
+        "residual_params_per_dendrite": 24,
+        "residual_macs_per_dendrite": 2424,
+        "projected_params_1d": 3712,
+        "projected_macs_1d": 308636,
+        "pai": {
+          "params_before_wrap": 3400,
+          "params_after_wrap": 3688,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 144
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 144
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "10": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 100,
+            "shape": [
+              10,
+              10,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 100,
+            "shape": [
+              10,
+              10,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 2854,
+        "base_macs": 224806,
+        "copied_params_per_dendrite": 200,
+        "copied_macs_per_dendrite": 20200,
+        "residual_params_per_dendrite": 20,
+        "residual_macs_per_dendrite": 2020,
+        "projected_params_1d": 3074,
+        "projected_macs_1d": 247026,
+        "pai": {
+          "params_before_wrap": 2854,
+          "params_after_wrap": 3054,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 100
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 100
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "8": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 64,
+            "shape": [
+              8,
+              8,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 64,
+            "shape": [
+              8,
+              8,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 2356,
+        "base_macs": 177336,
+        "copied_params_per_dendrite": 128,
+        "copied_macs_per_dendrite": 12928,
+        "residual_params_per_dendrite": 16,
+        "residual_macs_per_dendrite": 1616,
+        "projected_params_1d": 2500,
+        "projected_macs_1d": 191880,
+        "pai": {
+          "params_before_wrap": 2356,
+          "params_after_wrap": 2484,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 64
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 64
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "6": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 36,
+            "shape": [
+              6,
+              6,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 36,
+            "shape": [
+              6,
+              6,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 1906,
+        "base_macs": 134714,
+        "copied_params_per_dendrite": 72,
+        "copied_macs_per_dendrite": 7272,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 1212,
+        "projected_params_1d": 1990,
+        "projected_macs_1d": 143198,
+        "pai": {
+          "params_before_wrap": 1906,
+          "params_after_wrap": 1978,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 36
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 36
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "4": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 16,
+            "shape": [
+              4,
+              4,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 16,
+            "shape": [
+              4,
+              4,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 1504,
+        "base_macs": 96940,
+        "copied_params_per_dendrite": 32,
+        "copied_macs_per_dendrite": 3232,
+        "residual_params_per_dendrite": 8,
+        "residual_macs_per_dendrite": 808,
+        "projected_params_1d": 1544,
+        "projected_macs_1d": 100980,
+        "pai": {
+          "params_before_wrap": 1504,
+          "params_after_wrap": 1536,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 16
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 16
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "2": {
+        "resolved_module_names": [
+          "blocks.3.pointwise",
+          "blocks.2.pointwise"
+        ],
+        "per_module": {
+          "blocks.3.pointwise": {
+            "type": "Conv2d",
+            "params": 4,
+            "shape": [
+              2,
+              2,
+              1,
+              1
+            ],
+            "groups": 1
+          },
+          "blocks.2.pointwise": {
+            "type": "Conv2d",
+            "params": 4,
+            "shape": [
+              2,
+              2,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 1150,
+        "base_macs": 64014,
+        "copied_params_per_dendrite": 8,
+        "copied_macs_per_dendrite": 808,
+        "residual_params_per_dendrite": 4,
+        "residual_macs_per_dendrite": 404,
+        "projected_params_1d": 1162,
+        "projected_macs_1d": 65226,
+        "pai": {
+          "params_before_wrap": 1150,
+          "params_after_wrap": 1158,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 4
+            },
+            {
+              "neuron_module": "blocks.3.pointwise",
+              "inner_type": "Conv2d",
+              "inner_params": 4
+            }
+          ],
+          "n_wrapped": 2
+        }
+      }
+    }
+  },
+  "depthwise": {
+    "module_ids": [
+      ".blocks.3.depthwise",
+      ".blocks.2.depthwise"
+    ],
+    "widths": {
+      "16": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 464,
+            "shape": [
+              16,
+              1,
+              1,
+              29
+            ],
+            "groups": 16
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 304,
+            "shape": [
+              16,
+              1,
+              1,
+              19
+            ],
+            "groups": 16
+          }
+        },
+        "base_params": 4636,
+        "base_macs": 396304,
+        "copied_params_per_dendrite": 768,
+        "copied_macs_per_dendrite": 77568,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 5436,
+        "projected_macs_1d": 477104,
+        "pai": {
+          "params_before_wrap": 4636,
+          "params_after_wrap": 5404,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 304
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 464
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "12": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 348,
+            "shape": [
+              12,
+              1,
+              1,
+              29
+            ],
+            "groups": 12
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 228,
+            "shape": [
+              12,
+              1,
+              1,
+              19
+            ],
+            "groups": 12
+          }
+        },
+        "base_params": 3400,
+        "base_macs": 277124,
+        "copied_params_per_dendrite": 576,
+        "copied_macs_per_dendrite": 58176,
+        "residual_params_per_dendrite": 24,
+        "residual_macs_per_dendrite": 2424,
+        "projected_params_1d": 4000,
+        "projected_macs_1d": 337724,
+        "pai": {
+          "params_before_wrap": 3400,
+          "params_after_wrap": 3976,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 228
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 348
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "10": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 290,
+            "shape": [
+              10,
+              1,
+              1,
+              29
+            ],
+            "groups": 10
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 190,
+            "shape": [
+              10,
+              1,
+              1,
+              19
+            ],
+            "groups": 10
+          }
+        },
+        "base_params": 2854,
+        "base_macs": 224806,
+        "copied_params_per_dendrite": 480,
+        "copied_macs_per_dendrite": 48480,
+        "residual_params_per_dendrite": 20,
+        "residual_macs_per_dendrite": 2020,
+        "projected_params_1d": 3354,
+        "projected_macs_1d": 275306,
+        "pai": {
+          "params_before_wrap": 2854,
+          "params_after_wrap": 3334,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 190
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 290
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "8": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 232,
+            "shape": [
+              8,
+              1,
+              1,
+              29
+            ],
+            "groups": 8
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 152,
+            "shape": [
+              8,
+              1,
+              1,
+              19
+            ],
+            "groups": 8
+          }
+        },
+        "base_params": 2356,
+        "base_macs": 177336,
+        "copied_params_per_dendrite": 384,
+        "copied_macs_per_dendrite": 38784,
+        "residual_params_per_dendrite": 16,
+        "residual_macs_per_dendrite": 1616,
+        "projected_params_1d": 2756,
+        "projected_macs_1d": 217736,
+        "pai": {
+          "params_before_wrap": 2356,
+          "params_after_wrap": 2740,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 152
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 232
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "6": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 174,
+            "shape": [
+              6,
+              1,
+              1,
+              29
+            ],
+            "groups": 6
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 114,
+            "shape": [
+              6,
+              1,
+              1,
+              19
+            ],
+            "groups": 6
+          }
+        },
+        "base_params": 1906,
+        "base_macs": 134714,
+        "copied_params_per_dendrite": 288,
+        "copied_macs_per_dendrite": 29088,
+        "residual_params_per_dendrite": 12,
+        "residual_macs_per_dendrite": 1212,
+        "projected_params_1d": 2206,
+        "projected_macs_1d": 165014,
+        "pai": {
+          "params_before_wrap": 1906,
+          "params_after_wrap": 2194,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 114
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 174
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "4": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 116,
+            "shape": [
+              4,
+              1,
+              1,
+              29
+            ],
+            "groups": 4
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 76,
+            "shape": [
+              4,
+              1,
+              1,
+              19
+            ],
+            "groups": 4
+          }
+        },
+        "base_params": 1504,
+        "base_macs": 96940,
+        "copied_params_per_dendrite": 192,
+        "copied_macs_per_dendrite": 19392,
+        "residual_params_per_dendrite": 8,
+        "residual_macs_per_dendrite": 808,
+        "projected_params_1d": 1704,
+        "projected_macs_1d": 117140,
+        "pai": {
+          "params_before_wrap": 1504,
+          "params_after_wrap": 1696,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 76
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 116
+            }
+          ],
+          "n_wrapped": 2
+        }
+      },
+      "2": {
+        "resolved_module_names": [
+          "blocks.3.depthwise",
+          "blocks.2.depthwise"
+        ],
+        "per_module": {
+          "blocks.3.depthwise": {
+            "type": "Conv2d",
+            "params": 58,
+            "shape": [
+              2,
+              1,
+              1,
+              29
+            ],
+            "groups": 2
+          },
+          "blocks.2.depthwise": {
+            "type": "Conv2d",
+            "params": 38,
+            "shape": [
+              2,
+              1,
+              1,
+              19
+            ],
+            "groups": 2
+          }
+        },
+        "base_params": 1150,
+        "base_macs": 64014,
+        "copied_params_per_dendrite": 96,
+        "copied_macs_per_dendrite": 9696,
+        "residual_params_per_dendrite": 4,
+        "residual_macs_per_dendrite": 404,
+        "projected_params_1d": 1250,
+        "projected_macs_1d": 74114,
+        "pai": {
+          "params_before_wrap": 1150,
+          "params_after_wrap": 1246,
+          "neuron_modules": [
+            {
+              "neuron_module": "blocks.2.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 38
+            },
+            {
+              "neuron_module": "blocks.3.depthwise",
+              "inner_type": "Conv2d",
+              "inner_params": 58
+            }
+          ],
+          "n_wrapped": 2
+        }
+      }
+    }
+  },
+  "gate_conv": {
+    "module_ids": [
+      ".gate_conv"
+    ],
+    "widths": {
+      "16": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 544,
+            "shape": [
+              32,
+              16,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 4636,
+        "base_macs": 396304,
+        "copied_params_per_dendrite": 544,
+        "copied_macs_per_dendrite": 51712,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 5212,
+        "projected_macs_1d": 451248,
+        "pai": {
+          "params_before_wrap": 4636,
+          "params_after_wrap": 5180,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 544
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "12": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 416,
+            "shape": [
+              32,
+              12,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 3400,
+        "base_macs": 277124,
+        "copied_params_per_dendrite": 416,
+        "copied_macs_per_dendrite": 38784,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 3848,
+        "projected_macs_1d": 319140,
+        "pai": {
+          "params_before_wrap": 3400,
+          "params_after_wrap": 3816,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 416
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "10": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 352,
+            "shape": [
+              32,
+              10,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 2854,
+        "base_macs": 224806,
+        "copied_params_per_dendrite": 352,
+        "copied_macs_per_dendrite": 32320,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 3238,
+        "projected_macs_1d": 260358,
+        "pai": {
+          "params_before_wrap": 2854,
+          "params_after_wrap": 3206,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 352
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "8": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 288,
+            "shape": [
+              32,
+              8,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 2356,
+        "base_macs": 177336,
+        "copied_params_per_dendrite": 288,
+        "copied_macs_per_dendrite": 25856,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 2676,
+        "projected_macs_1d": 206424,
+        "pai": {
+          "params_before_wrap": 2356,
+          "params_after_wrap": 2644,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 288
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "6": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 224,
+            "shape": [
+              32,
+              6,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 1906,
+        "base_macs": 134714,
+        "copied_params_per_dendrite": 224,
+        "copied_macs_per_dendrite": 19392,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 2162,
+        "projected_macs_1d": 157338,
+        "pai": {
+          "params_before_wrap": 1906,
+          "params_after_wrap": 2130,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 224
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "4": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 160,
+            "shape": [
+              32,
+              4,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 1504,
+        "base_macs": 96940,
+        "copied_params_per_dendrite": 160,
+        "copied_macs_per_dendrite": 12928,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 1696,
+        "projected_macs_1d": 113100,
+        "pai": {
+          "params_before_wrap": 1504,
+          "params_after_wrap": 1664,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 160
+            }
+          ],
+          "n_wrapped": 1
+        }
+      },
+      "2": {
+        "resolved_module_names": [
+          "gate_conv"
+        ],
+        "per_module": {
+          "gate_conv": {
+            "type": "Conv2d",
+            "params": 96,
+            "shape": [
+              32,
+              2,
+              1,
+              1
+            ],
+            "groups": 1
+          }
+        },
+        "base_params": 1150,
+        "base_macs": 64014,
+        "copied_params_per_dendrite": 96,
+        "copied_macs_per_dendrite": 6464,
+        "residual_params_per_dendrite": 32,
+        "residual_macs_per_dendrite": 3232,
+        "projected_params_1d": 1278,
+        "projected_macs_1d": 73710,
+        "pai": {
+          "params_before_wrap": 1150,
+          "params_after_wrap": 1246,
+          "neuron_modules": [
+            {
+              "neuron_module": "gate_conv",
+              "inner_type": "Conv2d",
+              "inner_params": 96
+            }
+          ],
+          "n_wrapped": 1
+        }
+      }
+    }
+  },
+  "control": {
+    "module_ids": [],
+    "widths": {
+      "16": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 4636,
+        "base_macs": 396304,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 4636,
+        "projected_macs_1d": 396304,
+        "pai": {
+          "params_before_wrap": 4636,
+          "params_after_wrap": 4636,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      },
+      "12": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 3400,
+        "base_macs": 277124,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 3400,
+        "projected_macs_1d": 277124,
+        "pai": {
+          "params_before_wrap": 3400,
+          "params_after_wrap": 3400,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      },
+      "10": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 2854,
+        "base_macs": 224806,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 2854,
+        "projected_macs_1d": 224806,
+        "pai": {
+          "params_before_wrap": 2854,
+          "params_after_wrap": 2854,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      },
+      "8": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 2356,
+        "base_macs": 177336,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 2356,
+        "projected_macs_1d": 177336,
+        "pai": {
+          "params_before_wrap": 2356,
+          "params_after_wrap": 2356,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      },
+      "6": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 1906,
+        "base_macs": 134714,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 1906,
+        "projected_macs_1d": 134714,
+        "pai": {
+          "params_before_wrap": 1906,
+          "params_after_wrap": 1906,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      },
+      "4": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 1504,
+        "base_macs": 96940,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 1504,
+        "projected_macs_1d": 96940,
+        "pai": {
+          "params_before_wrap": 1504,
+          "params_after_wrap": 1504,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      },
+      "2": {
+        "resolved_module_names": [],
+        "per_module": {},
+        "base_params": 1150,
+        "base_macs": 64014,
+        "copied_params_per_dendrite": 0,
+        "copied_macs_per_dendrite": 0,
+        "residual_params_per_dendrite": 0,
+        "residual_macs_per_dendrite": 0,
+        "projected_params_1d": 1150,
+        "projected_macs_1d": 64014,
+        "pai": {
+          "params_before_wrap": 1150,
+          "params_after_wrap": 1150,
+          "neuron_modules": [],
+          "n_wrapped": 0
+        }
+      }
+    }
+  }
+}
