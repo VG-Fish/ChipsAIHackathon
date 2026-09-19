@@ -74,6 +74,20 @@ grow_dendrites:
     pointwise_b3: [.blocks.3.pointwise]
     # Every C -> C pointwise conv; blocks.0's maps the 32 feature bins to C.
     pointwise_b123: [.blocks.3.pointwise, .blocks.2.pointwise, .blocks.1.pointwise]
+    # The rest of the block subsets, for the placement sweep.  A C -> C
+    # dendrite with --group-batchnorm costs C^2 + 3C; blocks.0's costs 35C.
+    pointwise_b0: [.blocks.0.pointwise]
+    pointwise_b1: [.blocks.1.pointwise]
+    pointwise_b01: [.blocks.1.pointwise, .blocks.0.pointwise]
+    pointwise_b02: [.blocks.2.pointwise, .blocks.0.pointwise]
+    pointwise_b03: [.blocks.3.pointwise, .blocks.0.pointwise]
+    pointwise_b12: [.blocks.2.pointwise, .blocks.1.pointwise]
+    pointwise_b13: [.blocks.3.pointwise, .blocks.1.pointwise]
+    pointwise_b23: [.blocks.3.pointwise, .blocks.2.pointwise]
+    pointwise_b012: [.blocks.2.pointwise, .blocks.1.pointwise, .blocks.0.pointwise]
+    pointwise_b013: [.blocks.3.pointwise, .blocks.1.pointwise, .blocks.0.pointwise]
+    pointwise_b023: [.blocks.3.pointwise, .blocks.2.pointwise, .blocks.0.pointwise]
+    pointwise_b0123: [.blocks.3.pointwise, .blocks.2.pointwise, .blocks.1.pointwise, .blocks.0.pointwise]
     gate_conv: [.gate_conv]
     depthwise: [.blocks.3.depthwise, .blocks.2.depthwise]
   # Only the candidate trains in p-mode (PAI strips the base out of the
