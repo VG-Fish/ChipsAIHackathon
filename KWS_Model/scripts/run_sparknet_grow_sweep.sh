@@ -94,7 +94,7 @@
 #
 #   WIDTHS            ["8 12 4 10 6 2 16"]  each needs configs/model/sparknet_c{w}_paper.yaml
 #   SEEDS             ["0 1 2 3 4"]
-#   PLACEMENTS        ["fc pointwise"]      the driver also accepts gate_conv, depthwise
+#   PLACEMENTS        ["fc pointwise"]      keys from grow_dendrites.placements in TRAIN_CONFIG
 #   ARM_SUFFIX        [empty]  appended to the placement to name the arm;
 #                     letters, digits, '.', '_' and '-' only
 #   EXTRA_ARGS        [empty]  extra driver arguments after --arm, split on
@@ -211,12 +211,38 @@ for width in $WIDTHS; do
   model_config="configs/model/sparknet_c${width}_paper.yaml"
   [[ -f "$model_config" ]] || problems+=("missing config: ${model_config}")
 done
-for placement in $PLACEMENTS; do
-  case "$placement" in
-    fc | pointwise | gate_conv | depthwise) ;;
-    *) problems+=("unknown placement: ${placement} (expected fc, pointwise, gate_conv or depthwise)") ;;
-  esac
-done
+if [[ -f "$TRAIN_CONFIG" ]]; then
+  if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    config_python=("$REPO_ROOT/.venv/bin/python")
+  else
+    config_python=(uv run --env-file .env python)
+  fi
+  placement_problems="$("${config_python[@]}" - "$TRAIN_CONFIG" "$PLACEMENTS" <<'PY'
+import sys
+
+import yaml
+
+path, requested = sys.argv[1:]
+try:
+    with open(path) as stream:
+        config = yaml.safe_load(stream)
+    grow = config.get("grow_dendrites") if isinstance(config, dict) else None
+    placements = grow.get("placements") if isinstance(grow, dict) else None
+    if not isinstance(placements, dict) or not placements:
+        print(f"invalid grow_dendrites.placements mapping in config: {path}")
+    else:
+        configured = ", ".join(sorted(str(name) for name in placements))
+        for name in requested.split():
+            if name not in placements:
+                print(f"unknown placement: {name} (configured in {path}: {configured})")
+except Exception as exc:
+    print(f"could not read placements from {path}: {type(exc).__name__}: {exc}")
+PY
+)"
+  while IFS= read -r problem; do
+    [[ -z "$problem" ]] || problems+=("$problem")
+  done <<< "$placement_problems"
+fi
 # The arm is a directory name and the driver's --arm label.
 arm_suffix_pattern='^[A-Za-z0-9._-]*$'
 if [[ ! $ARM_SUFFIX =~ $arm_suffix_pattern ]]; then

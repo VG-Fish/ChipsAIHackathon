@@ -70,6 +70,8 @@ grow_dendrites:
   placements:
     fc: [.fc]
     pointwise: [.blocks.3.pointwise, .blocks.2.pointwise]
+    pointwise_b2: [.blocks.2.pointwise]
+    pointwise_b3: [.blocks.3.pointwise]
     gate_conv: [.gate_conv]
     depthwise: [.blocks.3.depthwise, .blocks.2.depthwise]
   # Only the candidate trains in p-mode (PAI strips the base out of the

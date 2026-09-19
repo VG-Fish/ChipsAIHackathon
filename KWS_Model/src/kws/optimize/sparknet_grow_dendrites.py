@@ -65,6 +65,11 @@ Run variants (CLI flags; each is recorded under ``variant`` in the summary):
     untouched, so pairing with scratch holds.  The exports fold ``1 / C``
     into the dendrite weights and run under plain ``f``, so deployment cost
     and every downstream reader are unchanged.
+``--calibrate-dendrite-input-scale``
+    Measure the configured modules' input standard deviations on the fixed
+    validation probe at the switch and use their geometric mean as ``C``.
+    For a single-module placement this is exactly that module's measured
+    standard deviation.  Calibration happens before candidate training.
 ``--arm NAME``
     Label recorded as ``arm`` in the summary (``[A-Za-z0-9._-]+``).  Defaults
     to the placement, with ``-sham`` appended for a sham run.
@@ -101,7 +106,7 @@ import math
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -195,6 +200,8 @@ class GrowConfig:
     sham: bool = False
     # PAI's forward function runs as f(z / dendrite_input_scale).
     dendrite_input_scale: float = 1.0
+    # Replace the scale at the switch with the module input-statistic scale.
+    calibrate_dendrite_input_scale: bool = False
     # Summary label; empty means ``default_arm(placement, sham)``.
     arm: str = ""
 
@@ -208,13 +215,16 @@ class GrowConfig:
 
     def variant(self) -> dict[str, Any]:
         """What distinguishes this run from the other arms of the same placement."""
-        return {
+        variant = {
             "sham": self.sham,
             "dendrite_weight_decay": self.dendrite_weight_decay,
             "switch_epoch": self.switch_epoch,
             "candidate_epochs": self.candidate_epochs,
             "dendrite_input_scale": self.dendrite_input_scale,
         }
+        if self.calibrate_dendrite_input_scale:
+            variant["dendrite_input_scale_calibration"] = "switch_input_std"
+        return variant
 
     def segment(self, epoch: int) -> str:
         """Segment of 1-based wall-clock ``epoch``."""
@@ -239,6 +249,18 @@ def default_arm(placement: str, sham: bool) -> str:
     return f"{placement}{SHAM_SUFFIX}" if sham else placement
 
 
+def calibrated_dendrite_input_scale(input_std: Mapping[str, float]) -> float:
+    """Return the geometric mean of positive finite module input deviations."""
+    values = [float(value) for value in input_std.values()]
+    if not values or any(not math.isfinite(value) or value <= 0 for value in values):
+        raise GrowInvariantError(
+            f"cannot calibrate dendrite input scale from input std values {dict(input_std)!r}"
+        )
+    if len(values) == 1:
+        return values[0]
+    return math.exp(sum(math.log(value) for value in values) / len(values))
+
+
 def resolve_grow_config(
     train_cfg: Mapping[str, Any],
     *,
@@ -250,6 +272,7 @@ def resolve_grow_config(
     sham: bool = False,
     arm: str | None = None,
     dendrite_input_scale: float | None = None,
+    calibrate_dendrite_input_scale: bool = False,
 ) -> GrowConfig:
     """Validate the ``grow_dendrites`` block before any output is written.
 
@@ -312,9 +335,17 @@ def resolve_grow_config(
         raise ValueError(
             f"dendrite_weight_decay must be non-negative and finite; got {dendrite_weight_decay}"
         )
-    dendrite_input_scale = float(
-        grow.get("dendrite_input_scale", 1.0)
-        if dendrite_input_scale is None else dendrite_input_scale
+    if calibrate_dendrite_input_scale and dendrite_input_scale is not None:
+        raise ValueError(
+            "dendrite_input_scale and calibrate_dendrite_input_scale are mutually exclusive"
+        )
+    dendrite_input_scale = (
+        1.0
+        if calibrate_dendrite_input_scale
+        else float(
+            grow.get("dendrite_input_scale", 1.0)
+            if dendrite_input_scale is None else dendrite_input_scale
+        )
     )
     if not math.isfinite(dendrite_input_scale) or dendrite_input_scale <= 0:
         raise ValueError(
@@ -345,6 +376,7 @@ def resolve_grow_config(
         max_wall_clock_minutes=cap,
         sham=bool(sham),
         dendrite_input_scale=dendrite_input_scale,
+        calibrate_dendrite_input_scale=bool(calibrate_dendrite_input_scale),
         arm=label,
     )
 
@@ -886,6 +918,7 @@ def run_grow(
         "candidate_optimizer": dict(grow.candidate_optimizer),
         "dendrite_weight_decay": grow.dendrite_weight_decay,
         "dendrite_input_scale": grow.dendrite_input_scale,
+        "calibrate_dendrite_input_scale": grow.calibrate_dendrite_input_scale,
         "carry_momentum": grow.carry_momentum,
     }
     device = get_device()
@@ -1088,6 +1121,24 @@ def run_grow(
                     input_std=(grow.module_ids, input_std),
                 )
                 extra["dendrite_input_std_at_switch"] = input_std
+                if grow.calibrate_dendrite_input_scale:
+                    calibrated_scale = calibrated_dendrite_input_scale(input_std)
+                    GPA.pc.set_pai_forward_function(
+                        ScaledForwardFunction(
+                            GPA.pc.get_pai_forward_function(), calibrated_scale
+                        )
+                    )
+                    grow = replace(grow, dendrite_input_scale=calibrated_scale)
+                    schedule["dendrite_input_scale"] = calibrated_scale
+                    extra["dendrite_input_scale_calibration"] = {
+                        "method": "geometric_mean_switch_input_std",
+                        "module_input_std": dict(input_std),
+                        "scale": calibrated_scale,
+                    }
+                    logger.info(
+                        "Calibrated dendrite input scale to %.6g before candidate training",
+                        calibrated_scale,
+                    )
                 logger.info(
                     "Dendrite module input std at the switch: %s (input scale %g)",
                     {name: round(value, 4) for name, value in input_std.items()},
@@ -1434,10 +1485,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="noise-floor arm: grow the dendrite as usual, then zero and freeze it at "
         "the p->n switch so post-switch training updates the base only",
     )
-    parser.add_argument(
+    input_scale = parser.add_mutually_exclusive_group()
+    input_scale.add_argument(
         "--dendrite-input-scale", type=float, default=None,
         help="override grow_dendrites.dendrite_input_scale: PAI's forward function runs "
         "as f(z / C) on the dendrite pre-activation (folded into the exported weights)",
+    )
+    input_scale.add_argument(
+        "--calibrate-dendrite-input-scale", action="store_true",
+        help="at the switch, set the dendrite input scale to the geometric mean of "
+        "the configured modules' measured input standard deviations",
     )
     parser.add_argument(
         "--arm", default=None,
@@ -1467,6 +1524,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sham=args.sham,
             arm=args.arm,
             dendrite_input_scale=args.dendrite_input_scale,
+            calibrate_dendrite_input_scale=args.calibrate_dendrite_input_scale,
         )
     except ValueError as error:
         parser.error(str(error))

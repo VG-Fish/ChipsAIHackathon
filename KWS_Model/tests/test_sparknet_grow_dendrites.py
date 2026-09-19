@@ -76,6 +76,17 @@ def test_resolve_grow_config_reads_the_paper_defaults():
     ).module_ids == (".blocks.3.pointwise", ".blocks.2.pointwise")
 
 
+def test_pointwise_blocks_are_available_as_independent_placements():
+    train_cfg = _paper_train_cfg()
+
+    assert grow.resolve_grow_config(
+        train_cfg, placement="pointwise_b2"
+    ).module_ids == (".blocks.2.pointwise",)
+    assert grow.resolve_grow_config(
+        train_cfg, placement="pointwise_b3"
+    ).module_ids == (".blocks.3.pointwise",)
+
+
 def test_cli_overrides_win_and_the_train_config_is_not_mutated():
     train_cfg = _paper_train_cfg()
     pristine = copy.deepcopy(train_cfg)
@@ -251,6 +262,28 @@ def test_the_input_scale_override_beats_the_config():
     assert grow.resolve_grow_config(train_cfg, dendrite_input_scale=75).variant()[
         "dendrite_input_scale"
     ] == 75.0
+
+
+def test_switch_input_scale_calibration_is_an_explicit_run_variant():
+    config = grow.resolve_grow_config(
+        _paper_train_cfg(),
+        placement="pointwise_b2",
+        calibrate_dendrite_input_scale=True,
+    )
+
+    assert config.calibrate_dendrite_input_scale is True
+    assert config.dendrite_input_scale == 1.0
+
+
+def test_switch_input_scale_calibration_uses_the_geometric_mean():
+    assert grow.calibrated_dendrite_input_scale({"blocks.2.pointwise": 81.0}) == 81.0
+    assert grow.calibrated_dendrite_input_scale(
+        {"b2": 25.0, "b3": 100.0}
+    ) == pytest.approx(50.0)
+
+    for values in ({}, {"b2": 0.0}, {"b2": float("nan")}):
+        with pytest.raises(grow.GrowInvariantError, match="input std"):
+            grow.calibrated_dendrite_input_scale(values)
 
 
 def test_a_scaled_forward_function_divides_the_pre_activation():
@@ -1184,6 +1217,7 @@ def test_cli_variant_flags_default_to_a_real_run():
     args = grow.build_arg_parser().parse_args(["--model-config", "m.yaml", "--output-dir", "o"])
     assert (args.sham, args.arm, args.dendrite_weight_decay) == (False, None, None)
     assert args.dendrite_input_scale is None
+    assert args.calibrate_dendrite_input_scale is False
 
     args = grow.build_arg_parser().parse_args([
         "--model-config", "m.yaml", "--output-dir", "o",
@@ -1231,6 +1265,24 @@ def test_cli_input_scale_reaches_the_run(tmp_path, monkeypatch):
     (config,) = received
     assert (config.placement, config.arm, config.dendrite_input_scale) == ("pointwise", "pw-in75", 75.0)
     assert config.variant()["dendrite_input_scale"] == 75.0
+
+
+def test_cli_switch_input_scale_calibration_reaches_the_run(tmp_path, monkeypatch):
+    received = []
+    monkeypatch.setattr(
+        grow, "run_grow", lambda *args, **kwargs: received.append(args[3]) or {}
+    )
+    extra = [
+        "--placement", "pointwise_b2",
+        "--calibrate-dendrite-input-scale",
+        "--arm", "pointwise_b2-auto",
+    ]
+
+    assert grow.main(_cli_args(tmp_path / "run", *extra)) == 0
+
+    (config,) = received
+    assert config.calibrate_dendrite_input_scale is True
+    assert config.variant()["dendrite_input_scale_calibration"] == "switch_input_std"
 
 
 # --------------------------------------------------------------------------
@@ -1487,6 +1539,7 @@ def run_grow():
         spec["train_cfg"], placement=spec["placement"], max_minutes=spec["max_minutes"],
         dendrite_weight_decay=spec["dendrite_weight_decay"], sham=spec["sham"], arm=spec["arm"],
         dendrite_input_scale=spec["dendrite_input_scale"],
+        calibrate_dendrite_input_scale=spec["calibrate_dendrite_input_scale"],
     )
     guard = script_validation(grow)
     if spec["probe_momentum"]:
@@ -1537,6 +1590,7 @@ def _launch(workdir: Path, options: dict) -> SimpleNamespace:
         "dendrite_weight_decay": options.get("dendrite_weight_decay"),
         "disable_integration_probe": options.get("disable_integration_probe", False),
         "dendrite_input_scale": options.get("dendrite_input_scale"),
+        "calibrate_dendrite_input_scale": options.get("calibrate_dendrite_input_scale", False),
         "check_rebuild": options.get("check_rebuild", False),
         "train_cfg": _tiny_train_cfg(options.get("switch_epoch", 2)),
         "model_cfg": TINY_MODEL,
@@ -2032,3 +2086,30 @@ def test_pai_input_scale_trains_scaled_and_exports_a_plain_tanh_graph(pai_run, s
         assert summary["dendrite_diagnostics"][label]["modules"].keys() == module_names
     assert checks["integration_output_max_abs_diff"] <= grow.INTEGRATION_WARN_TOLERANCE
     assert run.result["final_dendrite"]["max_abs"] > 0
+
+
+def test_pai_calibrates_input_scale_at_the_switch_before_candidate_training(pai_run):
+    run = pai_run(**{
+        **REAL_FC,
+        "placement": "pointwise_b2",
+        "calibrate_dendrite_input_scale": True,
+        "check_rebuild": True,
+        "arm": "pointwise_b2-auto",
+    })
+    assert run.result["raised"] is None, run.result.get("traceback")
+    summary = _summary(run)
+
+    input_std = summary["dendrite_input_std_at_switch"]["blocks.2.pointwise"]
+    assert input_std > 0
+    assert summary["schedule"]["dendrite_input_scale"] == pytest.approx(input_std)
+    assert summary["variant"]["dendrite_input_scale"] == pytest.approx(input_std)
+    assert summary["variant"]["dendrite_input_scale_calibration"] == "switch_input_std"
+    assert summary["dendrite_input_scale_calibration"] == {
+        "method": "geometric_mean_switch_input_std",
+        "module_input_std": {"blocks.2.pointwise": input_std},
+        "scale": input_std,
+    }
+    for entry in run.result["rebuild"]:
+        assert entry["forward_function"] == f"tanh(z / {input_std:g})"
+        assert entry["folded"] == repr(input_std)
+        assert entry["max_abs_diff"] <= grow.PARITY_TOLERANCE

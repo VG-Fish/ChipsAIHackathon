@@ -203,6 +203,43 @@ def test_invalid_arm_suffix_fails_preflight(sweep):
     assert calls == []
 
 
+def test_preflight_accepts_a_placement_declared_only_in_the_selected_yaml(sweep, tmp_path):
+    train_config = tmp_path / "train.yaml"
+    train_config.write_text(
+        "grow_dendrites:\n"
+        "  placements:\n"
+        "    yaml_only: [.blocks.2.pointwise]\n"
+    )
+
+    result, calls = sweep(
+        DRY_RUN=1, SEEDS=0, TRAIN_CONFIG=train_config, PLACEMENTS="yaml_only"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls == []
+    (command,) = planned_commands(result.stdout)
+    assert command[command.index("--placement") + 1] == "yaml_only"
+    assert "unknown placement" not in result.stderr
+
+
+def test_preflight_rejects_a_hard_coded_name_absent_from_the_selected_yaml(sweep, tmp_path):
+    train_config = tmp_path / "train.yaml"
+    train_config.write_text(
+        "grow_dendrites:\n"
+        "  placements:\n"
+        "    yaml_only: [.fc]\n"
+    )
+
+    result, calls = sweep(
+        SEEDS=0, TRAIN_CONFIG=train_config, PLACEMENTS="fc"
+    )
+
+    assert result.returncode == 1
+    assert "unknown placement: fc" in result.stderr
+    assert "yaml_only" in result.stderr
+    assert calls == []
+
+
 @pytest.mark.parametrize(
     "summary,arm_suffix,recorded",
     [
