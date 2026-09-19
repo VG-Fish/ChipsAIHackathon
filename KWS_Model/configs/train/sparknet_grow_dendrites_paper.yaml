@@ -1,0 +1,102 @@
+# Grow one PerforatedAI dendrite *during* the paper-recipe training of a
+# from-scratch SparkNet, instead of bolting it onto a finished network.
+#
+# Why this recipe exists: the v2 study (outputs/sparknet-dendritic-study-v2)
+# added dendrites to converged scratch networks through a 40-epoch "identity"
+# fine-tune plus a PAI phase that always ran AdamW + restarted cosine.  That
+# handoff alone cost ~0.3-0.6 pp, and every placement moved together, so v2
+# measured the optimizer restarts, not the dendrites.  Here the base network
+# never leaves the paper recipe:
+#
+#   base epochs 1..switch_epoch       ordinary SGD/polynomial-hold training
+#   candidate_epochs                  base frozen (out of the optimizer, BN
+#                                     stats pinned); only the dendrite
+#                                     candidate learns, by PB correlation
+#   base epochs switch_epoch+1..200   base + integrated dendrite, SGD resumes
+#                                     at the exact schedule step it left, with
+#                                     the base's momentum buffers carried over
+#
+# The base therefore sees the same 200-epoch optimizer trajectory as the
+# scratch runs, and before the switch the run is bit-identical to scratch for
+# the same seed on the same device.  The scratch runs under
+# outputs/sparknet-dendritic-study-v2/scratch are the paired controls.
+#
+# Everything above ``grow_dendrites`` is copied verbatim from
+# sparknet_narrow_paper_fast_io.yaml, the recipe those scratch runs used.  Do
+# not change it here without retraining the controls: dataloader worker count
+# alone changes the augmentation RNG and breaks the pairing.
+
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  white_noise_integer_db: true
+  spec_augment: false
+epochs: 200
+batch_size: 128
+num_workers: 8
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+optimizer: sgd
+momentum: 0.9
+lr: 0.01
+weight_decay: 0.001
+label_smoothing: 0.0
+task_loss_scale: 100.0
+scheduler: polynomial_hold
+warmup_fraction: 0.05
+hold_fraction: 0.40
+polynomial_power: 2.0
+min_lr: 0.000001
+seed: 0
+
+grow_dendrites:
+  # Base (neuron-mode) epochs completed before the candidate phase.  With 5%
+  # warmup and 40% hold the decay starts after base epoch 90; at 120 the LR is
+  # ~0.53x peak and the dendrite still gets 80 epochs of the decaying schedule.
+  switch_epoch: 120
+  # Candidate (p-mode) epochs.  They do not consume base-schedule steps, so a
+  # run is epochs + candidate_epochs long in wall-clock epochs.
+  candidate_epochs: 15
+  # Default placement; the CLI's --placement overrides it.
+  placement: fc
+  placements:
+    fc: [.fc]
+    pointwise: [.blocks.3.pointwise, .blocks.2.pointwise]
+    gate_conv: [.gate_conv]
+    depthwise: [.blocks.3.depthwise, .blocks.2.depthwise]
+  # Only the candidate trains in p-mode (PAI strips the base out of the
+  # optimizer), so this choice cannot confound the base's trajectory.  AdamW
+  # at 1e-3 is what produced non-zero PB scores and skip weights in v2.
+  candidate_optimizer:
+    name: adamw
+    lr: 0.001
+    weight_decay: 0.0
+  # The dendrite's to-top (skip) weights start at zero; decaying them toward
+  # zero fights the only path the dendrite has to the output
+  # (PAI_KNOWLEDGE.md section 8).  Base parameters keep the recipe's decay.
+  dendrite_weight_decay: 0.0
+  # Restore the base parameters' SGD momentum buffers after the candidate
+  # phase, so post-switch training is a continuation, not a cold restart.
+  carry_momentum: true
+  # Hard stop.  A run is ~12-13 min on this machine; anything near this cap
+  # is a hang or a mis-set schedule, and it writes an incomplete summary.
+  max_wall_clock_minutes: 45
+
+perforatedai:
+  testing_dendrite_capacity: false
+  forward_function: tanh
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  # SparkNet's convolutions emit (B, C, 1, T); the classifier's 2-D output is
+  # handled by PAI's Linear path.  Explicit rather than PAI's implicit default
+  # (INTEGRATION_AUDIT.md P1).
+  output_dimensions: [-1, 0, -1, -1]
+  freeze_base_batchnorm_in_dendrite_phase: true

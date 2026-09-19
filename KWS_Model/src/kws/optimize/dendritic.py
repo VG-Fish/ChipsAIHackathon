@@ -21,6 +21,7 @@ import argparse
 import contextlib
 import csv
 import hashlib
+import math
 import os
 import sys
 import tempfile
@@ -1233,8 +1234,47 @@ def _restore_single_dendrite_skip_weights(
     return restored
 
 
+def fold_dendrite_input_scale(clean_model: nn.Module, scale: float) -> int:
+    """Fold a forward function ``f(z / scale)`` into the clean dendrite weights.
+
+    A dendrite trained under ``f(z / scale)`` with ``z = W x + b`` computes
+    ``f((W / scale) x + b / scale)`` exactly, so dividing each dendrite
+    branch's weight and bias by ``scale`` leaves a graph that runs under plain
+    ``f``.  Only affine branches (Linear, Conv) can be folded.  Parameters are
+    replaced, never divided in place, so nothing aliasing the trained model
+    changes.  Returns the number of branches folded.
+    """
+    if not math.isfinite(scale) or scale <= 0:
+        raise ValueError(f"dendrite input scale must be positive and finite; got {scale}")
+    if scale == 1.0:
+        return 0
+    folded = 0
+    for name, module in clean_model.named_modules():
+        layer_array = getattr(module, "layer_array", None)
+        if not isinstance(layer_array, (nn.ModuleList, nn.Sequential)) or len(layer_array) < 2:
+            continue
+        # The original module is last; every earlier entry is a dendrite.
+        for index, branch in enumerate(list(layer_array)[:-1]):
+            if not isinstance(branch, (nn.Linear, nn.modules.conv._ConvNd)):
+                raise ValueError(
+                    f"cannot fold an input scale into {name}.layer_array.{index} "
+                    f"({type(branch).__name__}): only Linear and Conv dendrites are affine"
+                )
+            branch.weight = nn.Parameter(branch.weight.detach() / scale, requires_grad=False)
+            if branch.bias is not None:
+                branch.bias = nn.Parameter(branch.bias.detach() / scale, requires_grad=False)
+            folded += 1
+    if folded == 0:
+        raise ValueError("no clean dendrite branches to fold the input scale into")
+    return folded
+
+
 def export_final_pai_model(
-    model: nn.Module, save_name: str, *, run_id: str | None = None
+    model: nn.Module,
+    save_name: str,
+    *,
+    run_id: str | None = None,
+    dendrite_input_scale: float = 1.0,
 ) -> nn.Module:
     """Write a clean, inference-ready PAI checkpoint with branch parity.
 
@@ -1243,6 +1283,11 @@ def export_final_pai_model(
     wrapper repeats the cleanup, restores those coefficients, and atomically
     replaces the library-generated file.  The returned model is the exact
     model represented by the saved tensors and is useful for parity checks.
+
+    A model trained with PAI's forward function set to ``f(z / scale)``
+    passes ``dendrite_input_scale=scale``: the scale is folded into the
+    dendrite weights (:func:`fold_dendrite_input_scale`), so the saved tensors
+    and the returned model run under plain ``f``.
     """
     if run_id is None:
         candidate = Path(save_name).expanduser().resolve()
@@ -1253,6 +1298,7 @@ def export_final_pai_model(
     top_weights = _collect_dendrite_top_weights(model)
     clean_model = UPA.prepare_final_model(model)
     restored = _restore_single_dendrite_skip_weights(clean_model, top_weights)
+    fold_dendrite_input_scale(clean_model, dendrite_input_scale)
     clean_model.eval()
 
     path = Path(save_name) / "final_clean_pai.pt"
@@ -1269,6 +1315,7 @@ def export_final_pai_model(
             metadata={
                 "format": "perforatedai_clean_inference",
                 "single_dendrite_skip_weights_restored": str(restored),
+                "dendrite_input_scale_folded": repr(float(dendrite_input_scale)),
                 "run_id": run_id,
             },
         )
