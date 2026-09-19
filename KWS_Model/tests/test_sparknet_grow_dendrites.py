@@ -26,6 +26,12 @@ from torch.utils.data import DataLoader, TensorDataset
 from kws.models.registry import build_model
 from kws.optimize import sparknet_grow_dendrites as grow
 from kws.optimize.dendritic import fold_dendrite_input_scale
+from kws.optimize.grow_clean_rebuild import (
+    PlainSequential,
+    RebuiltDendriteModule,
+    group_conv_with_batchnorm,
+    rebuild_clean_model,
+)
 from kws.train import build_lr_scheduler, build_optimizer
 from kws.utils.artifacts import ArtifactLayout
 
@@ -284,6 +290,133 @@ def test_switch_input_scale_calibration_uses_the_geometric_mean():
     for values in ({}, {"b2": 0.0}, {"b2": float("nan")}):
         with pytest.raises(grow.GrowInvariantError, match="input std"):
             grow.calibrated_dendrite_input_scale(values)
+
+
+# --------------------------------------------------------------------------
+# --group-batchnorm
+
+
+def _paper_sparknet(width: int = 12) -> tuple[dict, nn.Module]:
+    model_cfg = yaml.safe_load((ROOT / f"configs/model/sparknet_c{width}_paper.yaml").read_text())
+    torch.manual_seed(0)
+    return model_cfg, build_model(model_cfg, (32, 101), 12)
+
+
+def test_group_batchnorm_is_a_run_variant_with_its_own_arm():
+    config = grow.resolve_grow_config(
+        _paper_train_cfg(), placement="pointwise_b2", group_batchnorm=True
+    )
+    sham = grow.resolve_grow_config(
+        _paper_train_cfg(), placement="pointwise_b2", group_batchnorm=True, sham=True
+    )
+
+    assert config.group_batchnorm is True
+    assert config.arm == "pointwise_b2-bn"
+    assert config.variant()["group_batchnorm"] is True
+    assert config.dendrite_input_scale == 1.0
+    assert sham.arm == "pointwise_b2-bn-sham"
+    assert "group_batchnorm" not in grow.resolve_grow_config(_paper_train_cfg()).variant()
+
+
+@pytest.mark.parametrize(
+    ("edit", "overrides", "message"),
+    [
+        (_no_edit, {"placement": "fc"}, "needs 'pointwise' placements"),
+        (_no_edit, {"placement": "depthwise"}, "needs 'pointwise' placements"),
+        (_no_edit, {"placement": "pointwise_b2", "dendrite_input_scale": 34.8}, "leave it at 1"),
+        (_set_grow("dendrite_input_scale", 50), {"placement": "pointwise_b2"}, "leave it at 1"),
+        (
+            _no_edit,
+            {"placement": "pointwise_b2", "calibrate_dendrite_input_scale": True},
+            "leave it at 1",
+        ),
+    ],
+)
+def test_group_batchnorm_rejects_what_it_cannot_group(edit, overrides, message):
+    train_cfg = _paper_train_cfg()
+    edit(train_cfg)
+    with pytest.raises(ValueError, match=message):
+        grow.resolve_grow_config(train_cfg, group_batchnorm=True, **overrides)
+
+
+def test_grouping_a_pointwise_conv_with_its_batchnorm_changes_only_the_layout():
+    _model_cfg, model = _paper_sparknet()
+    grouped = copy.deepcopy(model)
+    rng = torch.random.get_rng_state()
+
+    assert group_conv_with_batchnorm(grouped, [".blocks.2.pointwise"]) == ["blocks.2.pointwise"]
+
+    assert torch.equal(torch.random.get_rng_state(), rng)
+    block = grouped.blocks[2]
+    assert isinstance(block.pointwise, PlainSequential)
+    assert isinstance(block.bn, nn.Identity)
+    # The same tensors in the same order, three of them renamed: an optimizer
+    # built over either model steps the same list.
+    before, after = list(model.named_parameters()), list(grouped.named_parameters())
+    assert len(before) == len(after)
+    assert all(torch.equal(left, right) for (_, left), (_, right) in zip(before, after))
+    assert {left: right for (left, _), (right, _) in zip(before, after) if left != right} == {
+        "blocks.2.pointwise.weight": "blocks.2.pointwise.model.0.weight",
+        "blocks.2.bn.weight": "blocks.2.pointwise.model.1.weight",
+        "blocks.2.bn.bias": "blocks.2.pointwise.model.1.bias",
+    }
+
+    features = torch.randn(8, 1, 32, 101)
+    for training in (True, False):
+        outputs = []
+        for net in (model, grouped):
+            net.train(training)
+            torch.manual_seed(1)  # the training gate noise
+            outputs.append(net(features))
+        assert torch.equal(outputs[0], outputs[1]), training
+    assert torch.equal(model.blocks[2].bn.running_var, block.pointwise.model[1].running_var)
+
+
+@pytest.mark.parametrize(
+    ("module_id", "message"),
+    [
+        (".fc", "only a TCSBlock's 'pointwise'"),
+        (".blocks.2.depthwise", "only a TCSBlock's 'pointwise'"),
+        (".blocks.2", "only a TCSBlock's 'pointwise'"),
+        (".nowhere.pointwise", "no module 'nowhere'"),
+    ],
+)
+def test_grouping_refuses_anything_but_a_block_pointwise_conv(module_id, message):
+    _model_cfg, model = _paper_sparknet()
+    with pytest.raises(ValueError, match=message):
+        group_conv_with_batchnorm(model, [module_id])
+
+
+def test_grouping_refuses_to_group_twice():
+    _model_cfg, model = _paper_sparknet()
+    group_conv_with_batchnorm(model, [".blocks.2.pointwise"])
+    with pytest.raises(ValueError, match="already grouped"):
+        group_conv_with_batchnorm(model, [".blocks.2.pointwise"])
+
+
+def test_the_rebuild_regroups_a_grouped_export():
+    """A clean state whose dendrite branches are (conv, BN) pairs rebuilds exactly."""
+    model_cfg, model = _paper_sparknet()
+    group_conv_with_batchnorm(model, [".blocks.2.pointwise"])
+    main = model.blocks[2].pointwise
+    dendrite = copy.deepcopy(main)
+    with torch.no_grad():
+        for parameter in dendrite.parameters():
+            parameter.normal_()
+        dendrite.model[1].running_mean.normal_()
+        dendrite.model[1].running_var.uniform_(0.5, 2.0)
+    module = RebuiltDendriteModule([dendrite, main], 12, [1, -1, 1, 1])
+    with torch.no_grad():
+        module.skip_weights[0].normal_()
+    model.blocks[2].pointwise = module
+    model.eval()
+
+    rebuilt = rebuild_clean_model(model_cfg, (32, 101), 12, model.state_dict())
+
+    assert isinstance(rebuilt.blocks[2].bn, nn.Identity)
+    features = torch.randn(4, 1, 32, 101)
+    with torch.no_grad():
+        assert torch.equal(rebuilt(features), model(features))
 
 
 def test_a_scaled_forward_function_divides_the_pre_activation():
@@ -1202,6 +1335,11 @@ def test_cli_refuses_a_directory_holding_an_earlier_attempt(tmp_path, capsys):
         (["--arm", ""], "arm must be a non-empty name"),
         (["--arm", "fc sham"], "arm must be a non-empty name"),
         (["--sham", "--arm", "../fc"], "arm must be a non-empty name"),
+        (["--group-batchnorm"], "needs 'pointwise' placements"),
+        (
+            ["--placement", "pointwise_b2", "--group-batchnorm", "--calibrate-dendrite-input-scale"],
+            "leave it at 1",
+        ),
     ],
 )
 def test_cli_rejects_bad_overrides_before_writing_output(tmp_path, capsys, extra, message):
@@ -1218,6 +1356,7 @@ def test_cli_variant_flags_default_to_a_real_run():
     assert (args.sham, args.arm, args.dendrite_weight_decay) == (False, None, None)
     assert args.dendrite_input_scale is None
     assert args.calibrate_dendrite_input_scale is False
+    assert args.group_batchnorm is False
 
     args = grow.build_arg_parser().parse_args([
         "--model-config", "m.yaml", "--output-dir", "o",
@@ -1283,6 +1422,20 @@ def test_cli_switch_input_scale_calibration_reaches_the_run(tmp_path, monkeypatc
     (config,) = received
     assert config.calibrate_dendrite_input_scale is True
     assert config.variant()["dendrite_input_scale_calibration"] == "switch_input_std"
+
+
+def test_cli_group_batchnorm_reaches_the_run(tmp_path, monkeypatch):
+    received = []
+    monkeypatch.setattr(
+        grow, "run_grow", lambda *args, **kwargs: received.append(args[3]) or {}
+    )
+    extra = ["--placement", "pointwise_b2", "--group-batchnorm"]
+
+    assert grow.main(_cli_args(tmp_path / "run", *extra)) == 0
+
+    (config,) = received
+    assert (config.group_batchnorm, config.arm) == (True, "pointwise_b2-bn")
+    assert config.variant()["group_batchnorm"] is True
 
 
 # --------------------------------------------------------------------------
@@ -1540,6 +1693,7 @@ def run_grow():
         dendrite_weight_decay=spec["dendrite_weight_decay"], sham=spec["sham"], arm=spec["arm"],
         dendrite_input_scale=spec["dendrite_input_scale"],
         calibrate_dendrite_input_scale=spec["calibrate_dendrite_input_scale"],
+        group_batchnorm=spec["group_batchnorm"],
     )
     guard = script_validation(grow)
     if spec["probe_momentum"]:
@@ -1591,6 +1745,7 @@ def _launch(workdir: Path, options: dict) -> SimpleNamespace:
         "disable_integration_probe": options.get("disable_integration_probe", False),
         "dendrite_input_scale": options.get("dendrite_input_scale"),
         "calibrate_dendrite_input_scale": options.get("calibrate_dendrite_input_scale", False),
+        "group_batchnorm": options.get("group_batchnorm", False),
         "check_rebuild": options.get("check_rebuild", False),
         "train_cfg": _tiny_train_cfg(options.get("switch_epoch", 2)),
         "model_cfg": TINY_MODEL,
@@ -2113,3 +2268,62 @@ def test_pai_calibrates_input_scale_at_the_switch_before_candidate_training(pai_
         assert entry["forward_function"] == f"tanh(z / {input_std:g})"
         assert entry["folded"] == repr(input_std)
         assert entry["max_abs_diff"] <= grow.PARITY_TOLERANCE
+
+
+GROUPED_POINTWISE = {
+    **REAL_FC, "placement": "pointwise_b2", "group_batchnorm": True, "check_rebuild": True,
+}
+
+
+def test_pai_group_batchnorm_grows_a_conv_and_batchnorm_dendrite(pai_run):
+    plain = pai_run(mode="plain")
+    run = pai_run(**GROUPED_POINTWISE)
+    assert run.result["raised"] is None, run.result.get("traceback")
+    summary = _summary(run)
+    checks = summary["checks"]
+    records = _records(run)
+    name = "blocks.2.pointwise"
+
+    assert summary["status"] == "complete"
+    assert summary["arm"] == "pointwise_b2-bn"
+    assert summary["variant"]["group_batchnorm"] is True
+    assert summary["schedule"]["group_batchnorm"] is True
+
+    # The regrouping is exact: the pre-switch epochs are still the scratch run.
+    for grown_record, scratch_record in zip(records[:2], plain.result["history"][:2]):
+        assert grown_record["segment"] == PRE
+        for key in (
+            "train_loss", "train_gate_sparsity", "train_accuracy",
+            "val_loss", "val_acc", "learning_rate", "parameter_count",
+        ):
+            assert grown_record[key] == scratch_record[key], key
+
+    # Post-switch records report the skip weights as they train.
+    for record in records:
+        assert ("dendrite_skip_weight_mean_abs" in record) == (record["segment"] == POST)
+    assert records[-1]["dendrite_skip_weight_mean_abs"][name] == pytest.approx(
+        summary["dendrite"]["skip_weight_mean_abs"][name]
+    )
+
+    # The dendrite is a conv + BatchNorm copy, and the export keeps both.
+    path = run.output_dir / summary["artifacts"]["final_clean"]
+    with safe_open(str(path), "pt") as clean:
+        keys = set(clean.keys())
+    prefix = f"{name}.layer_array"
+    assert {
+        f"{prefix}.0.model.0.weight", f"{prefix}.0.model.1.running_var",
+        f"{prefix}.1.model.0.weight", f"{prefix}.1.model.1.running_var",
+    } <= keys
+    assert not any(key.startswith("blocks.2.bn.") for key in keys)
+    channels = TINY_MODEL["channels"]
+    # conv (C x C) + BatchNorm affine (2C) + skip weights (C)
+    assert summary["cost"]["deployed"]["params"] - summary["cost"]["base"]["params"] == (
+        channels * channels + 3 * channels
+    )
+    for entry in run.result["rebuild"]:
+        assert entry["max_abs_diff"] <= grow.PARITY_TOLERANCE
+    for key in ("clean_parity_max_abs_diff_final", "clean_parity_max_abs_diff_best"):
+        assert checks[key] <= grow.PARITY_TOLERANCE
+    assert checks["integration_output_max_abs_diff"] <= grow.INTEGRATION_WARN_TOLERANCE
+    assert run.result["final_dendrite"]["max_abs"] > 0
+    assert set(summary["dendrite_diagnostics"]["final"]["modules"]) == {name}

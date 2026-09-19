@@ -32,6 +32,13 @@ the rebuilt model needs must be in the file with the same shape.  PAI's
 cleanup drops the skip weights of a one-dendrite module; the repo's exporter
 restores them, and a file without them is refused rather than rebuilt as a
 model whose dendrite silently does nothing.
+
+A run with ``--group-batchnorm`` perforated a SparkNet pointwise conv together
+with its block's BatchNorm (:func:`group_conv_with_batchnorm`), so its
+``layer_array`` entries are ``PAISequential``s (``model.0`` the conv,
+``model.1`` the BatchNorm) and the block's own ``bn`` is gone.  The rebuild
+recognizes that layout from the tensors and regroups the fresh model the same
+way before loading.
 """
 
 from __future__ import annotations
@@ -44,6 +51,7 @@ import torch
 import torch.nn as nn
 
 from kws.models.registry import build_model
+from kws.models.sparknet import TCSBlock
 
 LAYER_ARRAY = "layer_array"
 SKIP_WEIGHTS = "skip_weights"
@@ -66,6 +74,67 @@ VIEW_TUPLE = "view_tuple"
 PAI_MODULE_BOOKKEEPING = ("node_index", "num_cycles")
 PAI_ANYWHERE_BOOKKEEPING = ("tracker_string", "module_id")
 PAI_BOOKKEEPING = PAI_MODULE_BOOKKEEPING + PAI_ANYWHERE_BOOKKEEPING
+# The TCSBlock conv that ``--group-batchnorm`` can perforate, and the
+# BatchNorm its block applies directly to that conv's output.
+GROUPABLE_CONV = "pointwise"
+GROUPED_BATCHNORM = "bn"
+
+
+class PlainSequential(nn.Module):
+    """PAI's ``PAISequential`` without PAI: same forward, same state-dict layout.
+
+    ``PAISequential(layer_array)`` keeps its layers under ``model`` (an
+    ``nn.Sequential``), so its tensors are ``model.<i>.*``.
+    """
+
+    def __init__(self, layer_array: Sequence[nn.Module]) -> None:
+        super().__init__()
+        self.model = nn.Sequential(*layer_array)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
+
+
+def group_conv_with_batchnorm(
+    model: nn.Module,
+    module_ids: Sequence[str],
+    container: Callable[[list[nn.Module]], nn.Module] = PlainSequential,
+) -> list[str]:
+    """Regroup each listed TCSBlock pointwise conv with the block's BatchNorm.
+
+    ``block.pointwise`` becomes ``container([pointwise, bn])`` and ``block.bn``
+    an ``nn.Identity``, so the block computes exactly what it did and a
+    dendrite on ``.blocks.<k>.pointwise`` now copies conv *and* BatchNorm, the
+    grouping PAI's ``PAISequential`` is documented for.  The same module
+    objects move, nothing is initialized, and both attributes keep their
+    registration slots, so parameter order, values and RNG state are
+    unchanged.  ``module_ids`` may carry PAI's leading dot.  Returns the
+    grouped module names.
+    """
+    grouped = []
+    for module_id in module_ids:
+        name = module_id.lstrip(".")
+        parent_name, _, child = name.rpartition(".")
+        try:
+            parent = model.get_submodule(parent_name) if parent_name else model
+        except AttributeError as error:
+            raise ValueError(f"no module {parent_name!r} to group {name!r} in") from error
+        if child != GROUPABLE_CONV or not isinstance(parent, TCSBlock):
+            raise ValueError(
+                f"only a TCSBlock's {GROUPABLE_CONV!r} conv can be grouped with its "
+                f"BatchNorm; got {name!r} in {type(parent).__name__}"
+            )
+        conv = getattr(parent, GROUPABLE_CONV)
+        batchnorm = getattr(parent, GROUPED_BATCHNORM)
+        if not isinstance(conv, nn.Conv2d) or not isinstance(batchnorm, nn.BatchNorm2d):
+            raise ValueError(
+                f"{name} is already grouped or not a Conv2d + BatchNorm2d pair "
+                f"({type(conv).__name__}, {type(batchnorm).__name__})"
+            )
+        setattr(parent, GROUPABLE_CONV, container([conv, batchnorm]))
+        setattr(parent, GROUPED_BATCHNORM, nn.Identity())
+        grouped.append(name)
+    return grouped
 
 
 class RebuiltDendriteModule(nn.Module):
@@ -241,6 +310,11 @@ def rebuild_clean_model(
     model = build_model(model_cfg, (int(input_shape[0]), int(input_shape[1])), int(num_classes))
     state = {key: value.detach().cpu() for key, value in clean_state.items()}
     prefixes = dendrite_prefixes(state)
+    # A --group-batchnorm dendrite module holds PAISequential(conv, bn) copies.
+    group_conv_with_batchnorm(model, [
+        prefix for prefix in prefixes
+        if f"{prefix}.{LAYER_ARRAY}.0.model.1.running_var" in state
+    ])
     for prefix in prefixes:
         try:
             original = model.get_submodule(prefix)

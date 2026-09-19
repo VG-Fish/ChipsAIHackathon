@@ -70,9 +70,22 @@ Run variants (CLI flags; each is recorded under ``variant`` in the summary):
     validation probe at the switch and use their geometric mean as ``C``.
     For a single-module placement this is exactly that module's measured
     standard deviation.  Calibration happens before candidate training.
+``--group-batchnorm``
+    Perforate each placement pointwise conv together with its block's
+    BatchNorm, as ``PAISequential([pointwise, bn])``
+    (:func:`kws.optimize.grow_clean_rebuild.group_conv_with_batchnorm`).  A
+    bare pointwise dendrite is added to the conv's raw output (std ~100), and
+    the BatchNorm right after divides its contribution by that std, so the skip
+    weights learn at ~lr / std**2 and stay inert (the pointwise_b2-auto pilot).
+    Grouped, the dendrite's copy has its own BatchNorm, which normalizes its
+    pre-activation, and its contribution is added after the base BatchNorm,
+    at unit scale.  The regrouping is exact and consumes no randomness, so the
+    pre-switch run is still the paired scratch run.  Pointwise placements
+    only; it replaces the input scale, so ``C`` must stay 1.
 ``--arm NAME``
     Label recorded as ``arm`` in the summary (``[A-Za-z0-9._-]+``).  Defaults
-    to the placement, with ``-sham`` appended for a sham run.
+    to the placement, with ``-bn`` appended for ``--group-batchnorm`` and
+    ``-sham`` for a sham run.
 
 Further checks in ``reports/grow_summary.yaml``:
 
@@ -86,6 +99,10 @@ Further checks in ``reports/grow_summary.yaml``:
 ``dendrite_input_std_at_switch``
     Standard deviation of each dendrite module's input on that probe at the
     end of base epoch S; the natural value of ``--dendrite-input-scale``.
+
+Each post-switch record in the metrics file carries
+``dendrite_skip_weight_mean_abs`` (per dendrite module), so a dendrite that
+stays inert shows early in a running job, not only in the final summary.
 ``dendrite_diagnostics.{final,best}``
     :func:`kws.optimize.grow_diagnostics.dendrite_diagnostics` of each
     exported clean model on the training device (dendrite on/off validation
@@ -131,6 +148,7 @@ from kws.optimize.dendritic import (
     export_final_pai_model,
     freeze_base_batchnorm_stats,
 )
+from kws.optimize.grow_clean_rebuild import GROUPABLE_CONV, group_conv_with_batchnorm
 from kws.optimize.grow_diagnostics import dendrite_diagnostics
 from kws.train import (
     _task_loss_scale,
@@ -168,6 +186,7 @@ UNUSED_HISTORY_PATIENCE = 1_000_000
 # Arm labels end up in directory names and report tables.
 ARM_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 SHAM_SUFFIX = "-sham"
+GROUP_BATCHNORM_SUFFIX = "-bn"
 # A real run's logits may move this much across the integration before the
 # driver warns; PAI starts the skip weights at zero, so ~0 is expected.
 INTEGRATION_WARN_TOLERANCE = 1e-6
@@ -202,12 +221,16 @@ class GrowConfig:
     dendrite_input_scale: float = 1.0
     # Replace the scale at the switch with the module input-statistic scale.
     calibrate_dendrite_input_scale: bool = False
-    # Summary label; empty means ``default_arm(placement, sham)``.
+    # Perforate each pointwise conv as PAISequential([pointwise, bn]).
+    group_batchnorm: bool = False
+    # Summary label; empty means ``default_arm(placement, sham, group_batchnorm)``.
     arm: str = ""
 
     def __post_init__(self) -> None:
         if not self.arm:
-            object.__setattr__(self, "arm", default_arm(self.placement, self.sham))
+            object.__setattr__(
+                self, "arm", default_arm(self.placement, self.sham, self.group_batchnorm)
+            )
 
     @property
     def total_epochs(self) -> int:
@@ -224,6 +247,8 @@ class GrowConfig:
         }
         if self.calibrate_dendrite_input_scale:
             variant["dendrite_input_scale_calibration"] = "switch_input_std"
+        if self.group_batchnorm:
+            variant["group_batchnorm"] = True
         return variant
 
     def segment(self, epoch: int) -> str:
@@ -244,9 +269,10 @@ class GrowConfig:
         return epoch - self.candidate_epochs
 
 
-def default_arm(placement: str, sham: bool) -> str:
+def default_arm(placement: str, sham: bool, group_batchnorm: bool = False) -> str:
     """The arm label a run gets without ``--arm``."""
-    return f"{placement}{SHAM_SUFFIX}" if sham else placement
+    label = f"{placement}{GROUP_BATCHNORM_SUFFIX}" if group_batchnorm else placement
+    return f"{label}{SHAM_SUFFIX}" if sham else label
 
 
 def calibrated_dendrite_input_scale(input_std: Mapping[str, float]) -> float:
@@ -273,11 +299,13 @@ def resolve_grow_config(
     arm: str | None = None,
     dendrite_input_scale: float | None = None,
     calibrate_dendrite_input_scale: bool = False,
+    group_batchnorm: bool = False,
 ) -> GrowConfig:
     """Validate the ``grow_dendrites`` block before any output is written.
 
     Keyword arguments are CLI overrides; ``None`` keeps the config's value.
-    ``arm`` defaults to the placement, with ``-sham`` appended when ``sham``.
+    ``arm`` defaults to the placement, with ``-bn`` appended when
+    ``group_batchnorm`` and ``-sham`` when ``sham``.
     """
     grow = train_cfg.get("grow_dendrites")
     if not isinstance(grow, Mapping):
@@ -351,6 +379,22 @@ def resolve_grow_config(
         raise ValueError(
             f"dendrite_input_scale must be positive and finite; got {dendrite_input_scale}"
         )
+    if group_batchnorm:
+        ungroupable = [
+            module_id for module_id in module_ids
+            if module_id.rpartition(".")[2] != GROUPABLE_CONV
+        ]
+        if ungroupable:
+            raise ValueError(
+                f"group_batchnorm needs {GROUPABLE_CONV!r} placements; "
+                f"{chosen!r} has {ungroupable}"
+            )
+        # The dendrite's own BatchNorm normalizes its pre-activation, and a
+        # scale cannot be folded through a BatchNorm into the export.
+        if calibrate_dendrite_input_scale or dendrite_input_scale != 1.0:
+            raise ValueError(
+                "group_batchnorm replaces the dendrite input scale; leave it at 1"
+            )
 
     cap =max_minutes if max_minutes is not None else grow.get("max_wall_clock_minutes")
     if cap is not None:
@@ -358,7 +402,7 @@ def resolve_grow_config(
         if cap <= 0:
             raise ValueError("max_wall_clock_minutes must be positive")
 
-    label = default_arm(str(chosen), bool(sham)) if arm is None else arm
+    label = default_arm(str(chosen), bool(sham), bool(group_batchnorm)) if arm is None else arm
     if not isinstance(label, str) or not ARM_PATTERN.fullmatch(label):
         raise ValueError(
             f"arm must be a non-empty name of letters, digits, '.', '_' or '-'; got {label!r}"
@@ -377,6 +421,7 @@ def resolve_grow_config(
         sham=bool(sham),
         dendrite_input_scale=dendrite_input_scale,
         calibrate_dendrite_input_scale=bool(calibrate_dendrite_input_scale),
+        group_batchnorm=bool(group_batchnorm),
         arm=label,
     )
 
@@ -919,6 +964,7 @@ def run_grow(
         "dendrite_weight_decay": grow.dendrite_weight_decay,
         "dendrite_input_scale": grow.dendrite_input_scale,
         "calibrate_dendrite_input_scale": grow.calibrate_dendrite_input_scale,
+        "group_batchnorm": grow.group_batchnorm,
         "carry_momentum": grow.carry_momentum,
     }
     device = get_device()
@@ -984,6 +1030,11 @@ def run_grow(
         # Wrapping must not consume the stream the scratch run's first epoch
         # draws its gate noise from.
         rng_after_init = _capture_rng(device)
+        if grow.group_batchnorm:
+            grouped = group_conv_with_batchnorm(
+                base, grow.module_ids, container=GPA.PAISequential
+            )
+            logger.info("Grouped with their BatchNorm as PAISequential: %s", grouped)
         with _pai_cwd(run_dir):
             model = UPA.perforate_model(
                 base,
@@ -1090,13 +1141,19 @@ def run_grow(
                 "seed": seed,
                 **{f"train_{name}": value for name, value in train_losses.items() if name != "total"},
             }
+            if segment == "post_switch":
+                record["dendrite_skip_weight_mean_abs"] = _skip_weight_mean_abs(model)
             history.append(record)
             recorder.append(record)
             logger.info(
-                "epoch %d/%d %s base_epoch=%s lr=%.6g train_loss=%.4f val_acc=%.4f params=%d",
+                "epoch %d/%d %s base_epoch=%s lr=%.6g train_loss=%.4f val_acc=%.4f params=%d%s",
                 epoch, grow.total_epochs, segment, record["base_epoch"],
                 record["learning_rate"][0], train_losses["total"], val_acc,
                 record["parameter_count"],
+                "".join(
+                    f" skip|w|[{name}]={value:.4g}"
+                    for name, value in record.get("dendrite_skip_weight_mean_abs", {}).items()
+                ),
             )
 
             if segment == "post_switch" and val_acc > best_post_acc:
@@ -1497,9 +1554,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "the configured modules' measured input standard deviations",
     )
     parser.add_argument(
+        "--group-batchnorm", action="store_true",
+        help="perforate each placement pointwise conv together with its block's "
+        "BatchNorm (PAISequential([pointwise, bn])); the input scale must stay 1",
+    )
+    parser.add_argument(
         "--arm", default=None,
         help="label recorded in the summary ([A-Za-z0-9._-]+); default: the placement, "
-        f"with '{SHAM_SUFFIX}' appended for --sham",
+        f"with '{GROUP_BATCHNORM_SUFFIX}' appended for --group-batchnorm and "
+        f"'{SHAM_SUFFIX}' for --sham",
     )
     return parser
 
@@ -1525,6 +1588,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arm=args.arm,
             dendrite_input_scale=args.dendrite_input_scale,
             calibrate_dendrite_input_scale=args.calibrate_dendrite_input_scale,
+            group_batchnorm=args.group_batchnorm,
         )
     except ValueError as error:
         parser.error(str(error))
