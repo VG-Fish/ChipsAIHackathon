@@ -72,6 +72,8 @@ grow_dendrites:
     pointwise: [.blocks.3.pointwise, .blocks.2.pointwise]
     pointwise_b2: [.blocks.2.pointwise]
     pointwise_b3: [.blocks.3.pointwise]
+    # Every C -> C pointwise conv; blocks.0's maps the 32 feature bins to C.
+    pointwise_b123: [.blocks.3.pointwise, .blocks.2.pointwise, .blocks.1.pointwise]
     gate_conv: [.gate_conv]
     depthwise: [.blocks.3.depthwise, .blocks.2.depthwise]
   # Only the candidate trains in p-mode (PAI strips the base out of the

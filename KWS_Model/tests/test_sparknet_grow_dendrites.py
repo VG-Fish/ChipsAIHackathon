@@ -91,6 +91,9 @@ def test_pointwise_blocks_are_available_as_independent_placements():
     assert grow.resolve_grow_config(
         train_cfg, placement="pointwise_b3"
     ).module_ids == (".blocks.3.pointwise",)
+    assert grow.resolve_grow_config(
+        train_cfg, placement="pointwise_b123"
+    ).module_ids == (".blocks.3.pointwise", ".blocks.2.pointwise", ".blocks.1.pointwise")
 
 
 def test_cli_overrides_win_and_the_train_config_is_not_mutated():
@@ -394,26 +397,29 @@ def test_grouping_refuses_to_group_twice():
         group_conv_with_batchnorm(model, [".blocks.2.pointwise"])
 
 
-def test_the_rebuild_regroups_a_grouped_export():
+@pytest.mark.parametrize("blocks", [(2,), (3, 2, 1)])
+def test_the_rebuild_regroups_a_grouped_export(blocks):
     """A clean state whose dendrite branches are (conv, BN) pairs rebuilds exactly."""
     model_cfg, model = _paper_sparknet()
-    group_conv_with_batchnorm(model, [".blocks.2.pointwise"])
-    main = model.blocks[2].pointwise
-    dendrite = copy.deepcopy(main)
-    with torch.no_grad():
-        for parameter in dendrite.parameters():
-            parameter.normal_()
-        dendrite.model[1].running_mean.normal_()
-        dendrite.model[1].running_var.uniform_(0.5, 2.0)
-    module = RebuiltDendriteModule([dendrite, main], 12, [1, -1, 1, 1])
-    with torch.no_grad():
-        module.skip_weights[0].normal_()
-    model.blocks[2].pointwise = module
+    group_conv_with_batchnorm(model, [f".blocks.{index}.pointwise" for index in blocks])
+    for index in blocks:
+        main = model.blocks[index].pointwise
+        dendrite = copy.deepcopy(main)
+        with torch.no_grad():
+            for parameter in dendrite.parameters():
+                parameter.normal_()
+            dendrite.model[1].running_mean.normal_()
+            dendrite.model[1].running_var.uniform_(0.5, 2.0)
+        module = RebuiltDendriteModule([dendrite, main], 12, [1, -1, 1, 1])
+        with torch.no_grad():
+            module.skip_weights[0].normal_()
+        model.blocks[index].pointwise = module
     model.eval()
 
     rebuilt = rebuild_clean_model(model_cfg, (32, 101), 12, model.state_dict())
 
-    assert isinstance(rebuilt.blocks[2].bn, nn.Identity)
+    for index in range(4):
+        assert isinstance(rebuilt.blocks[index].bn, nn.Identity) == (index in blocks)
     features = torch.randn(4, 1, 32, 101)
     with torch.no_grad():
         assert torch.equal(rebuilt(features), model(features))
@@ -2327,3 +2333,33 @@ def test_pai_group_batchnorm_grows_a_conv_and_batchnorm_dendrite(pai_run):
     assert checks["integration_output_max_abs_diff"] <= grow.INTEGRATION_WARN_TOLERANCE
     assert run.result["final_dendrite"]["max_abs"] > 0
     assert set(summary["dendrite_diagnostics"]["final"]["modules"]) == {name}
+
+
+def test_pai_group_batchnorm_grows_one_dendrite_per_grouped_block(pai_run):
+    run = pai_run(**{**GROUPED_POINTWISE, "placement": "pointwise_b123"})
+    assert run.result["raised"] is None, run.result.get("traceback")
+    summary = _summary(run)
+    checks = summary["checks"]
+    blocks = (1, 2, 3)
+
+    assert summary["status"] == "complete"
+    assert summary["arm"] == "pointwise_b123-bn"
+    path = run.output_dir / summary["artifacts"]["final_clean"]
+    with safe_open(str(path), "pt") as clean:
+        keys = set(clean.keys())
+    for index in blocks:
+        assert f"blocks.{index}.pointwise.layer_array.0.model.1.running_var" in keys
+        assert not any(key.startswith(f"blocks.{index}.bn.") for key in keys)
+    assert "blocks.0.bn.running_var" in keys
+    channels = TINY_MODEL["channels"]
+    assert summary["cost"]["deployed"]["params"] - summary["cost"]["base"]["params"] == (
+        len(blocks) * (channels * channels + 3 * channels)
+    )
+    for entry in run.result["rebuild"]:
+        assert entry["max_abs_diff"] <= grow.PARITY_TOLERANCE
+    for key in ("clean_parity_max_abs_diff_final", "clean_parity_max_abs_diff_best"):
+        assert checks[key] <= grow.PARITY_TOLERANCE
+    assert checks["integration_output_max_abs_diff"] <= grow.INTEGRATION_WARN_TOLERANCE
+    assert set(summary["dendrite_diagnostics"]["final"]["modules"]) == {
+        f"blocks.{index}.pointwise" for index in blocks
+    }
