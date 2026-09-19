@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.13)
+
+# PICO_SDK_PATH must point at a pico-sdk checkout (tested with 2.2.0).
+include(pico_sdk_import.cmake)
+project(kws_rp2040 C CXX ASM)
+set(CMAKE_C_STANDARD 11)
+pico_sdk_init()
+
+add_executable(kws_rp2040 main.c kws_engine.c)
+target_compile_options(kws_rp2040 PRIVATE -O2 -Wall -Wextra)
+target_link_libraries(kws_rp2040 pico_stdlib hardware_clocks)
+# USB serial needs the SDK's tinyusb submodule; UART0 (GP0/GP1, 115200) always works.
+if (TARGET tinyusb_device)
+    pico_enable_stdio_usb(kws_rp2040 1)
+endif()
+pico_enable_stdio_uart(kws_rp2040 1)
+pico_add_extra_outputs(kws_rp2040)

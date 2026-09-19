@@ -321,6 +321,16 @@ def test_group_batchnorm_is_a_run_variant_with_its_own_arm():
     assert "group_batchnorm" not in grow.resolve_grow_config(_paper_train_cfg()).variant()
 
 
+def test_the_last_group_batchnorm_flag_wins():
+    # a job queue that always passes --group-batchnorm can still run an fc arm
+    parser = grow.build_arg_parser()
+    required = ["--model-config", "m.yaml", "--output-dir", "out"]
+
+    assert parser.parse_args(required).group_batchnorm is False
+    assert parser.parse_args(required + ["--group-batchnorm"]).group_batchnorm is True
+    assert parser.parse_args(required + ["--group-batchnorm", "--no-group-batchnorm"]).group_batchnorm is False
+
+
 @pytest.mark.parametrize(
     ("edit", "overrides", "message"),
     [
@@ -340,6 +350,109 @@ def test_group_batchnorm_rejects_what_it_cannot_group(edit, overrides, message):
     edit(train_cfg)
     with pytest.raises(ValueError, match=message):
         grow.resolve_grow_config(train_cfg, group_batchnorm=True, **overrides)
+
+
+# --------------------------------------------------------------------------
+# --teacher-checkpoint (knowledge distillation)
+
+
+def _save_sparknet_checkpoint(path: Path, seed: int, width: int = 4) -> nn.Module:
+    model_cfg, _ = _paper_sparknet(width)
+    torch.manual_seed(seed)
+    model = build_model(model_cfg, (32, 101), 12)
+    torch.save(
+        {"model_cfg": model_cfg, "input_shape": [32, 101], "num_classes": 12,
+         "model_state_dict": model.state_dict()},
+        path,
+    )
+    return model.eval()
+
+
+def test_distillation_is_a_run_variant_with_its_own_arm(tmp_path):
+    teacher = tmp_path / "teacher.pt"
+    teacher.write_bytes(b"")
+    config = grow.resolve_grow_config(
+        _paper_train_cfg(), placement="pointwise_b2", group_batchnorm=True,
+        teacher_checkpoints=[str(teacher)], kd_alpha=0.7, kd_temperature=2.0,
+    )
+    plain = grow.resolve_grow_config(_paper_train_cfg(), kd_alpha=0.7, kd_temperature=2.0)
+
+    assert config.arm == "pointwise_b2-bn-kd"
+    assert config.variant()["distillation"] == {
+        "teachers": [str(teacher)], "alpha": 0.7, "temperature": 2.0,
+    }
+    assert (plain.kd_alpha, plain.kd_temperature, plain.teacher_checkpoints) == (0.0, 1.0, ())
+    assert "distillation" not in plain.variant()
+    explicit = grow.resolve_grow_config(
+        _paper_train_cfg(), teacher_checkpoints=[str(teacher)], arm="mine"
+    )
+    assert explicit.arm == "mine"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"kd_alpha": 0.0}, "kd_alpha"),
+        ({"kd_alpha": 1.5}, "kd_alpha"),
+        ({"kd_temperature": 0.0}, "kd_temperature"),
+        ({"teacher_checkpoints": ["/nonexistent/teacher.pt"]}, "not found"),
+    ],
+)
+def test_distillation_rejects_invalid_settings(tmp_path, overrides, message):
+    teacher = tmp_path / "teacher.pt"
+    teacher.write_bytes(b"")
+    kwargs = {"teacher_checkpoints": [str(teacher)], **overrides}
+    with pytest.raises(ValueError, match=message):
+        grow.resolve_grow_config(_paper_train_cfg(), **kwargs)
+
+
+def test_distillation_loss_is_the_temperature_scaled_kl():
+    torch.manual_seed(0)
+    student, teacher = torch.randn(5, 12), torch.randn(5, 12)
+    expected = sum(
+        (torch.softmax(t / 3, 0) * (torch.log_softmax(t / 3, 0) - torch.log_softmax(s / 3, 0))).sum()
+        for s, t in zip(student, teacher)
+    ) / 5 * 9
+    assert grow.distillation_loss(student, teacher, 3.0) == pytest.approx(float(expected), rel=1e-5)
+    assert grow.distillation_loss(teacher, teacher, 3.0) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_teacher_averages_member_logits_and_never_trains(tmp_path):
+    members = [_save_sparknet_checkpoint(tmp_path / f"t{seed}.pt", seed) for seed in (1, 2)]
+    teacher = grow.LogitEnsembleTeacher(
+        [str(tmp_path / "t1.pt"), str(tmp_path / "t2.pt")], torch.device("cpu")
+    )
+    teacher.train()
+    features = torch.randn(3, 1, 32, 101)
+    with torch.no_grad():
+        expected = (members[0](features) + members[1](features)) / 2
+
+    assert not teacher.training and not any(member.training for member in teacher.members)
+    assert not any(parameter.requires_grad for parameter in teacher.parameters())
+    assert torch.allclose(teacher(features), expected, atol=1e-6)
+    # Eval mode draws no gate noise, so the teacher is deterministic.
+    assert torch.equal(teacher(features), teacher(features))
+
+
+def test_a_distilled_epoch_mixes_the_losses_and_logs_both(tmp_path):
+    _save_sparknet_checkpoint(tmp_path / "t.pt", seed=1)
+    teacher = grow.LogitEnsembleTeacher([str(tmp_path / "t.pt")], torch.device("cpu"))
+    model_cfg, _ = _paper_sparknet(4)
+    torch.manual_seed(0)
+    model = build_model(model_cfg, (32, 101), 12)
+    loader = DataLoader(
+        TensorDataset(torch.randn(8, 1, 32, 101), torch.randint(0, 12, (8,))), batch_size=8
+    )
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+    losses, _ = grow._train_epoch(
+        model, loader, optimizer, None, nn.CrossEntropyLoss(), 100.0, torch.device("cpu"),
+        pin_base_batchnorm=False, teacher=teacher, kd_alpha=0.25, kd_temperature=2.0,
+    )
+    auxiliary = sum(value for name, value in losses.items() if name not in {"total", "ce", "kd"})
+
+    assert losses["total"] == pytest.approx(
+        100.0 * (0.75 * losses["ce"] + 0.25 * losses["kd"]) + auxiliary, rel=1e-5
+    )
 
 
 def test_grouping_a_pointwise_conv_with_its_batchnorm_changes_only_the_layout():

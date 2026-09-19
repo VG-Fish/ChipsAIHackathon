@@ -1,0 +1,10 @@
+# SparkNet C=18 trained on the paper recipe, the C16 reference narrowed/widened
+# with nothing else changed (5,326 learned parameters on MFCC-32 x 101 frames,
+# 12 classes, gate_channels=32).  Added 2026-09-19 as an odd-width frontier point
+# and dendrite base for the accuracy-tier search; not a width the paper reports.
+family: sparknet
+name: sparknet_c18_paper
+channels: 18
+gate_channels: 32
+# 100 * cross_entropy + 1 * gate_sparsity with the recipe's task_loss_scale: 100.
+sparsity_weight: 1.0

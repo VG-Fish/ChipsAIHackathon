@@ -130,12 +130,13 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import yaml
 
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
 from kws.data.splits import TRAIN, VAL
-from kws.models.registry import build_model, model_family
+from kws.models.registry import build_model, build_model_from_checkpoint, model_family
 from kws.optimize.dendritic import (
     GPA,
     UPA,
@@ -150,6 +151,7 @@ from kws.optimize.dendritic import (
 )
 from kws.optimize.grow_clean_rebuild import GROUPABLE_CONV, group_conv_with_batchnorm
 from kws.optimize.grow_diagnostics import dendrite_diagnostics
+from kws.optimize.kd import file_sha256
 from kws.train import (
     _task_loss_scale,
     build_lr_scheduler,
@@ -186,6 +188,7 @@ UNUSED_HISTORY_PATIENCE = 1_000_000
 # Arm labels end up in directory names and report tables.
 ARM_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 SHAM_SUFFIX = "-sham"
+KD_SUFFIX = "-kd"
 GROUP_BATCHNORM_SUFFIX = "-bn"
 # A real run's logits may move this much across the integration before the
 # driver warns; PAI starts the skip weights at zero, so ~0 is expected.
@@ -223,6 +226,12 @@ class GrowConfig:
     calibrate_dendrite_input_scale: bool = False
     # Perforate each pointwise conv as PAISequential([pointwise, bn]).
     group_batchnorm: bool = False
+    # Frozen checkpoints whose averaged logits are the distillation target;
+    # empty means no distillation.
+    teacher_checkpoints: tuple[str, ...] = ()
+    # Loss = task_loss_scale * ((1 - kd_alpha) * CE + kd_alpha * T^2 * KL).
+    kd_alpha: float = 0.0
+    kd_temperature: float = 1.0
     # Summary label; empty means ``default_arm(placement, sham, group_batchnorm)``.
     arm: str = ""
 
@@ -249,6 +258,12 @@ class GrowConfig:
             variant["dendrite_input_scale_calibration"] = "switch_input_std"
         if self.group_batchnorm:
             variant["group_batchnorm"] = True
+        if self.teacher_checkpoints:
+            variant["distillation"] = {
+                "teachers": list(self.teacher_checkpoints),
+                "alpha": self.kd_alpha,
+                "temperature": self.kd_temperature,
+            }
         return variant
 
     def segment(self, epoch: int) -> str:
@@ -300,12 +315,16 @@ def resolve_grow_config(
     dendrite_input_scale: float | None = None,
     calibrate_dendrite_input_scale: bool = False,
     group_batchnorm: bool = False,
+    teacher_checkpoints: Sequence[str] = (),
+    kd_alpha: float = 0.9,
+    kd_temperature: float = 4.0,
 ) -> GrowConfig:
     """Validate the ``grow_dendrites`` block before any output is written.
 
     Keyword arguments are CLI overrides; ``None`` keeps the config's value.
     ``arm`` defaults to the placement, with ``-bn`` appended when
-    ``group_batchnorm`` and ``-sham`` when ``sham``.
+    ``group_batchnorm``, ``-sham`` when ``sham`` and ``-kd`` when teachers
+    are given.  ``kd_alpha`` and ``kd_temperature`` apply only with teachers.
     """
     grow = train_cfg.get("grow_dendrites")
     if not isinstance(grow, Mapping):
@@ -402,7 +421,22 @@ def resolve_grow_config(
         if cap <= 0:
             raise ValueError("max_wall_clock_minutes must be positive")
 
+    teachers = tuple(str(path) for path in teacher_checkpoints)
+    missing = [path for path in teachers if not Path(path).is_file()]
+    if missing:
+        raise ValueError(f"teacher checkpoints not found: {missing}")
+    if teachers:
+        kd_alpha, kd_temperature = float(kd_alpha), float(kd_temperature)
+        if not 0.0 < kd_alpha <= 1.0:
+            raise ValueError(f"kd_alpha must be in (0, 1]; got {kd_alpha}")
+        if not math.isfinite(kd_temperature) or kd_temperature <= 0:
+            raise ValueError(f"kd_temperature must be positive and finite; got {kd_temperature}")
+    else:
+        kd_alpha, kd_temperature = 0.0, 1.0
+
     label = default_arm(str(chosen), bool(sham), bool(group_batchnorm)) if arm is None else arm
+    if arm is None and teachers:
+        label = f"{label}{KD_SUFFIX}"
     if not isinstance(label, str) or not ARM_PATTERN.fullmatch(label):
         raise ValueError(
             f"arm must be a non-empty name of letters, digits, '.', '_' or '-'; got {label!r}"
@@ -422,6 +456,9 @@ def resolve_grow_config(
         dendrite_input_scale=dendrite_input_scale,
         calibrate_dendrite_input_scale=bool(calibrate_dendrite_input_scale),
         group_batchnorm=bool(group_batchnorm),
+        teacher_checkpoints=teachers,
+        kd_alpha=kd_alpha,
+        kd_temperature=kd_temperature,
         arm=label,
     )
 
@@ -855,6 +892,42 @@ def probe_logits(
         _restore_rng(rng)
 
 
+class LogitEnsembleTeacher(nn.Module):
+    """Frozen checkpoints whose averaged logits are the distillation target.
+
+    Always in eval mode, so SparkNet's training-only gate noise is off and the
+    teacher draws nothing from the RNG streams the student's run depends on.
+    """
+
+    def __init__(self, checkpoint_paths: Sequence[str], device: torch.device) -> None:
+        super().__init__()
+        members = []
+        for path in checkpoint_paths:
+            checkpoint = torch.load(path, map_location=device, weights_only=False)
+            member = build_model_from_checkpoint(checkpoint)
+            member.load_state_dict(checkpoint["model_state_dict"])
+            members.append(member.to(device).eval().requires_grad_(False))
+        self.members = nn.ModuleList(members)
+
+    def train(self, mode: bool = True) -> "LogitEnsembleTeacher":
+        return super().train(False)
+
+    @torch.no_grad()
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return torch.stack([member(features) for member in self.members]).mean(dim=0)
+
+
+def distillation_loss(
+    student_logits: torch.Tensor, teacher_logits: torch.Tensor, temperature: float
+) -> torch.Tensor:
+    """Hinton's T^2-scaled KL(teacher || student) on temperature-softened logits."""
+    return F.kl_div(
+        F.log_softmax(student_logits / temperature, dim=1),
+        F.softmax(teacher_logits / temperature, dim=1),
+        reduction="batchmean",
+    ) * (temperature * temperature)
+
+
 def _train_epoch(
     model: nn.Module,
     loader,
@@ -865,8 +938,16 @@ def _train_epoch(
     device: torch.device,
     *,
     pin_base_batchnorm: bool,
+    teacher: nn.Module | None = None,
+    kd_alpha: float = 0.0,
+    kd_temperature: float = 1.0,
 ) -> tuple[dict[str, float], float]:
-    """One epoch with ``kws.train.run_finetune``'s exact step sequence."""
+    """One epoch with ``kws.train.run_finetune``'s exact step sequence.
+
+    With a ``teacher`` the task term becomes
+    ``(1 - kd_alpha) * CE + kd_alpha * distillation_loss``, still multiplied
+    by ``task_loss_scale``; the auxiliary losses are unchanged.
+    """
     set_train_mode_preserving_frozen_batchnorm(model)
     if pin_base_batchnorm:
         # BatchNorm statistics move in forward(), which no optimizer filter
@@ -882,7 +963,13 @@ def _train_epoch(
         features, labels = features.to(device), labels.to(device)
         optimizer.zero_grad()
         logits = model(features)
-        losses = {"total": task_loss_scale * criterion(logits, labels)}
+        task = criterion(logits, labels)
+        losses: dict[str, torch.Tensor] = {}
+        if teacher is not None:
+            kd = distillation_loss(logits, teacher(features), kd_temperature)
+            losses["ce"], losses["kd"] = task.detach(), kd.detach()
+            task = (1.0 - kd_alpha) * task + kd_alpha * kd
+        losses["total"] = task_loss_scale * task
         for name, (value, weight) in collect_auxiliary_losses(model).items():
             if name in losses:
                 raise ValueError(f"auxiliary loss {name!r} collides with a task loss")
@@ -968,6 +1055,19 @@ def run_grow(
         "carry_momentum": grow.carry_momentum,
     }
     device = get_device()
+    teacher: LogitEnsembleTeacher | None = None
+    if grow.teacher_checkpoints:
+        # Built before the seeded init so the student starts from the paired
+        # scratch run's weights; the teacher itself is never randomized.
+        teacher = LogitEnsembleTeacher(grow.teacher_checkpoints, device)
+        schedule["distillation"] = {
+            "teachers": [
+                {"path": path, "sha256": file_sha256(path)} for path in grow.teacher_checkpoints
+            ],
+            "alpha": grow.kd_alpha,
+            "temperature": grow.kd_temperature,
+            "combination": "mean of member logits",
+        }
 
     def write_summary(status: str, reason: str | None = None) -> dict[str, Any]:
         summary = {
@@ -1114,6 +1214,7 @@ def run_grow(
                 scheduler if segment != "candidate" else None,
                 criterion, task_loss_scale, device,
                 pin_base_batchnorm=segment == "candidate" and pin_bn,
+                teacher=teacher, kd_alpha=grow.kd_alpha, kd_temperature=grow.kd_temperature,
             )
             global_step += steps_per_epoch
             if segment != "candidate":
@@ -1554,10 +1655,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "the configured modules' measured input standard deviations",
     )
     parser.add_argument(
-        "--group-batchnorm", action="store_true",
+        "--group-batchnorm", action=argparse.BooleanOptionalAction, default=False,
         help="perforate each placement pointwise conv together with its block's "
-        "BatchNorm (PAISequential([pointwise, bn])); the input scale must stay 1",
+        "BatchNorm (PAISequential([pointwise, bn])); the input scale must stay 1.  "
+        "The last of --group-batchnorm / --no-group-batchnorm wins",
     )
+    parser.add_argument(
+        "--teacher-checkpoint", action="append", default=[],
+        help="distill from this frozen checkpoint (repeat for an ensemble; logits "
+        "are averaged).  The arm label gets '-kd' appended by default",
+    )
+    parser.add_argument("--kd-alpha", type=float, default=0.9,
+                        help="weight of the distillation term (with --teacher-checkpoint)")
+    parser.add_argument("--kd-temperature", type=float, default=4.0,
+                        help="distillation temperature (with --teacher-checkpoint)")
     parser.add_argument(
         "--arm", default=None,
         help="label recorded in the summary ([A-Za-z0-9._-]+); default: the placement, "
@@ -1589,6 +1700,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             dendrite_input_scale=args.dendrite_input_scale,
             calibrate_dendrite_input_scale=args.calibrate_dendrite_input_scale,
             group_batchnorm=args.group_batchnorm,
+            teacher_checkpoints=args.teacher_checkpoint,
+            kd_alpha=args.kd_alpha,
+            kd_temperature=args.kd_temperature,
         )
     except ValueError as error:
         parser.error(str(error))
@@ -1612,6 +1726,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             (args.data_config, "data_config"),
             (args.model_config, "model_config"),
             (args.train_config, "train_config"),
+            *((path, "teacher_checkpoint") for path in args.teacher_checkpoint),
         ],
     ):
         try:
