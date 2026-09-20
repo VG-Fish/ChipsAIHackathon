@@ -230,6 +230,23 @@ started without the flag can be charted after the fact:
 uv run python -m kws.utils.graphs outputs/my-kws-run --watch
 ```
 
+### Plot the SparkNet/dendritic study
+
+`scripts/plot_sparknet_dendritic_comparison.py` reads the completed paired
+reports under `outputs/sparknet-dendritic-study-v2/`, averages the five seed
+runs for each arm and width, and writes editable PNG graphics plus a CSV
+summary. The main Pareto plots compare validation accuracy against deployed
+parameters and MACs; the additional plots show accuracy gain, parameter/MAC
+overhead, and the dendritic latency proxy.
+
+```bash
+uv run python scripts/plot_sparknet_dendritic_comparison.py
+```
+
+Use `--arms pointwise fc` to focus on selected placements, `--input` to use a
+different study root, or edit the defaults at the top of the script. Results
+go to `outputs/plots/sparknet-dendritic-comparison/`.
+
 `manifest.yaml` is the run-identity authority. Every project-owned checkpoint
 records the manifest's `run_id`, including teacher/student training
 checkpoints, each sparsity candidate's prune/KD and resume-KD checkpoints, the

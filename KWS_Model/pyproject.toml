@@ -9,6 +9,7 @@ dependencies = [
     "onnxscript",
     "perforatedai>=3.2.8",
     "perforatedbp>=3.2.7",
+    "matplotlib",
     "pyyaml",
     "scikit-learn",
     "soundfile",
