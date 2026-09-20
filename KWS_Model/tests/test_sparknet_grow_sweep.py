@@ -24,7 +24,7 @@ SCRIPT = REPO_ROOT / "scripts/run_sparknet_grow_sweep.sh"
 SWEEP_VARIABLES = (
     "WIDTHS", "SEEDS", "PLACEMENTS", "ARM_SUFFIX", "EXTRA_ARGS", "OUTPUT_ROOT",
     "DATA_CONFIG", "TRAIN_CONFIG", "SWITCH_EPOCH", "CANDIDATE_EPOCHS",
-    "MAX_MINUTES", "DRY_RUN", "GROW_CMD",
+    "MAX_MINUTES", "MAX_TOTAL_MINUTES", "DRY_RUN", "GROW_CMD",
 )
 
 _bashes = []
@@ -148,6 +148,52 @@ def test_arm_suffix_names_the_directory_and_passes_arm_then_extra_args(sweep):
     assert command[command.index("--output-dir") + 1] == f"{sweep.output_root}/fc-wd1e-3/c8-seed0"
     assert table_rows(result.stdout) == [["fc-wd1e-3", "C8", "0", "-", "would-run"]]
     assert "arms: fc-wd1e-3" in result.stdout
+
+
+def test_model_variant_tokens_select_variant_config_and_output_directory(sweep):
+    result, calls = sweep(DRY_RUN=1, WIDTHS="c4g16 c6g16", SEEDS=0)
+    assert result.returncode == 0, result.stderr
+    assert calls == []
+    assert planned_runs(result.stdout) == [
+        ("fc C4g16 seed0", f"{sweep.output_root}/fc/c4g16-seed0"),
+        ("fc C6g16 seed0", f"{sweep.output_root}/fc/c6g16-seed0"),
+    ]
+    assert [row[1] for row in table_rows(result.stdout)] == ["C4g16", "C6g16"]
+    commands = planned_commands(result.stdout)
+    assert commands[0][commands[0].index("--model-config") + 1].endswith(
+        "configs/model/sparknet_c4g16_paper.yaml"
+    )
+
+
+def test_aggregate_budget_refuses_before_driver_calls_or_mutations(sweep):
+    result, calls = sweep(
+        WIDTHS="c4g16 c6g16", SEEDS="0 1", MAX_MINUTES=200, MAX_TOTAL_MINUTES=720
+    )
+    assert result.returncode == 1
+    assert "aggregate budget" in result.stderr
+    assert "800" in result.stderr
+    assert calls == []
+    assert not sweep.output_root.exists()
+
+
+def test_fractional_max_minutes_is_forwarded_and_budgeted(sweep):
+    result, calls = sweep(
+        SEEDS=0, MAX_MINUTES="5.25", MAX_TOTAL_MINUTES="5.25"
+    )
+    assert result.returncode == 0, result.stderr
+    assert calls[0][calls[0].index("--max-minutes") + 1] == "5.25"
+
+
+def test_aggregate_budget_excludes_matching_complete_runs(sweep):
+    write_summary(
+        sweep.output_root / "fc/c8-seed0",
+        "status: complete\nplacement: fc\narm: fc\n",
+    )
+    result, calls = sweep(
+        SEEDS="0 1", MAX_MINUTES=720, MAX_TOTAL_MINUTES=720
+    )
+    assert result.returncode == 0, result.stderr
+    assert [argv[argv.index("--seed") + 1] for argv in calls] == ["1"]
 
 
 def test_driver_receives_arm_and_extra_args_and_the_run_lands_in_the_arm_dir(sweep):

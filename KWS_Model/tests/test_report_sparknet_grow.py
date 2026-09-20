@@ -21,6 +21,7 @@ CLEAN_CHECKS = {
 # Stub costs keep the synthetic frontier readable; the real ones are measured
 # in test_scratch_cost_is_measured_from_the_paper_configs.
 STUB_COSTS = {
+    4: {"params": 1000, "macs": 50_000},
     8: {"params": 2000, "macs": 100_000},
     12: {"params": 3000, "macs": 200_000},
 }
@@ -180,6 +181,100 @@ def _run(report, label):
 
 def _ramp(epoch):
     return 0.80 + 0.0005 * epoch
+
+
+def test_noncanonical_model_name_runs_are_discovered_and_retained_for_real_and_sham_arms(tmp_path):
+    scratch_root = tmp_path / "scratch"
+    grow_root = tmp_path / "grow"
+    _write_scratch(scratch_root, 4, 0, {e: 0.90 for e in range(1, BASE_EPOCHS + 1)})
+    _write_scratch(scratch_root, 12, 0, {e: 0.92 for e in range(1, BASE_EPOCHS + 1)})
+    curve = {e: 0.90 for e in range(1, BASE_EPOCHS + 1)}
+    _write_grow(grow_root, "fc", 4, 0, curve)
+    _write_grow(
+        grow_root, "fc-sham", 4, 0, curve, variant={"sham": True},
+        checks={**CLEAN_CHECKS, "sham_skip_weight_max_abs_final": 0.0},
+    )
+    # The exported sweep names these models c4g16/c10g16, not c4/c10.
+    for arm, sham in (("fc", False), ("fc-sham", True)):
+        source = grow_root / arm / "c4-seed0"
+        target = grow_root / arm / "c4g16-seed0"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        summary = yaml.safe_load((target / "reports" / "grow_summary.yaml").read_text())
+        summary["model_name"] = "c4g16"
+        (target / "reports" / "grow_summary.yaml").write_text(yaml.safe_dump(summary))
+
+    report = grow_report.build_report(
+        grow_root, {4: str(scratch_root / "c{width}-seed{seed}"), 12: str(scratch_root / "c{width}-seed{seed}")},
+        seeds=(0,), cost_fn=_stub_cost,
+    )
+    assert {(run["arm"], run["model_name"], run["seed"]) for run in report["runs"] if run["status"] == "valid"} == {
+        ("fc", "c4g16", 0), ("fc-sham", "c4g16", 0)
+    }
+    assert {cell["arm"] for cell in report["cells"]} == {"fc", "fc-sham"}
+
+
+def test_standard_and_g16_model_names_are_isolated_within_one_arm(tmp_path):
+    scratch_root = tmp_path / "scratch"
+    grow_root = tmp_path / "grow"
+    for seed in (0, 1):
+        _write_scratch(scratch_root, 4, seed, {e: 0.90 for e in range(1, BASE_EPOCHS + 1)})
+    curve = {e: 0.90 for e in range(1, BASE_EPOCHS + 1)}
+    _write_grow(grow_root, "fc", 4, 0, curve)
+    _write_grow(grow_root, "fc", 4, 1, curve)
+    source = grow_root / "fc" / "c4-seed1"
+    target = grow_root / "fc" / "c4g16-seed1"
+    source.rename(target)
+    summary = yaml.safe_load((target / "reports" / "grow_summary.yaml").read_text())
+    summary["model_name"] = "c4g16"
+    (target / "reports" / "grow_summary.yaml").write_text(yaml.safe_dump(summary))
+
+    report = grow_report.build_report(
+        grow_root, _templates(scratch_root), seeds=(0, 1), cost_fn=_stub_cost
+    )
+
+    assert [(cell["model_name"], cell["seeds"]) for cell in report["cells"]] == [
+        ("c4", [0]), ("c4g16", [1])
+    ]
+    assert len(report["inventory"]["missing"]) == 2
+    assert {(run["model_name"], run["seed"]) for run in report["runs"] if run["status"] == "missing"} == {
+        ("c4", 1), ("c4g16", 0)
+    }
+    markdown = grow_report.render_markdown(report)
+    assert "C4g16" in markdown
+    assert "may not be architecture-matched" in markdown
+
+
+def test_noise_floor_keeps_standard_and_g16_model_names_distinct(tmp_path):
+    scratch_root = tmp_path / "scratch"
+    grow_root = tmp_path / "grow"
+    _write_scratch(scratch_root, 4, 0, {e: 0.90 for e in range(1, BASE_EPOCHS + 1)})
+    curve = {e: 0.90 for e in range(1, BASE_EPOCHS + 1)}
+    _write_grow(
+        grow_root, "fc-sham", 4, 0, curve, placement="fc",
+        summary_arm="fc-sham", variant={**_variant(sham=True)},
+        checks={**CLEAN_CHECKS, "sham_skip_weight_max_abs_final": 0.0},
+    )
+    source = grow_root / "fc-sham" / "c4-seed0"
+    target = grow_root / "fc-sham" / "c4g16-seed0"
+    source.rename(target)
+    summary_path = target / "reports" / "grow_summary.yaml"
+    summary = yaml.safe_load(summary_path.read_text())
+    summary["model_name"] = "c4g16"
+    summary_path.write_text(yaml.safe_dump(summary))
+    _write_grow(
+        grow_root, "fc-sham", 4, 0, curve, placement="fc",
+        summary_arm="fc-sham", variant={**_variant(sham=True)},
+        checks={**CLEAN_CHECKS, "sham_skip_weight_max_abs_final": 0.0},
+    )
+
+    report = grow_report.build_report(
+        grow_root, {4: str(scratch_root / "c{width}-seed{seed}")},
+        seeds=(0,), cost_fn=_stub_cost,
+    )
+    assert [row["model_name"] for row in report["noise_floor"]] == ["c4", "c4g16"]
+    markdown = grow_report.render_markdown(report)
+    assert markdown.count("C4g16") >= 2
 
 
 # --------------------------------------------------------------------------

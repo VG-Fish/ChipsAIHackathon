@@ -92,7 +92,8 @@
 #
 # Environment overrides (defaults in brackets):
 #
-#   WIDTHS            ["8 12 4 10 6 2 16"]  each needs configs/model/sparknet_c{w}_paper.yaml
+#   WIDTHS            ["8 12 4 10 6 2 16"]  integer widths or model tokens such
+#                     as c4g16; each needs configs/model/sparknet_<token>_paper.yaml
 #   SEEDS             ["0 1 2 3 4"]
 #   PLACEMENTS        ["fc pointwise"]      keys from grow_dendrites.placements in TRAIN_CONFIG
 #   ARM_SUFFIX        [empty]  appended to the placement to name the arm;
@@ -105,6 +106,8 @@
 #   SWITCH_EPOCH      passed as --switch-epoch only when set; needs ARM_SUFFIX
 #   CANDIDATE_EPOCHS  passed as --candidate-epochs only when set; needs ARM_SUFFIX
 #   MAX_MINUTES       passed as --max-minutes only when set
+#   MAX_TOTAL_MINUTES [720] aggregate worst-case budget: MAX_MINUTES multiplied
+#                     by planned-to-run count must fit; set 0 to opt out
 #   DRY_RUN           [0]  1 = print the plan only
 #   GROW_CMD          [uv run --env-file .env python -m kws.optimize.sparknet_grow_dendrites]
 #                     testing hook: the driver command, split on whitespace
@@ -159,6 +162,7 @@ TRAIN_CONFIG="${TRAIN_CONFIG:-configs/train/sparknet_grow_dendrites_paper.yaml}"
 SWITCH_EPOCH="${SWITCH_EPOCH:-}"
 CANDIDATE_EPOCHS="${CANDIDATE_EPOCHS:-}"
 MAX_MINUTES="${MAX_MINUTES:-}"
+MAX_TOTAL_MINUTES="${MAX_TOTAL_MINUTES:-720}"
 DRY_RUN="${DRY_RUN:-0}"
 DEFAULT_GROW_CMD="uv run --env-file .env python -m kws.optimize.sparknet_grow_dendrites"
 GROW_CMD="${GROW_CMD:-$DEFAULT_GROW_CMD}"
@@ -208,7 +212,9 @@ for file in "$DATA_CONFIG" "$TRAIN_CONFIG"; do
   [[ -f "$file" ]] || problems+=("missing config: ${file}")
 done
 for width in $WIDTHS; do
-  model_config="configs/model/sparknet_c${width}_paper.yaml"
+  model_token="$width"
+  [[ "$model_token" == c* ]] || model_token="c${model_token}"
+  model_config="configs/model/sparknet_${model_token}_paper.yaml"
   [[ -f "$model_config" ]] || problems+=("missing config: ${model_config}")
 done
 if [[ -f "$TRAIN_CONFIG" ]]; then
@@ -297,6 +303,34 @@ recorded_arm() {
   fi
   echo "$arm"
 }
+
+if [[ -n "$MAX_MINUTES" && "$MAX_TOTAL_MINUTES" != "0" ]]; then
+  number_pattern='^[0-9]+([.][0-9]+)?$'
+  if [[ ! "$MAX_MINUTES" =~ $number_pattern || ! "$MAX_TOTAL_MINUTES" =~ $number_pattern ]]; then
+    echo "refusing to start: MAX_MINUTES and MAX_TOTAL_MINUTES must be non-negative numbers" >&2
+    exit 1
+  fi
+  planned_count=0
+  for seed in $SEEDS; do
+    for width in $WIDTHS; do
+      for placement in $PLACEMENTS; do
+        token="$width"; [[ "$token" == c* ]] || token="c${token}"
+        output_dir="${OUTPUT_ROOT}/${placement}${ARM_SUFFIX}/${token}-seed${seed}"
+        if run_is_complete "$output_dir" && [[ "$(recorded_arm "$output_dir")" == "${placement}${ARM_SUFFIX}" ]]; then
+          continue
+        fi
+        planned_count=$((planned_count + 1))
+      done
+    done
+  done
+  worst_case="$(awk -v minutes="$MAX_MINUTES" -v count="$planned_count" 'BEGIN { print minutes * count }')"
+  if awk -v worst="$worst_case" -v total="$MAX_TOTAL_MINUTES" \
+    'BEGIN { exit !(worst > total + 1e-9) }'; then
+    echo "refusing to start: aggregate budget ${worst_case} minutes exceeds MAX_TOTAL_MINUTES=${MAX_TOTAL_MINUTES} (${MAX_MINUTES} x ${planned_count} planned-to-run)" >&2
+    exit 1
+  fi
+fi
+
 # What an unfinished directory looked like, for the move-aside message.
 describe_partial() {
   local summary line
@@ -346,13 +380,14 @@ for seed in $SEEDS; do
       fi
 
       arm="${placement}${ARM_SUFFIX}"
-      label="${arm} C${width} seed${seed}"
-      output_dir="${OUTPUT_ROOT}/${arm}/c${width}-seed${seed}"
+      model_token="$width"; [[ "$model_token" == c* ]] || model_token="c${model_token}"
+      label="${arm} C${model_token#c} seed${seed}"
+      output_dir="${OUTPUT_ROOT}/${arm}/${model_token}-seed${seed}"
       log_file="${output_dir}.log"
 
       cmd=("${grow_cmd[@]}"
         --data-config "$DATA_CONFIG"
-        --model-config "configs/model/sparknet_c${width}_paper.yaml"
+        --model-config "configs/model/sparknet_${model_token}_paper.yaml"
         --train-config "$TRAIN_CONFIG"
         --placement "$placement" --seed "$seed"
         --output-dir "$output_dir")
@@ -512,7 +547,7 @@ printf "$row_format" "---" "-----" "----" "----" "------"
 for entry in ${statuses[@]+"${statuses[@]}"}; do
   IFS='|' read -r arm width seed status elapsed <<<"$entry"
   # shellcheck disable=SC2059
-  printf "$row_format" "$arm" "C${width}" "$seed" "$elapsed" "$status"
+  printf "$row_format" "$arm" "C${width#c}" "$seed" "$elapsed" "$status"
 done
 
 if ((interrupted)); then

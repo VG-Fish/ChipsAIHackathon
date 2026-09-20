@@ -314,7 +314,7 @@ def resolve_grow_config(
     arm: str | None = None,
     dendrite_input_scale: float | None = None,
     calibrate_dendrite_input_scale: bool = False,
-    group_batchnorm: bool = False,
+    group_batchnorm: bool | None = None,
     teacher_checkpoints: Sequence[str] = (),
     kd_alpha: float = 0.9,
     kd_temperature: float = 4.0,
@@ -398,7 +398,10 @@ def resolve_grow_config(
         raise ValueError(
             f"dendrite_input_scale must be positive and finite; got {dendrite_input_scale}"
         )
-    if group_batchnorm:
+    use_group_batchnorm = bool(
+        grow.get("group_batchnorm", False) if group_batchnorm is None else group_batchnorm
+    )
+    if use_group_batchnorm:
         ungroupable = [
             module_id for module_id in module_ids
             if module_id.rpartition(".")[2] != GROUPABLE_CONV
@@ -434,7 +437,7 @@ def resolve_grow_config(
     else:
         kd_alpha, kd_temperature = 0.0, 1.0
 
-    label = default_arm(str(chosen), bool(sham), bool(group_batchnorm)) if arm is None else arm
+    label = default_arm(str(chosen), bool(sham), use_group_batchnorm) if arm is None else arm
     if arm is None and teachers:
         label = f"{label}{KD_SUFFIX}"
     if not isinstance(label, str) or not ARM_PATTERN.fullmatch(label):
@@ -455,7 +458,7 @@ def resolve_grow_config(
         sham=bool(sham),
         dendrite_input_scale=dendrite_input_scale,
         calibrate_dendrite_input_scale=bool(calibrate_dendrite_input_scale),
-        group_batchnorm=bool(group_batchnorm),
+        group_batchnorm=use_group_batchnorm,
         teacher_checkpoints=teachers,
         kd_alpha=kd_alpha,
         kd_temperature=kd_temperature,
@@ -1655,7 +1658,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "the configured modules' measured input standard deviations",
     )
     parser.add_argument(
-        "--group-batchnorm", action=argparse.BooleanOptionalAction, default=False,
+        "--group-batchnorm", action=argparse.BooleanOptionalAction, default=None,
         help="perforate each placement pointwise conv together with its block's "
         "BatchNorm (PAISequential([pointwise, bn])); the input scale must stay 1.  "
         "The last of --group-batchnorm / --no-group-batchnorm wins",

@@ -116,7 +116,7 @@ NARROW_WIDTHS = (2, 4, 6, 8, 10, 12)
 C16_WIDTH = 16
 DEFAULT_SEEDS = tuple(range(5))
 RUN_DIR_TEMPLATE = "c{width}-seed{seed}"
-RUN_DIR_PATTERN = re.compile(r"^c(?P<width>\d+)-seed(?P<seed>\d+)$")
+RUN_DIR_PATTERN = re.compile(r"^(?P<model_name>c\d+(?:g\d+)?)-seed(?P<seed>\d+)$")
 GROW_SUMMARY = Path("reports/grow_summary.yaml")
 GROW_DIAGNOSTICS = Path("reports/grow_diagnostics.yaml")
 SCRATCH_PHASE = "paper_replication/sparknet_c{width}_paper"
@@ -617,6 +617,7 @@ class GrowRun:
     width: int
     seed: int
     run_dir: str
+    model_name: str | None = None
     # valid | invalid | incomplete | missing
     status: str = "valid"
     reasons: list[str] = field(default_factory=list)
@@ -649,7 +650,7 @@ class GrowRun:
 
     @property
     def label(self) -> str:
-        return f"{self.arm} C{self.width} seed{self.seed}"
+        return f"{self.arm} {_display_model_name(self.model_name, self.width)} seed{self.seed}"
 
     @property
     def sham(self) -> bool:
@@ -666,10 +667,12 @@ class GrowRun:
         return payload
 
 
-def load_grow_run(run_dir: Path, arm: str, width: int, seed: int) -> GrowRun:
+def load_grow_run(
+    run_dir: Path, arm: str, width: int, seed: int, model_name: str | None = None
+) -> GrowRun:
     """Parse one grow run's summary and per-epoch log; decide its status."""
     run_dir = Path(run_dir)
-    run = GrowRun(arm, width, seed, str(run_dir))
+    run = GrowRun(arm, width, seed, str(run_dir), model_name)
     summary_path = run_dir / GROW_SUMMARY
     if not summary_path.exists():
         run.status = "missing"
@@ -874,7 +877,7 @@ def pair_grow_run(
         )
 
 
-def discover_grow_runs(grow_root: Path) -> list[tuple[str, int, int, Path]]:
+def discover_grow_runs(grow_root: Path) -> list[tuple[str, int, int, str, Path]]:
     """Every ``<grow-root>/<arm>/c<width>-seed<seed>/`` directory."""
     grow_root = Path(grow_root)
     if not grow_root.is_dir():
@@ -886,7 +889,9 @@ def discover_grow_runs(grow_root: Path) -> list[tuple[str, int, int, Path]]:
         for run_dir in sorted(p for p in arm_dir.iterdir() if p.is_dir()):
             match = RUN_DIR_PATTERN.match(run_dir.name)
             if match:
-                found.append((arm_dir.name, int(match["width"]), int(match["seed"]), run_dir))
+                model_name = match["model_name"]
+                width = int(re.match(r"^c(\d+)", model_name)[1])
+                found.append((arm_dir.name, width, int(match["seed"]), model_name, run_dir))
     return found
 
 
@@ -1016,6 +1021,7 @@ def summarize_cell(
     width: int,
     runs: Sequence[GrowRun],
     *,
+    model_name: str | None = None,
     placement: str | None = None,
     variant: Mapping[str, Any] | None = None,
     confidence: float = DEFAULT_CONFIDENCE,
@@ -1028,6 +1034,7 @@ def summarize_cell(
         "variant": None if variant is None else dict(variant),
         "sham": bool(variant and variant.get("sham")),
         "width": width,
+        "model_name": model_name or RUN_DIR_TEMPLATE.format(width=width, seed=0).split("-seed")[0],
         "n": len(runs),
         "seeds": sorted(run.seed for run in runs),
         "delta_pp": {},
@@ -1258,6 +1265,7 @@ def noise_floor(cells: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                 "arm": cell["arm"],
                 "placement": cell["placement"],
                 "width": cell["width"],
+                "model_name": cell.get("model_name"),
                 "n": cell["n"],
                 "seeds": cell["seeds"],
                 "window": cell["window"],
@@ -1308,16 +1316,16 @@ def build_report(
     frontier = build_frontier(scratch_runs, costs)
 
     runs: list[GrowRun] = []
-    seen: dict[tuple[str, int], set[int]] = defaultdict(set)
-    for arm, width, seed, run_dir in discover_grow_runs(grow_root):
-        runs.append(load_grow_run(run_dir, arm, width, seed))
-        seen[(arm, width)].add(seed)
+    seen: dict[tuple[str, int, str], set[int]] = defaultdict(set)
+    for arm, width, seed, model_name, run_dir in discover_grow_runs(grow_root):
+        runs.append(load_grow_run(run_dir, arm, width, seed, model_name))
+        seen[(arm, width, model_name)].add(seed)
     arms = reconcile_arms(runs)
     for run in runs:
         pair_grow_run(run, scratch_runs.get((run.width, run.seed)), costs.get(run.width), window=window)
     # Only a cell with some seeds on disk is expected to have them all: a
     # one-seed pilot at one width is not a sweep missing every other cell.
-    for (arm, width), present in sorted(seen.items()):
+    for (arm, width, model_name), present in sorted(seen.items()):
         for seed in expected_grow_seeds:
             if seed not in present:
                 runs.append(
@@ -1325,29 +1333,36 @@ def build_report(
                         arm,
                         width,
                         seed,
-                        str(Path(grow_root) / arm / RUN_DIR_TEMPLATE.format(width=width, seed=seed)),
+                        str(Path(grow_root) / arm / f"{model_name}-seed{seed}"),
                         status="missing",
                         reasons=["no run directory"],
                         placement=arms[arm]["placement"],
+                        model_name=model_name,
                     )
                 )
-    runs.sort(key=lambda run: (run.arm, run.width, run.seed))
+    runs.sort(key=lambda run: (run.arm, run.width, run.model_name or "", run.seed))
     for arm, info in arms.items():
         members = [run for run in runs if run.arm == arm]
         info["valid"] = sum(1 for run in members if run.status == "valid")
         info["widths"] = sorted({run.width for run in members})
 
     cells = []
-    for arm, width in sorted(seen):
+    for arm, width, model_name in sorted(seen):
         valid = [
             run
             for run in runs
-            if run.arm == arm and run.width == width and run.status == "valid"
+            if (
+                run.arm == arm
+                and run.width == width
+                and run.model_name == model_name
+                and run.status == "valid"
+            )
         ]
         cell = summarize_cell(
             arm,
             width,
             valid,
+            model_name=model_name,
             placement=arms[arm]["placement"],
             variant=arms[arm]["variant"],
             confidence=confidence,
@@ -1511,7 +1526,13 @@ def _arm_notes(arm: Mapping[str, Any]) -> str:
 
 
 def _label(run: Mapping[str, Any]) -> str:
-    return f"{run['arm']} C{run['width']} seed{run['seed']}"
+    return f"{run['arm']} {_display_model_name(run.get('model_name'), run['width'])} seed{run['seed']}"
+
+
+def _display_model_name(model_name: str | None, width: int) -> str:
+    """Human-readable architecture name, retaining C4 compatibility."""
+    name = model_name or f"c{width}"
+    return name[:1].upper() + name[1:]
 
 
 def _axis_name(axis: str) -> str:
@@ -1549,6 +1570,16 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
         "### Arms",
         "",
     ]
+    if any(
+        run.get("model_name") not in (None, f"c{run['width']}")
+        for run in runs
+    ):
+        out += [
+            "> **Architecture warning:** noncanonical model variants (for example "
+            "`c4g16`) are paired with scratch controls and the frontier by numeric "
+            "width; those controls may not be architecture-matched.",
+            "",
+        ]
     if not report["arms"]:
         out += ["No arm directories with run directories yet.", ""]
     else:
@@ -1655,7 +1686,7 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
             (
                 (
                     cell["arm"] + (" (sham)" if cell["sham"] else ""),
-                    f"C{cell['width']}",
+                    _display_model_name(cell.get("model_name"), cell["width"]),
                     str(cell["n"]),
                     ",".join(str(s) for s in cell["seeds"]) or "--",
                     *(_delta(cell["delta_pp"][m]) for m in METRICS),
@@ -1676,7 +1707,7 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
         for cell in cells:
             if not cell["cost_consistent"]:
                 out += [
-                    f"- **{cell['arm']} C{cell['width']}: deployed cost differs "
+                    f"- **{cell['arm']} {_display_model_name(cell.get('model_name'), cell['width'])}: deployed cost differs "
                     f"across seeds {cell['deployed_values_seen']} -- cell not gated.**"
                 ]
         out.append("")
@@ -1713,7 +1744,7 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
                 (
                     row["arm"],
                     _general(row["placement"]),
-                    f"C{row['width']}",
+                    _display_model_name(row.get("model_name"), row["width"]),
                     str(row["n"]),
                     *(
                         _delta(row["delta_pp"][m])
@@ -1818,7 +1849,7 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
                 entry = cell["break_even"][axis]
                 rows.append(
                     (
-                        f"{cell['arm']} C{cell['width']}",
+                        f"{cell['arm']} {_display_model_name(cell.get('model_name'), cell['width'])}",
                         str(cell["n"]),
                         axis,
                         _count(entry["cost"]),
@@ -1862,7 +1893,7 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
         for cell in cells:
             if cell["sham"]:
                 out.append(
-                    f"- {cell['arm']} C{cell['width']} (n={cell['n']}): not gated "
+                    f"- {cell['arm']} {_display_model_name(cell.get('model_name'), cell['width'])} (n={cell['n']}): not gated "
                     "(sham arm -- noise floor, section 3)"
                 )
                 continue
@@ -1878,7 +1909,7 @@ def render_markdown(report: Mapping[str, Any], *, per_run: bool = False) -> str:
                 summary = next(iter(verdicts.values()))
             else:
                 summary = "; ".join(f"{verdicts[axis]} on {_axis_name(axis)}" for axis in AXES)
-            out.append(f"- **{cell['arm']} C{cell['width']}** (n={cell['n']}): {summary}")
+            out.append(f"- **{cell['arm']} {_display_model_name(cell.get('model_name'), cell['width'])}** (n={cell['n']}): {summary}")
         out.append("")
 
     if per_run:

@@ -68,12 +68,13 @@ def test_resolve_grow_config_reads_the_paper_defaults():
         epochs=200,
         switch_epoch=120,
         candidate_epochs=15,
-        placement="fc",
-        module_ids=(".fc",),
+        placement="pointwise_b2",
+        module_ids=(".blocks.2.pointwise",),
         candidate_optimizer={"name": "adamw", "lr": 0.001, "weight_decay": 0.0},
         dendrite_weight_decay=0.0,
         carry_momentum=True,
         max_wall_clock_minutes=45.0,
+        group_batchnorm=True,
     )
     assert config.total_epochs == 215
     # Order is PAI's conversion order, so it is preserved from the config.
@@ -120,7 +121,7 @@ def test_every_configured_placement_names_real_sparknet_modules():
     module_ids = {f".{name}" for name, _module in model.named_modules() if name}
 
     for placement in train_cfg["grow_dendrites"]["placements"]:
-        config = grow.resolve_grow_config(train_cfg, placement=placement)
+        config = grow.resolve_grow_config(train_cfg, placement=placement, group_batchnorm=False)
         assert set(config.module_ids) <= module_ids, placement
 
 
@@ -218,7 +219,7 @@ def test_resolve_grow_config_requires_the_grow_block():
 
 
 def test_a_default_run_is_a_real_arm_named_after_its_placement():
-    config = grow.resolve_grow_config(_paper_train_cfg(), placement="pointwise")
+    config = grow.resolve_grow_config(_paper_train_cfg(), placement="pointwise", group_batchnorm=False)
 
     assert config.sham is False
     assert config.arm == "pointwise"
@@ -233,7 +234,7 @@ def test_variant_flags_resolve_into_the_config_and_its_variant_record():
     pristine = copy.deepcopy(train_cfg)
 
     config = grow.resolve_grow_config(
-        train_cfg, placement="pointwise", switch_epoch=100, candidate_epochs=5,
+        train_cfg, placement="pointwise", group_batchnorm=False, switch_epoch=100, candidate_epochs=5,
         dendrite_weight_decay=5e-4, sham=True, dendrite_input_scale=80,
     )
 
@@ -266,6 +267,7 @@ def test_the_input_scale_override_beats_the_config():
     assert grow.resolve_grow_config(train_cfg).dendrite_input_scale == 1.0
 
     train_cfg["grow_dendrites"]["dendrite_input_scale"] = 40
+    train_cfg["grow_dendrites"]["group_batchnorm"] = False
     assert grow.resolve_grow_config(train_cfg).dendrite_input_scale == 40.0
     assert grow.resolve_grow_config(train_cfg, dendrite_input_scale=1).dendrite_input_scale == 1.0
     assert grow.resolve_grow_config(train_cfg, dendrite_input_scale=75).variant()[
@@ -277,7 +279,7 @@ def test_switch_input_scale_calibration_is_an_explicit_run_variant():
     config = grow.resolve_grow_config(
         _paper_train_cfg(),
         placement="pointwise_b2",
-        calibrate_dendrite_input_scale=True,
+        calibrate_dendrite_input_scale=True, group_batchnorm=False,
     )
 
     assert config.calibrate_dendrite_input_scale is True
@@ -318,7 +320,7 @@ def test_group_batchnorm_is_a_run_variant_with_its_own_arm():
     assert config.variant()["group_batchnorm"] is True
     assert config.dendrite_input_scale == 1.0
     assert sham.arm == "pointwise_b2-bn-sham"
-    assert "group_batchnorm" not in grow.resolve_grow_config(_paper_train_cfg()).variant()
+    assert grow.resolve_grow_config(_paper_train_cfg()).variant()["group_batchnorm"] is True
 
 
 def test_the_last_group_batchnorm_flag_wins():
@@ -326,9 +328,15 @@ def test_the_last_group_batchnorm_flag_wins():
     parser = grow.build_arg_parser()
     required = ["--model-config", "m.yaml", "--output-dir", "out"]
 
-    assert parser.parse_args(required).group_batchnorm is False
+    assert parser.parse_args(required).group_batchnorm is None
     assert parser.parse_args(required + ["--group-batchnorm"]).group_batchnorm is True
     assert parser.parse_args(required + ["--group-batchnorm", "--no-group-batchnorm"]).group_batchnorm is False
+
+
+def test_group_batchnorm_config_is_used_unless_cli_explicitly_disables_it():
+    train_cfg = _paper_train_cfg()
+    assert grow.resolve_grow_config(train_cfg).group_batchnorm is True
+    assert grow.resolve_grow_config(train_cfg, group_batchnorm=False).group_batchnorm is False
 
 
 @pytest.mark.parametrize(
@@ -1454,7 +1462,7 @@ def test_cli_refuses_a_directory_holding_an_earlier_attempt(tmp_path, capsys):
         (["--arm", ""], "arm must be a non-empty name"),
         (["--arm", "fc sham"], "arm must be a non-empty name"),
         (["--sham", "--arm", "../fc"], "arm must be a non-empty name"),
-        (["--group-batchnorm"], "needs 'pointwise' placements"),
+        (["--placement", "fc", "--group-batchnorm"], "needs 'pointwise' placements"),
         (
             ["--placement", "pointwise_b2", "--group-batchnorm", "--calibrate-dendrite-input-scale"],
             "leave it at 1",
@@ -1475,7 +1483,7 @@ def test_cli_variant_flags_default_to_a_real_run():
     assert (args.sham, args.arm, args.dendrite_weight_decay) == (False, None, None)
     assert args.dendrite_input_scale is None
     assert args.calibrate_dendrite_input_scale is False
-    assert args.group_batchnorm is False
+    assert args.group_batchnorm is None
 
     args = grow.build_arg_parser().parse_args([
         "--model-config", "m.yaml", "--output-dir", "o",
@@ -1487,10 +1495,10 @@ def test_cli_variant_flags_default_to_a_real_run():
 @pytest.mark.parametrize(
     ("extra", "expected"),
     [
-        ([], (False, "fc", 0.0)),
-        (["--sham"], (True, "fc-sham", 0.0)),
-        (["--placement", "pointwise", "--sham"], (True, "pointwise-sham", 0.0)),
-        (["--dendrite-weight-decay", "5e-4"], (False, "fc", 5e-4)),
+        ([], (False, "pointwise_b2-bn", 0.0)),
+        (["--sham"], (True, "pointwise_b2-bn-sham", 0.0)),
+        (["--placement", "pointwise", "--sham", "--no-group-batchnorm"], (True, "pointwise-sham", 0.0)),
+        (["--dendrite-weight-decay", "5e-4"], (False, "pointwise_b2-bn", 5e-4)),
         (["--sham", "--arm", "floor.1", "--dendrite-weight-decay", "0.01"], (True, "floor.1", 0.01)),
     ],
 )
@@ -1517,7 +1525,7 @@ def test_cli_input_scale_reaches_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(
         grow, "run_grow", lambda *args, **kwargs: received.append(args[3]) or {}
     )
-    extra = ["--placement", "pointwise", "--dendrite-input-scale", "75", "--arm", "pw-in75"]
+    extra = ["--placement", "pointwise", "--no-group-batchnorm", "--dendrite-input-scale", "75", "--arm", "pw-in75"]
     assert grow.main(_cli_args(tmp_path / "run", *extra)) == 0
 
     (config,) = received
@@ -1532,6 +1540,7 @@ def test_cli_switch_input_scale_calibration_reaches_the_run(tmp_path, monkeypatc
     )
     extra = [
         "--placement", "pointwise_b2",
+        "--no-group-batchnorm",
         "--calibrate-dendrite-input-scale",
         "--arm", "pointwise_b2-auto",
     ]

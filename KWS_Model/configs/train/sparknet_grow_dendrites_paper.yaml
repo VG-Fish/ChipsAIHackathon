@@ -65,8 +65,12 @@ grow_dendrites:
   # Candidate (p-mode) epochs.  They do not consume base-schedule steps, so a
   # run is epochs + candidate_epochs long in wall-clock epochs.
   candidate_epochs: 15
-  # Default placement; the CLI's --placement overrides it.
-  placement: fc
+  # Effective exported SparkNet models used the block-2 pointwise placement
+  # with its BatchNorm grouped into PAI; this is the evidence-backed default
+  # recipe across the C4-C12 width study.  Pass --no-group-batchnorm to retain
+  # the explicit bare-pointwise arm for older comparisons.
+  placement: pointwise_b2
+  group_batchnorm: true
   placements:
     fc: [.fc]
     pointwise: [.blocks.3.pointwise, .blocks.2.pointwise]
