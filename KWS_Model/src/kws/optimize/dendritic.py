@@ -974,6 +974,7 @@ def estimate_one_dendrite_params(
 _PRUNE_FINETUNE_IRRELEVANT_KEYS = frozenset(
     {
         "dendritic_schedule_epochs",
+        "lr_schedule_epochs",
         "resume_epochs",
         "objective",
         "deployment",
@@ -1978,6 +1979,36 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
     GPA.pc.set_silent(False)
 
 
+def pai_lr_schedule_epochs(train_cfg: Mapping[str, Any]) -> int:
+    """Epochs the per-phase learning-rate schedule is drawn over.
+
+    Every PAI phase gets a fresh cosine over this many epochs.  The cosine
+    clamps at its endpoint rather than oscillating, so a phase that outlives
+    the horizon trains at a learning rate of exactly zero -- after which the
+    validation score cannot improve and PAI's history detector is guaranteed
+    to switch within ``n_epochs_to_switch``.  Setting this equal to the
+    expected phase length therefore *decides the switch epoch in advance*,
+    which is the same forced switch as a hard-coded switch epoch, only
+    laundered through the optimizer.
+
+    ``lr_schedule_epochs`` decouples the horizon from
+    ``dendritic_schedule_epochs`` (which now only sizes the matched control's
+    budget) so the horizon can be set well beyond any plausible phase length.
+    The plateau PAI reacts to is then a property of the data and the model,
+    not of the schedule; the horizon survives only as a far-away backstop
+    against a phase that never converges.  Omitting the key preserves the
+    historical behavior exactly.
+    """
+    epochs = train_cfg.get(
+        "lr_schedule_epochs",
+        train_cfg.get("dendritic_schedule_epochs", train_cfg["epochs"]),
+    )
+    epochs = int(epochs)
+    if epochs < 1:
+        raise ValueError("lr_schedule_epochs must be positive")
+    return epochs
+
+
 def _make_optimizer_and_scheduler(
     model,
     train_cfg: dict,
@@ -2001,8 +2032,7 @@ def _make_optimizer_and_scheduler(
     )
     scheduler = build_lr_scheduler(
         optimizer,
-        int(train_cfg.get("dendritic_schedule_epochs", train_cfg["epochs"]))
-        * loader_length,
+        pai_lr_schedule_epochs(train_cfg) * loader_length,
         train_cfg["warmup_fraction"],
     )
     GPA.pai_tracker.set_optimizer_instance(optimizer)
@@ -2019,8 +2049,7 @@ def _make_optimizer_and_scheduler(
             )
             adapter_scheduler = build_lr_scheduler(
                 adapter_optimizer,
-                int(train_cfg.get("dendritic_schedule_epochs", train_cfg["epochs"]))
-                * loader_length,
+                pai_lr_schedule_epochs(train_cfg) * loader_length,
                 train_cfg["warmup_fraction"],
             )
 

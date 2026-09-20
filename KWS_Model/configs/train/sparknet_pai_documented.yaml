@@ -1,0 +1,122 @@
+# SparkNet, PerforatedAI run the way PerforatedAI documents it.
+#
+# Why this recipe exists.  Every dendrite result in this repo so far came from
+# sparknet_grow_dendrites_paper.yaml, a recipe we wrote: one dendrite, on a
+# placement we chose by hand, integrated at a switch epoch we fixed in advance.
+# It found a null.  The fair objection to that null is that it tests our
+# adaptation of PerforatedAI rather than PerforatedAI, so this config hands the
+# search back to the library:
+#
+#   * PAI picks WHEN.  switch_mode: history -- the tracker watches a
+#     history_lookback window of validation scores and switches to a dendrite
+#     phase when the base stops improving, instead of a hard-coded epoch.
+#   * PAI picks HOW MANY.  max_dendrites: 3 with a rising improvement
+#     threshold, so the search stops on its own when a dendrite fails to earn
+#     its rung.  Our recipe allowed exactly one.
+#   * PAI picks WHERE within the surface it is given.  module_ids below is
+#     every Conv2d and every Linear in SparkNet -- the CNN placement the PAI
+#     skill prescribes (set_module_names_to_perforate(["Conv2d", "Linear"]))
+#     rather than the single block we hand-picked.
+#
+# The comparison this supports is against `sparknet_pai_documented_control.yaml`,
+# the same recipe with an empty module_ids, which routes to run_standard_control
+# and trains conventionally for standard_control_epoch_budget() epochs --
+# schedule_epochs * (2 * max_dendrites + 1) + resume_epochs, the same budget the
+# PAI arm gets.  That control is what the v2 study lacked, and without it the
+# AdamW restart and the extra epochs are free to masquerade as dendrite gain.
+#
+# Data and loss follow sparknet_c16_dendritic_prune_no_kd.yaml, because the
+# source checkpoints are the paper-recipe scratch runs: paper data config, and
+# task_loss_scale 100 against sparsity_weight 1.0.  Fine-tuning those on the
+# default 1:1 ratio would crush the learned gates.
+#
+# Widths are driven from the experiment config; every cycle here is
+# identity-width (widths == source_channels, keep_ratio 1.0), so nothing is
+# pruned and the only thing PAI can change is dendritic capacity.
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  white_noise_integer_db: true
+  spec_augment: false
+epochs: 40
+# Only sizes the matched control's budget now (see standard_control_epoch_budget).
+dendritic_schedule_epochs: 30
+# The per-phase cosine horizon.  It is deliberately far longer than any phase
+# is expected to run: the cosine clamps at zero past its horizon, so a horizon
+# equal to the expected phase length silently forces the switch at that epoch.
+# At 120 the learning rate is still ~89% of peak at phase-epoch 30, so a
+# plateau PAI sees is the model's, not the schedule's.  It remains a backstop:
+# no phase can outlive ~130 epochs at a nonzero learning rate.
+lr_schedule_epochs: 120
+batch_size: 256
+num_workers: 8
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+lr: 0.001
+weight_decay: 0.0001
+label_smoothing: 0.1
+warmup_fraction: 0.05
+task_loss_scale: 100.0
+seed: 0
+
+resume_epochs: 8
+
+objective:
+  metric: validation_accuracy
+  use_test: false
+
+deployment:
+  bits_per_weight: 8
+  latency_iterations: 50
+  profile_device: cpu
+
+# Identity cycles: the runner sets target_channels from the experiment's
+# widths, and widths == source_channels forces keep_ratio 1.0 (dendritic.py
+# rejects any other value on an identity-width SparkNet cycle).
+pruning:
+  kind: structured
+  method: l1_filter
+  keep_ratio: 1.0
+  target_channels: 8
+
+perforatedai:
+  testing_dendrite_capacity: false
+  max_dendrites: 3
+  switch_mode: history
+  # PerforatedAI's own defaults for the switch decision, verified against the
+  # installed perforatedai 3.2.8: history_lookback 1, n_epochs_to_switch 10,
+  # improvement_threshold 1e-05, switch_mode DOING_HISTORY.  Nothing here is
+  # ours.  PAI switches when the validation score has gone n_epochs_to_switch
+  # epochs without beating its best by more than improvement_threshold.
+  history_lookback: 1
+  n_epochs_to_switch: 10
+  improvement_threshold: 1.0e-05
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  conversion: module_ids
+  # The whole perforation surface: all four TCSBlocks as units, plus the gate
+  # conv and the classifier.  This is the SparkNet reading of the PAI skill's
+  # ResNet recipe -- set_module_names_to_perforate(["BasicBlock", "Bottleneck",
+  # "Linear"]) perforates whole residual blocks and the classifier, and
+  # TCSBlock is SparkNet's residual block.  (The .res_conv shortcuts are not
+  # separately selectable; they are covered inside their block.)
+  module_ids:
+    - .blocks.0
+    - .blocks.1
+    - .blocks.2
+    - .blocks.3
+    - .gate_conv
+    - .fc
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true

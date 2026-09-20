@@ -149,8 +149,15 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("testing_dendrite_capacity must be false for the full run")
     if pai.get("max_dendrite_tries") != 3:
         raise ValueError("perforatedai.max_dendrite_tries must be 3")
-    if pai.get("switch_mode") != "history" or pai.get("history_lookback") != 8:
-        raise ValueError("PAI must use history switching with an 8-epoch lookback")
+    # History switching is mandatory -- it is what lets PAI pick the switch
+    # epoch from the validation trajectory instead of a hard-coded one.  The
+    # lookback itself is PAI's parameter to tune, so any positive window is
+    # allowed; 1 is PerforatedAI's own default.
+    if pai.get("switch_mode") != "history":
+        raise ValueError("PAI must use history switching")
+    lookback = pai.get("history_lookback")
+    if isinstance(lookback, bool) or not isinstance(lookback, int) or lookback < 1:
+        raise ValueError("perforatedai.history_lookback must be a positive integer")
     return cfg
 
 

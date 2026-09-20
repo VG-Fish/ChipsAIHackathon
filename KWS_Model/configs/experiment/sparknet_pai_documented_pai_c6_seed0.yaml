@@ -1,0 +1,38 @@
+source_checkpoint: outputs/sparknet-dendritic-study-v2/scratch/c6-seed0/models/checkpoints/paper_replication/best.pt
+source_validation_accuracy: 0.8701912260967379
+source_channels: 6
+widths:
+- 6
+teacher_checkpoint: null
+data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
+model_config: configs/model/sparknet_c6_paper.yaml
+train_config: configs/train/sparknet_pai_documented.yaml
+output_dir: outputs/sparknet-pai-documented/pai/c6-seed0
+seed: 0
+objective:
+  metric: validation_accuracy
+  use_test: false
+perforatedai:
+  testing_dendrite_capacity: false
+  max_dendrites: 3
+  switch_mode: history
+  history_lookback: 1
+  n_epochs_to_switch: 10
+  improvement_threshold: 1.0e-05
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  conversion: module_ids
+  module_ids:
+  - .blocks.0
+  - .blocks.1
+  - .blocks.2
+  - .blocks.3
+  - .gate_conv
+  - .fc
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true
+pruning:
+  method: identity
