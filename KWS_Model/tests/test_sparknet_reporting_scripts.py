@@ -323,6 +323,35 @@ def test_selection_manifest_is_the_only_source_for_one_time_test_targets(tmp_pat
     assert targets[0].validation_accuracy == pytest.approx(0.9)
 
 
+def test_grow_clean_checkpoint_target_reads_grow_summary_metadata(tmp_path):
+    from scripts import report_test_accuracy as reporting
+
+    run_root = tmp_path / "pointwise_b2-bn" / "c14-seed0"
+    checkpoint = run_root / "pai/candidates/model/final_clean_pai.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"clean state placeholder")
+    (run_root / "manifest.yaml").write_text("seed: 0\n")
+    reports = run_root / "reports"
+    reports.mkdir()
+    (reports / "grow_summary.yaml").write_text(
+        """
+status: complete
+width: 14
+seed: 0
+model_name: sparknet_c14_paper
+results:
+  best_val_acc_overall: 0.94803
+"""
+    )
+
+    [target] = reporting.targets_from_checkpoints([checkpoint])
+
+    assert target.width == 14
+    assert target.seed == 0
+    assert target.validation_accuracy == pytest.approx(0.94803)
+    assert target.run_root == run_root
+
+
 def test_validation_selection_includes_fixed_scratch_baselines(tmp_path):
     selector = importlib.import_module("scripts.select_sparknet_arms")
     scratch_root = tmp_path / "scratch"

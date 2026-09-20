@@ -235,17 +235,48 @@ uv run python -m kws.utils.graphs outputs/my-kws-run --watch
 `scripts/plot_sparknet_dendritic_comparison.py` reads the completed paired
 reports under `outputs/sparknet-dendritic-study-v2/`, averages the five seed
 runs for each arm and width, and writes editable PNG graphics plus a CSV
-summary. The main Pareto plots compare validation accuracy against deployed
-parameters and MACs; the additional plots show accuracy gain, parameter/MAC
-overhead, and the dendritic latency proxy.
+summary. The main comparison plots show validation accuracy against deployed
+parameters and MACs for the control arm without a Pareto-frontier overlay; the
+additional plots show accuracy gain, parameter/MAC overhead, and the dendritic
+latency proxy. C2 is excluded by default from the figures and CSV, as is C4; pass `--include-c2` or
+`--include-c4` to restore either width.
+All generated graphs use the same naming pattern: `accuracy_vs_{metric}_errorbars.png`,
+`accuracy_vs_{metric}_lines.png`, and `accuracy_vs_{metric}_annotated.png` for
+`params` and `macs`. The line and annotated variants use only the control arm;
+the annotated variants restore the C-width labels. The metrics outputs are
+`accuracy_gain_vs_parameter_overhead.png`, `cost_overhead_by_width.png`, and
+`metrics_dashboard.png`. The same run also writes `model_stats.md`, a formatted
+Markdown report with coverage, headline control-arm results, placement summaries,
+and complete arm-by-width statistics. It also scans the completed
+`outputs/sparknet-grow-dendrites-v3/` runs, so the report includes non-paper
+widths such as C9g8, C14, and C17g8. If a held-out test JSON is available, the
+broader table adds its test accuracy in a separate column; published SC2 and
+RP2040 INT8 reference rows remain in their own section.
+
+The same command also writes `best_vs_faithful_accuracy_vs_params.png` and
+`best_vs_faithful_accuracy_vs_macs.png`. These point-only graphs compare the
+best completed v3 model for each model name with the pre-dendrite base from
+exact `sparknet_cN_paper` configurations. Dedicated paper-replication summaries
+are used when available (currently the five-seed C16 replication); C2 and C4
+remain excluded from these figures by default. The editable rows are in
+`best_models_summary.csv` and `faithful_sparknet_summary.csv`. Each graph also
+omits a best-trained point when a faithful SparkNet has strictly higher
+validation accuracy at no greater value of that graph's x-axis cost, and shows
+the old faithful frontier alongside the new best-trained frontier. The new
+frontier is explicitly drawn through C6g16, C9g8, C10g16, C12, C16g16, and
+C18g16, plus C10g8. The star marks the highest validation-accuracy-per-
+parameter model, and the ring marks the editable practical-model default
+(currently C10g8).
 
 ```bash
 uv run python scripts/plot_sparknet_dendritic_comparison.py
 ```
 
 Use `--arms pointwise fc` to focus on selected placements, `--input` to use a
-different study root, or edit the defaults at the top of the script. Results
-go to `outputs/plots/sparknet-dendritic-comparison/`.
+different study root, `--broader-input`, `--paper-replication-input`, or
+`--export-input` to change the inventory sources, and `--broader-test-input` to
+provide a JSON report from `scripts/report_test_accuracy.py`. Results go to
+`outputs/plots/sparknet-dendritic-comparison/`.
 
 `manifest.yaml` is the run-identity authority. Every project-owned checkpoint
 records the manifest's `run_id`, including teacher/student training

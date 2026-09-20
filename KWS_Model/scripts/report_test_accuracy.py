@@ -66,6 +66,7 @@ from kws.data.dataset import build_datasets
 from kws.data.splits import TEST
 from kws.evaluate import load_model_from_checkpoint, run_inference
 from kws.models.registry import checkpoint_input_shape
+from kws.optimize.grow_clean_rebuild import load_clean_state, rebuild_clean_model
 from kws.utils.device import get_device
 from kws.utils.metrics import compute_metrics
 from kws.utils.seed import set_seed
@@ -82,6 +83,7 @@ DEFAULT_DATA_CONFIG = "configs/data/speech_commands_v2_mfcc32_paper.yaml"
 # is ultimately trying to be comparable to.
 PAPER_TEST_ACCURACY = 0.957
 PAPER_TEST_SD = 0.0017
+REPO_ROOT = Path(__file__).resolve().parents[1]
 _SEED_SUFFIX = re.compile(r"[-_]?seed\d+$")
 
 
@@ -167,6 +169,21 @@ def _run_root_of(checkpoint: Path) -> Path | None:
     return None
 
 
+def _grow_summary(run_root: Path | None) -> dict[str, Any] | None:
+    if run_root is None:
+        return None
+    path = run_root / "reports" / "grow_summary.yaml"
+    if not path.is_file():
+        return None
+    payload = yaml.safe_load(path.read_text()) or {}
+    return payload if isinstance(payload, dict) and payload.get("status") == "complete" else None
+
+
+def _repo_path(value: object) -> Path:
+    path = Path(str(value))
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
 def targets_from_report(run_root: Path) -> list[Target]:
     """Read a finished run's already-selected candidates out of its report.
 
@@ -230,6 +247,25 @@ def targets_from_checkpoints(paths: Iterable[Path]) -> list[Target]:
         checkpoint = Path(path)
         run_root = _run_root_of(checkpoint)
         if checkpoint.name == "final_clean_pai.pt":
+            grow_summary = _grow_summary(run_root)
+            if grow_summary is not None and not (checkpoint.parent / "cycle_metadata.yaml").exists():
+                results = grow_summary.get("results") or {}
+                targets.append(
+                    Target(
+                        checkpoint=checkpoint,
+                        arm=_experiment_name(run_root) if run_root is not None else checkpoint.parent.name,
+                        width=int(grow_summary["width"]),
+                        seed=_recorded_seed(grow_summary),
+                        validation_accuracy=(
+                            float(results["best_val_acc_overall"])
+                            if results.get("best_val_acc_overall") is not None
+                            else None
+                        ),
+                        pai_dir=checkpoint.parent,
+                        run_root=run_root,
+                    )
+                )
+                continue
             # A PAI export cannot be unpickled to describe itself, so take what
             # its directory says and let the loader read the weights later.
             targets.append(
@@ -353,6 +389,25 @@ def load_target_model(
 
     if target.checkpoint.name == "final_clean_pai.pt":
         assert target.pai_dir is not None
+        grow_summary = _grow_summary(target.run_root)
+        if grow_summary is not None and not (target.pai_dir / "cycle_metadata.yaml").exists():
+            model_cfg = yaml.safe_load(
+                _repo_path(grow_summary["model_config"]).read_text()
+            )
+            clean_state, _ = load_clean_state(target.checkpoint)
+            model = rebuild_clean_model(
+                model_cfg,
+                tuple(grow_summary["input_shape"]),
+                int(grow_summary["num_classes"]),
+                clean_state,
+                torch.tanh,
+            )
+            checkpoint = {
+                "input_shape": list(grow_summary["input_shape"]),
+                "num_classes": int(grow_summary["num_classes"]),
+                "num_keywords": int(grow_summary.get("num_keywords", grow_summary["num_classes"])),
+            }
+            return model.to(device).eval(), checkpoint
         # load_clean_graph loads this exact file into the graph it rebuilds and
         # verifies the state dict matches, so there is nothing further to load.
         model, input_shape = load_clean_graph(target.pai_dir, device)
