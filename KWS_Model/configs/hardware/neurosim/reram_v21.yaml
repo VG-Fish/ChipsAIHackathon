@@ -1,0 +1,52 @@
+# Reference v1 simulation defaults, not universal physical properties.
+# Tune these assumptions for the selected NeuroSim checkout and document any
+# change in the generated run manifest.
+schema_version: 1
+
+backend: neurosim_v21_reram
+
+source:
+  root_env: NEUROSIM_V21_ROOT
+
+simulation:
+  inference_only: true
+  mapping: novel
+  pipeline: false
+
+precision:
+  weight_bits: 8
+  activation_bits: 8
+  cell_bits: 2
+  adc_bits: 6
+
+array:
+  rows: 128
+  cols: 128
+  columns_per_adc: 8
+
+technology:
+  node_nm: 32
+  temperature_k: 300
+  clock_hz: 1000000000
+
+memory:
+  access_type: 1t1r
+  resistance_on_ohm: 240000
+  resistance_off_ohm: 24000000
+  read_voltage_v: 0.5
+  read_pulse_width_s: 1.0e-8
+  write_voltage_v: 4.0
+  write_pulse_width_s: 5.0e-8
+  access_resistance_ohm: 15000
+
+trace:
+  split: test
+  samples: 16
+  seed: 0
+
+graph:
+  grouped_conv_mode: patched
+  reject_unsupported_ops: true
+
+runtime:
+  timeout_seconds: 300
