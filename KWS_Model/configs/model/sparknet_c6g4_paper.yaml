@@ -1,0 +1,12 @@
+# SparkNet C=6 with gate_channels=4 (the paper hard-codes 32), paper recipe.
+#
+# Added 2026-09-26 for the head-shrink + head-dendrite study. At narrow widths the
+# gate head (gate conv C->G, its BatchNorm, fc G->12) is a third of the model
+# and does not shrink with C; this arm narrows it, following the "shrink the
+# base, then add dendrites" workflow. Its scratch run is the control for the
+# dendritic run of the same config. Not a published SparkNet configuration.
+family: sparknet
+name: sparknet_c6g4_paper
+channels: 6
+gate_channels: 4
+sparsity_weight: 1.0

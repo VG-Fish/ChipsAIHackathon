@@ -384,15 +384,20 @@ def _load_inputs(
     ):
         raise ValueError("targeted run requires the MFCC-32 source and data frontend")
     source_model_cfg = checkpoint["model_cfg"]
+    gate_channels = int(source_model_cfg.get("gate_channels", -1))
+    # prune_sparknet assumes the paper's gate width 32; a reduced-gate source
+    # (e.g. c9g8) is accepted only for identity-width cycles, which never prune.
+    identity_only = all(int(width) == int(cfg["source_channels"]) for width in cfg["widths"])
     if (
         model_family(configured_model) != "sparknet"
         or int(source_model_cfg.get("channels", -1)) != int(cfg["source_channels"])
-        or int(source_model_cfg.get("gate_channels", -1)) != 32
-        or int(configured_model.get("gate_channels", -1)) != 32
+        or int(configured_model.get("gate_channels", -1)) != gate_channels
+        or (gate_channels != 32 and not identity_only)
     ):
         raise ValueError(
-            "targeted run requires a SparkNet source with gate width 32 whose "
-            f"checkpoint width matches source_channels={cfg['source_channels']}"
+            "targeted run requires a SparkNet source whose checkpoint width matches "
+            f"source_channels={cfg['source_channels']} and whose gate width matches the "
+            "model config (gate width 32 unless every width is the identity width)"
         )
     if train_cfg.get("perforatedai") != cfg.get("perforatedai"):
         raise ValueError("train and experiment PAI settings must match exactly")
@@ -455,7 +460,7 @@ def run_experiment(
         "source": {
             "checkpoint": source_path,
             "channels": int(cfg["source_channels"]),
-            "gate_channels": 32,
+            "gate_channels": int(source_model.gate_conv.out_channels),
             "validation_accuracy": float(source_accuracy),
             **source_cost,
         },

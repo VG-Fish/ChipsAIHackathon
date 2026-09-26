@@ -1,0 +1,38 @@
+# PAI stage 2 (2026-09-26): PerforatedAI's native loop exactly as in
+# sparknet_pai_documented_pai_c8_seed0.yaml, but following the analyze skill's
+# efficiency doctrine: shrink the base first (c9g8, gate 32->8) and perforate
+# only the module with high Best_PBScores (fc: 0.35-0.65 in stage 1; every
+# conv block and gate_conv <= 0.075). Paired with ..._control_fc_c9g8_seed0.
+source_checkpoint: outputs/sparknet-dendritic-study-v2/scratch/c9g8-seed0/models/checkpoints/paper_replication/best.pt
+source_validation_accuracy: 0.9084364454443195
+source_channels: 9
+widths:
+- 9
+teacher_checkpoint: null
+data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
+model_config: configs/model/sparknet_c9g8_paper.yaml
+train_config: configs/train/sparknet_pai_documented_fc.yaml
+output_dir: outputs/sparknet-pai-documented/pai-fc/c9g8-seed0
+seed: 0
+objective:
+  metric: validation_accuracy
+  use_test: false
+perforatedai:
+  testing_dendrite_capacity: false
+  max_dendrites: 3
+  switch_mode: history
+  history_lookback: 1
+  n_epochs_to_switch: 10
+  improvement_threshold: 1.0e-05
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 40
+  max_dendrite_tries: 3
+  forward_function: tanh
+  conversion: module_ids
+  module_ids:
+  - .fc
+  post_integration_lr_multiplier: 0.25
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: true
+pruning:
+  method: identity

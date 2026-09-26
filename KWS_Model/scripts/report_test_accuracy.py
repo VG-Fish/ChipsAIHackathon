@@ -184,6 +184,16 @@ def _repo_path(value: object) -> Path:
     return path if path.is_absolute() else REPO_ROOT / path
 
 
+def _grow_forward_function(grow_summary: dict[str, Any]):
+    """The dendrite activation a grow run trained with (its train config's
+    ``perforatedai.forward_function``), so a non-tanh run rebuilds faithfully."""
+    train_config = grow_summary.get("train_config")
+    if not train_config:
+        return torch.tanh
+    train_cfg = yaml.safe_load(_repo_path(train_config).read_text()) or {}
+    return getattr(torch, str((train_cfg.get("perforatedai") or {}).get("forward_function", "tanh")))
+
+
 def targets_from_report(run_root: Path) -> list[Target]:
     """Read a finished run's already-selected candidates out of its report.
 
@@ -400,7 +410,7 @@ def load_target_model(
                 tuple(grow_summary["input_shape"]),
                 int(grow_summary["num_classes"]),
                 clean_state,
-                torch.tanh,
+                _grow_forward_function(grow_summary),
             )
             checkpoint = {
                 "input_shape": list(grow_summary["input_shape"]),

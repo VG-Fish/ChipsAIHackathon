@@ -78,6 +78,10 @@ def load_model(args: argparse.Namespace) -> tuple[torch.nn.Module, dict]:
     state_path = run / summary["artifacts"][args.grow_checkpoint]
     state, _ = load_clean_state(state_path)
     model_cfg = yaml.safe_load(Path(summary["model_config"]).read_text())
+    train_cfg = yaml.safe_load(Path(summary["train_config"]).read_text()) or {}
+    function_name = (train_cfg.get("perforatedai") or {}).get("forward_function", "tanh")
+    if function_name != "tanh":
+        raise ValueError(f"{run}: RP2040 export supports tanh dendrites only, run used {function_name!r}")
     model = rebuild_clean_model(model_cfg, summary["input_shape"], summary["num_classes"], state, torch.tanh)
     results = summary.get("results", {})
     val = results.get("best_val_acc_post_switch" if args.grow_checkpoint == "best_clean" else "final_val_acc")
