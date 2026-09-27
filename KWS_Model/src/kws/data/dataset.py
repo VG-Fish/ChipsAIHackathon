@@ -229,6 +229,34 @@ def _class_count(class_cfg: Mapping, avg_keyword_count: float, *, class_name: st
     return math.ceil(exact) if rounding == "ceil" else int(round(exact))
 
 
+def _subsample_train(entries: list[Entry], data_cfg: Mapping) -> list[Entry]:
+    """Keep ``train_fraction`` of every class's training entries (low-data regime).
+
+    The subset is drawn with its own RNG seeded by ``train_subset_seed``
+    (default 0), not the run seed, so every arm and training seed sees the
+    same keyword and silence clips and paired comparisons stay paired (the
+    unknown pool is itself drawn per run seed, as at full data). The shared split RNG is
+    untouched, so validation and test are identical to the full-data config.
+    """
+    fraction = float(data_cfg.get("train_fraction", 1.0))
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"train_fraction must be in (0, 1], got {fraction}")
+    if fraction == 1.0:
+        return entries
+    rng = random.Random(f"train_subset:{int(data_cfg.get('train_subset_seed', 0))}")
+    by_label: dict[int, list[Entry]] = {}
+    for entry in entries:
+        by_label.setdefault(entry.label, []).append(entry)
+    kept: list[Entry] = []
+    for label in sorted(by_label):
+        # Entries arrive in run-seed order; sort so the subset is seed-free.
+        group = sorted(by_label[label], key=lambda e: (e.rel_path or "", e.silence_index or 0))
+        kept.extend(rng.sample(group, max(1, round(fraction * len(group)))))
+    rng.shuffle(kept)
+    logger.info("train_fraction=%.3f: kept %d of %d training entries", fraction, len(kept), len(entries))
+    return kept
+
+
 def build_datasets(
     data_cfg: dict,
     augment: bool,
@@ -306,6 +334,8 @@ def build_datasets(
             ),
             silence_count=silence_count,
         )
+        if split == TRAIN:
+            entries = _subsample_train(entries, data_cfg)
         is_train = split == TRAIN and augment
         waveform_augmenter, spec_augmenter = (
             build_augmenters(augmentation, noise_dir, sample_rate) if is_train else (None, None)
