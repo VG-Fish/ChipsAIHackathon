@@ -342,8 +342,8 @@ def test_group_batchnorm_config_is_used_unless_cli_explicitly_disables_it():
 @pytest.mark.parametrize(
     ("edit", "overrides", "message"),
     [
-        (_no_edit, {"placement": "fc"}, "needs 'pointwise' placements"),
-        (_no_edit, {"placement": "depthwise"}, "needs 'pointwise' placements"),
+        (_no_edit, {"placement": "fc"}, r"needs one of \['gate_conv', 'pointwise'\] placements"),
+        (_no_edit, {"placement": "depthwise"}, r"needs one of \['gate_conv', 'pointwise'\] placements"),
         (_no_edit, {"placement": "pointwise_b2", "dendrite_input_scale": 34.8}, "leave it at 1"),
         (_set_grow("dendrite_input_scale", 50), {"placement": "pointwise_b2"}, "leave it at 1"),
         (
@@ -494,6 +494,32 @@ def test_grouping_a_pointwise_conv_with_its_batchnorm_changes_only_the_layout():
             outputs.append(net(features))
         assert torch.equal(outputs[0], outputs[1]), training
     assert torch.equal(model.blocks[2].bn.running_var, block.pointwise.model[1].running_var)
+
+
+def test_grouping_the_gate_conv_with_gate_bn_changes_only_the_layout():
+    _model_cfg, model = _paper_sparknet()
+    grouped = copy.deepcopy(model)
+
+    assert group_conv_with_batchnorm(grouped, [".gate_conv"]) == ["gate_conv"]
+
+    assert isinstance(grouped.gate_conv, PlainSequential)
+    assert isinstance(grouped.gate_bn, nn.Identity)
+    before, after = list(model.named_parameters()), list(grouped.named_parameters())
+    assert all(torch.equal(left, right) for (_, left), (_, right) in zip(before, after))
+    assert {left: right for (left, _), (right, _) in zip(before, after) if left != right} == {
+        "gate_conv.weight": "gate_conv.model.0.weight",
+        "gate_conv.bias": "gate_conv.model.0.bias",
+        "gate_bn.weight": "gate_conv.model.1.weight",
+        "gate_bn.bias": "gate_conv.model.1.bias",
+    }
+    features = torch.randn(8, 1, 32, 101)
+    for training in (True, False):
+        outputs = []
+        for net in (model, grouped):
+            net.train(training)
+            torch.manual_seed(1)
+            outputs.append(net(features))
+        assert torch.equal(outputs[0], outputs[1]), training
 
 
 @pytest.mark.parametrize(
@@ -1462,7 +1488,7 @@ def test_cli_refuses_a_directory_holding_an_earlier_attempt(tmp_path, capsys):
         (["--arm", ""], "arm must be a non-empty name"),
         (["--arm", "fc sham"], "arm must be a non-empty name"),
         (["--sham", "--arm", "../fc"], "arm must be a non-empty name"),
-        (["--placement", "fc", "--group-batchnorm"], "needs 'pointwise' placements"),
+        (["--placement", "fc", "--group-batchnorm"], "needs one of ['gate_conv', 'pointwise'] placements"),
         (
             ["--placement", "pointwise_b2", "--group-batchnorm", "--calibrate-dendrite-input-scale"],
             "leave it at 1",

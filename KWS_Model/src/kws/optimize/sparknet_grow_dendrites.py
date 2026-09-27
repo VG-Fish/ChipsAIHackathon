@@ -80,7 +80,7 @@ Run variants (CLI flags; each is recorded under ``variant`` in the summary):
     Grouped, the dendrite's copy has its own BatchNorm, which normalizes its
     pre-activation, and its contribution is added after the base BatchNorm,
     at unit scale.  The regrouping is exact and consumes no randomness, so the
-    pre-switch run is still the paired scratch run.  Pointwise placements
+    pre-switch run is still the paired scratch run.  Pointwise and gate_conv
     only; it replaces the input scale, so ``C`` must stay 1.
 ``--arm NAME``
     Label recorded as ``arm`` in the summary (``[A-Za-z0-9._-]+``).  Defaults
@@ -149,7 +149,7 @@ from kws.optimize.dendritic import (
     export_final_pai_model,
     freeze_base_batchnorm_stats,
 )
-from kws.optimize.grow_clean_rebuild import GROUPABLE_CONV, group_conv_with_batchnorm
+from kws.optimize.grow_clean_rebuild import GROUPABLE_CONVS, group_conv_with_batchnorm
 from kws.optimize.grow_diagnostics import dendrite_diagnostics
 from kws.optimize.kd import file_sha256
 from kws.train import (
@@ -404,11 +404,11 @@ def resolve_grow_config(
     if use_group_batchnorm:
         ungroupable = [
             module_id for module_id in module_ids
-            if module_id.rpartition(".")[2] != GROUPABLE_CONV
+            if module_id.rpartition(".")[2] not in GROUPABLE_CONVS
         ]
         if ungroupable:
             raise ValueError(
-                f"group_batchnorm needs {GROUPABLE_CONV!r} placements; "
+                f"group_batchnorm needs one of {sorted(GROUPABLE_CONVS)} placements; "
                 f"{chosen!r} has {ungroupable}"
             )
         # The dendrite's own BatchNorm normalizes its pre-activation, and a

@@ -34,9 +34,10 @@ restores them, and a file without them is refused rather than rebuilt as a
 model whose dendrite silently does nothing.
 
 A run with ``--group-batchnorm`` perforated a SparkNet pointwise conv together
-with its block's BatchNorm (:func:`group_conv_with_batchnorm`), so its
-``layer_array`` entries are ``PAISequential``s (``model.0`` the conv,
-``model.1`` the BatchNorm) and the block's own ``bn`` is gone.  The rebuild
+with its block's BatchNorm, or the gate conv with ``gate_bn``
+(:func:`group_conv_with_batchnorm`), so its ``layer_array`` entries are
+``PAISequential``s (``model.0`` the conv, ``model.1`` the BatchNorm) and the
+original BatchNorm is gone.  The rebuild
 recognizes that layout from the tensors and regroups the fresh model the same
 way before loading.
 """
@@ -51,7 +52,7 @@ import torch
 import torch.nn as nn
 
 from kws.models.registry import build_model
-from kws.models.sparknet import TCSBlock
+from kws.models.sparknet import SparkNet, TCSBlock
 
 LAYER_ARRAY = "layer_array"
 SKIP_WEIGHTS = "skip_weights"
@@ -74,10 +75,11 @@ VIEW_TUPLE = "view_tuple"
 PAI_MODULE_BOOKKEEPING = ("node_index", "num_cycles")
 PAI_ANYWHERE_BOOKKEEPING = ("tracker_string", "module_id")
 PAI_BOOKKEEPING = PAI_MODULE_BOOKKEEPING + PAI_ANYWHERE_BOOKKEEPING
-# The TCSBlock conv that ``--group-batchnorm`` can perforate, and the
-# BatchNorm its block applies directly to that conv's output.
-GROUPABLE_CONV = "pointwise"
-GROUPED_BATCHNORM = "bn"
+# The convs ``--group-batchnorm`` can perforate, each mapped to the BatchNorm
+# its parent applies directly to that conv's output: a TCSBlock's pointwise
+# conv and SparkNet's gate conv (whose dendrite then lands inside the gate
+# tanh, after gate_bn, instead of being divided away by it).
+GROUPABLE_CONVS = {"pointwise": "bn", "gate_conv": "gate_bn"}
 
 
 class PlainSequential(nn.Module):
@@ -100,10 +102,11 @@ def group_conv_with_batchnorm(
     module_ids: Sequence[str],
     container: Callable[[list[nn.Module]], nn.Module] = PlainSequential,
 ) -> list[str]:
-    """Regroup each listed TCSBlock pointwise conv with the block's BatchNorm.
+    """Regroup each listed conv with the BatchNorm applied to its output.
 
     ``block.pointwise`` becomes ``container([pointwise, bn])`` and ``block.bn``
-    an ``nn.Identity``, so the block computes exactly what it did and a
+    an ``nn.Identity`` (likewise ``gate_conv`` with ``gate_bn`` on the
+    SparkNet itself), so the model computes exactly what it did and a
     dendrite on ``.blocks.<k>.pointwise`` now copies conv *and* BatchNorm, the
     grouping PAI's ``PAISequential`` is documented for.  The same module
     objects move, nothing is initialized, and both attributes keep their
@@ -119,20 +122,22 @@ def group_conv_with_batchnorm(
             parent = model.get_submodule(parent_name) if parent_name else model
         except AttributeError as error:
             raise ValueError(f"no module {parent_name!r} to group {name!r} in") from error
-        if child != GROUPABLE_CONV or not isinstance(parent, TCSBlock):
+        parent_type = TCSBlock if child == "pointwise" else SparkNet
+        if child not in GROUPABLE_CONVS or not isinstance(parent, parent_type):
             raise ValueError(
-                f"only a TCSBlock's {GROUPABLE_CONV!r} conv can be grouped with its "
-                f"BatchNorm; got {name!r} in {type(parent).__name__}"
+                "only a TCSBlock's 'pointwise' conv or SparkNet's 'gate_conv' can be "
+                f"grouped with its BatchNorm; got {name!r} in {type(parent).__name__}"
             )
-        conv = getattr(parent, GROUPABLE_CONV)
-        batchnorm = getattr(parent, GROUPED_BATCHNORM)
+        batchnorm_name = GROUPABLE_CONVS[child]
+        conv = getattr(parent, child)
+        batchnorm = getattr(parent, batchnorm_name)
         if not isinstance(conv, nn.Conv2d) or not isinstance(batchnorm, nn.BatchNorm2d):
             raise ValueError(
                 f"{name} is already grouped or not a Conv2d + BatchNorm2d pair "
                 f"({type(conv).__name__}, {type(batchnorm).__name__})"
             )
-        setattr(parent, GROUPABLE_CONV, container([conv, batchnorm]))
-        setattr(parent, GROUPED_BATCHNORM, nn.Identity())
+        setattr(parent, child, container([conv, batchnorm]))
+        setattr(parent, batchnorm_name, nn.Identity())
         grouped.append(name)
     return grouped
 

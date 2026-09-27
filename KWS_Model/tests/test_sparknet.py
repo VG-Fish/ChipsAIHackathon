@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from kws.evaluate import load_model_from_checkpoint
-from kws.models.sparknet import SparkNet, build_sparknet
+from kws.models.sparknet import DendriticPointwise, SparkNet, build_sparknet
 from kws.models.sparknet_port import map_state_dict
 from kws.utils.profile import count_macs
 
@@ -208,3 +208,22 @@ def test_phase_b_model_configs_have_the_planned_costs():
         assert isinstance(model, SparkNet)
         assert sum(p.numel() for p in model.parameters()) == params
         assert count_macs(model, (40, 101)) == macs
+
+
+def test_dendritic_pointwise_reads_only_its_local_window():
+    layer = DendriticPointwise(channels=6, dendrites=2, fan_in=2)
+    assert sum(p.numel() for p in layer.parameters()) == 6 * 2 * (2 + 2)
+    x = torch.randn(3, 6, 1, 5, requires_grad=True)
+    layer(x)[:, 0].sum().backward()
+    # Neuron 0's dendrites read channels 0-1 and 2-3, never 4-5.
+    touched = x.grad.abs().sum(dim=(0, 2, 3)) > 0
+    assert not touched[4:].any()
+
+
+def test_build_sparknet_swaps_only_the_c_to_c_pointwise_convs_for_dendrites():
+    cfg = {"channels": 18, "gate_channels": 16, "dendrites": 2, "dendrite_fan_in": 4}
+    model = build_sparknet(cfg, (32, 101), 12)
+    kinds = [type(block.pointwise).__name__ for block in model.blocks]
+    assert kinds == ["Conv2d", "DendriticPointwise", "DendriticPointwise", "DendriticPointwise"]
+    assert sum(p.numel() for p in model.parameters()) == 4474
+    assert model(torch.randn(2, 1, 32, 101)).shape == (2, 12)

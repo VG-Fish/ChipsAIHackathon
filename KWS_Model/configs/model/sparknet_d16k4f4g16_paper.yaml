@@ -1,0 +1,14 @@
+# SparkNet C=16, gate_channels=16, with each C -> C pointwise conv of blocks 1-3
+# replaced by a DendriticPointwise: 4 ReLU dendrites per neuron, each reading 4
+# contiguous input channels (restricted receptive field, Chavlis & Poirazi 2025),
+# trained jointly from scratch by gradient descent.
+#
+# Added 2026-09-27 for the native-dendrite study: an equal-param test of
+# structured dendrites against simply widening. Not a published SparkNet configuration.
+family: sparknet
+name: sparknet_d16k4f4g16_paper
+channels: 16
+gate_channels: 16
+dendrites: 4
+dendrite_fan_in: 4
+sparsity_weight: 1.0
