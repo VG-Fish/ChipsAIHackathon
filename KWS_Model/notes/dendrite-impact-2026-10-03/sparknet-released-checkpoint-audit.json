@@ -1,0 +1,186 @@
+[
+  {
+    "file": "KWS_Model/models/checkpoints/external/sparknet/kws_C_4.ckpt",
+    "width": 4,
+    "gate_channels": 32,
+    "n_features": 32,
+    "params": 1504,
+    "local_macs": 96940,
+    "shapes": {
+      "preprocessor.featurizer.dct_mat": [
+        32,
+        32
+      ],
+      "preprocessor.featurizer.MelSpectrogram.spectrogram.window": [
+        400
+      ],
+      "preprocessor.featurizer.MelSpectrogram.mel_scale.fb": [
+        257,
+        32
+      ],
+      "fs.encoder.0.mconv.0.weight": [
+        32,
+        1,
+        11
+      ],
+      "fs.encoder.1.mconv.0.weight": [
+        4,
+        1,
+        15
+      ],
+      "fs.encoder.2.mconv.0.weight": [
+        4,
+        1,
+        19
+      ],
+      "fs.encoder.3.mconv.0.weight": [
+        4,
+        1,
+        29
+      ],
+      "output_layer.0.weight": [
+        32,
+        4,
+        1
+      ]
+    }
+  },
+  {
+    "file": "KWS_Model/models/checkpoints/external/sparknet/kws_C_8.ckpt",
+    "width": 8,
+    "gate_channels": 32,
+    "n_features": 32,
+    "params": 2356,
+    "local_macs": 177336,
+    "shapes": {
+      "preprocessor.featurizer.dct_mat": [
+        32,
+        32
+      ],
+      "preprocessor.featurizer.MelSpectrogram.spectrogram.window": [
+        400
+      ],
+      "preprocessor.featurizer.MelSpectrogram.mel_scale.fb": [
+        257,
+        32
+      ],
+      "fs.encoder.0.mconv.0.weight": [
+        32,
+        1,
+        11
+      ],
+      "fs.encoder.1.mconv.0.weight": [
+        8,
+        1,
+        15
+      ],
+      "fs.encoder.2.mconv.0.weight": [
+        8,
+        1,
+        19
+      ],
+      "fs.encoder.3.mconv.0.weight": [
+        8,
+        1,
+        29
+      ],
+      "output_layer.0.weight": [
+        32,
+        8,
+        1
+      ]
+    }
+  },
+  {
+    "file": "KWS_Model/models/checkpoints/external/sparknet/kws_C_16.ckpt",
+    "width": 16,
+    "gate_channels": 32,
+    "n_features": 32,
+    "params": 4636,
+    "local_macs": 396304,
+    "shapes": {
+      "preprocessor.featurizer.dct_mat": [
+        32,
+        32
+      ],
+      "preprocessor.featurizer.MelSpectrogram.spectrogram.window": [
+        400
+      ],
+      "preprocessor.featurizer.MelSpectrogram.mel_scale.fb": [
+        257,
+        32
+      ],
+      "fs.encoder.0.mconv.0.weight": [
+        32,
+        1,
+        11
+      ],
+      "fs.encoder.1.mconv.0.weight": [
+        16,
+        1,
+        15
+      ],
+      "fs.encoder.2.mconv.0.weight": [
+        16,
+        1,
+        19
+      ],
+      "fs.encoder.3.mconv.0.weight": [
+        16,
+        1,
+        29
+      ],
+      "output_layer.0.weight": [
+        32,
+        16,
+        1
+      ]
+    }
+  },
+  {
+    "file": "KWS_Model/models/checkpoints/external/sparknet/kws_C_32.ckpt",
+    "width": 32,
+    "gate_channels": 32,
+    "n_features": 32,
+    "params": 11500,
+    "local_macs": 1066944,
+    "shapes": {
+      "preprocessor.featurizer.dct_mat": [
+        32,
+        32
+      ],
+      "preprocessor.featurizer.MelSpectrogram.spectrogram.window": [
+        400
+      ],
+      "preprocessor.featurizer.MelSpectrogram.mel_scale.fb": [
+        257,
+        32
+      ],
+      "fs.encoder.0.mconv.0.weight": [
+        32,
+        1,
+        11
+      ],
+      "fs.encoder.1.mconv.0.weight": [
+        32,
+        1,
+        15
+      ],
+      "fs.encoder.2.mconv.0.weight": [
+        32,
+        1,
+        19
+      ],
+      "fs.encoder.3.mconv.0.weight": [
+        32,
+        1,
+        29
+      ],
+      "output_layer.0.weight": [
+        32,
+        32,
+        1
+      ]
+    }
+  }
+]

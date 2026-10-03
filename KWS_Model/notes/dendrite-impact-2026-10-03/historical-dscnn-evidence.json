@@ -1,0 +1,181 @@
+[
+  {
+    "family": "compression-run",
+    "candidate": "w10_classifier",
+    "run_status": "interrupted",
+    "source": "outputs/compression-run/pai/candidates/w10_classifier",
+    "canonical_architectures": [
+      {
+        "native_params": 1246,
+        "best_validation": 0.6426229508196721
+      }
+    ],
+    "zero_validation": 0.6426229508196721,
+    "selected_validation": 0.6426229508196721,
+    "within_search_gain_pp": 0.0,
+    "native_param_delta": 0,
+    "pai_metrics": {
+      "epochs": 86,
+      "best_validation": 0.6426229508196721,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 3801.0437049140455
+    },
+    "resume_metrics": {
+      "epochs": 0
+    },
+    "held_out_test_available": false
+  },
+  {
+    "family": "compression-run",
+    "candidate": "w14_classifier",
+    "run_status": "interrupted",
+    "source": "outputs/compression-run/pai/candidates/w14_classifier",
+    "canonical_architectures": [
+      {
+        "native_params": 1522,
+        "best_validation": 0.6613307618129219
+      },
+      {
+        "native_params": 1702,
+        "best_validation": 0.6644165863066538
+      }
+    ],
+    "zero_validation": 0.6613307618129219,
+    "selected_validation": 0.6644165863066538,
+    "within_search_gain_pp": 0.3085824493731848,
+    "native_param_delta": 180,
+    "pai_metrics": {
+      "epochs": 140,
+      "best_validation": 0.6644165863066538,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 5844.928973669768
+    },
+    "resume_metrics": {
+      "epochs": 8,
+      "best_validation": 0.6592092574734812,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 348.4236396239139
+    },
+    "held_out_test_available": false
+  },
+  {
+    "family": "compression-run",
+    "candidate": "w18_classifier",
+    "run_status": "interrupted",
+    "source": "outputs/compression-run/pai/candidates/w18_classifier",
+    "canonical_architectures": [
+      {
+        "native_params": 1830,
+        "best_validation": 0.6869816779170684
+      },
+      {
+        "native_params": 2058,
+        "best_validation": 0.7016393442622951
+      }
+    ],
+    "zero_validation": 0.6869816779170684,
+    "selected_validation": 0.7016393442622951,
+    "within_search_gain_pp": 1.4657666345226694,
+    "native_param_delta": 228,
+    "pai_metrics": {
+      "epochs": 249,
+      "best_validation": 0.7016393442622951,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 10492.205459382618
+    },
+    "resume_metrics": {
+      "epochs": 8,
+      "best_validation": 0.7014464802314369,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 345.4863585839048
+    },
+    "held_out_test_available": false
+  },
+  {
+    "family": "full-run-20260912T063022Z",
+    "candidate": "candidate_w17",
+    "run_status": "failed",
+    "source": "outputs/full-run-20260912T063022Z/pai/candidates/candidate_w17",
+    "canonical_architectures": [
+      {
+        "native_params": 1750,
+        "best_validation": 0.792864030858245
+      }
+    ],
+    "zero_validation": 0.792864030858245,
+    "selected_validation": 0.792864030858245,
+    "within_search_gain_pp": 0.0,
+    "native_param_delta": 0,
+    "pai_metrics": {
+      "epochs": 3,
+      "best_validation": 0.792864030858245,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 200.22615199990105
+    },
+    "resume_metrics": {
+      "epochs": 0
+    },
+    "held_out_test_available": false
+  },
+  {
+    "family": "full-run-20260912T063022Z",
+    "candidate": "candidate_w18",
+    "run_status": "failed",
+    "source": "outputs/full-run-20260912T063022Z/pai/candidates/candidate_w18",
+    "canonical_architectures": [
+      {
+        "native_params": 1830,
+        "best_validation": 0.8258437801350048
+      },
+      {
+        "native_params": 2058,
+        "best_validation": 0.8268081002892961
+      }
+    ],
+    "zero_validation": 0.8258437801350048,
+    "selected_validation": 0.8268081002892961,
+    "within_search_gain_pp": 0.0964320154291265,
+    "native_param_delta": 228,
+    "pai_metrics": {
+      "epochs": 301,
+      "best_validation": 0.8268081002892961,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 19167.58221900533
+    },
+    "resume_metrics": {
+      "epochs": 8,
+      "best_validation": 0.8252651880424301,
+      "recorded_seeds": [
+        0
+      ],
+      "summed_epoch_seconds": 586.6822918328689
+    },
+    "held_out_test_available": false
+  },
+  {
+    "family": "dendritic_framework_w18",
+    "source": "dendritic_framework_w18",
+    "canonical_architectures": [
+      {
+        "native_params": 1830,
+        "best_validation": 0.7976856316297011
+      }
+    ],
+    "interpretation": "one zero-dendrite architecture, empty canonical switch CSV; partial baseline evidence",
+    "held_out_test_available": false
+  }
+]

@@ -1,0 +1,2080 @@
+[
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c10_paper",
+    "stats": {
+      "n": 5,
+      "mean": 92.80089988751406,
+      "sd": 0.3317858538527022,
+      "ci95": [
+        92.38893333767187,
+        93.21286643735625
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 10,
+      "gate_channels": 32,
+      "params": 2854,
+      "macs": 224806
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c10-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c10g12_paper",
+    "stats": {
+      "n": 5,
+      "mean": 92.08098987626546,
+      "sd": 0.7498687654667713,
+      "ci95": [
+        91.14990482680787,
+        93.01207492572306
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 10,
+      "gate_channels": 12,
+      "params": 2354,
+      "macs": 204366
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g12-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g12-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g12-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g12-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g12-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c10g16_paper",
+    "stats": {
+      "n": 3,
+      "mean": 92.36595425571804,
+      "sd": 0.44674528709730515,
+      "ci95": [
+        91.25617744049289,
+        93.47573107094318
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 10,
+      "gate_channels": 16,
+      "params": 2454,
+      "macs": 208454
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g16-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c10g8_paper",
+    "stats": {
+      "n": 3,
+      "mean": 91.57855268091488,
+      "sd": 0.5745965580649619,
+      "ci95": [
+        90.15117570198377,
+        93.00592965984599
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 10,
+      "gate_channels": 8,
+      "params": 2254,
+      "macs": 200278
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c10g8-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c12_paper",
+    "stats": {
+      "n": 5,
+      "mean": 93.87626546681665,
+      "sd": 0.46362768897349593,
+      "ci95": [
+        93.30059565684785,
+        94.45193527678545
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 12,
+      "gate_channels": 32,
+      "params": 3400,
+      "macs": 277124
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c12-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c12g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 93.41732283464567,
+      "sd": 0.3712376846334179,
+      "ci95": [
+        92.95637036685983,
+        93.87827530243152
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 12,
+      "gate_channels": 16,
+      "params": 2968,
+      "macs": 257540
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c12g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c12g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c13g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 93.95725534308211,
+      "sd": 0.38659831621488794,
+      "ci95": [
+        93.4772301320719,
+        94.43728055409233
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 13,
+      "gate_channels": 16,
+      "params": 3243,
+      "macs": 283901
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c13g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c13g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c13g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c13g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c13g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c14g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.20022497187851,
+      "sd": 0.23988796873009863,
+      "ci95": [
+        93.90236471750411,
+        94.49808522625291
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 14,
+      "gate_channels": 16,
+      "params": 3530,
+      "macs": 311474
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c14g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c14g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c14g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c14g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c14g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c16g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.99662542182227,
+      "sd": 0.30665573383826805,
+      "ci95": [
+        94.61586203727254,
+        95.37738880637201
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 16,
+      "gate_channels": 16,
+      "params": 4140,
+      "macs": 370256
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c16g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c16g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c16g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c16g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c16g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c17g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.94263217097863,
+      "sd": 0.2082661293324298,
+      "ci95": [
+        94.6840356161413,
+        95.20122872581595
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 17,
+      "gate_channels": 16,
+      "params": 4463,
+      "macs": 401465
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c17g8_paper",
+    "stats": {
+      "n": 3,
+      "mean": 94.66066741657293,
+      "sd": 0.3826726905788742,
+      "ci95": [
+        93.71005575464899,
+        95.61127907849688
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 17,
+      "gate_channels": 8,
+      "params": 4207,
+      "macs": 387633
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c17g8-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c18_paper",
+    "stats": {
+      "n": 5,
+      "mean": 95.10011248593926,
+      "sd": 0.21776998947725795,
+      "ci95": [
+        94.82971533011614,
+        95.37050964176238
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 18,
+      "gate_channels": 32,
+      "params": 5326,
+      "macs": 463166
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c18-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c18g12_paper",
+    "stats": {
+      "n": 3,
+      "mean": 95.34308211473565,
+      "sd": 0.06749156355455455,
+      "ci95": [
+        95.17542377648479,
+        95.51074045298651
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 18,
+      "gate_channels": 12,
+      "params": 4666,
+      "macs": 426566
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g12-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g12-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g12-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c18g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 95.19910011248594,
+      "sd": 0.4623158419046031,
+      "ci95": [
+        94.62505917579372,
+        95.77314104917815
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 18,
+      "gate_channels": 16,
+      "params": 4798,
+      "macs": 433886
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c18g8_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.99212598425197,
+      "sd": 0.35946254276507295,
+      "ci95": [
+        94.5457942861978,
+        95.43845768230614
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 18,
+      "gate_channels": 8,
+      "params": 4534,
+      "macs": 419246
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g8-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g8-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c18g8-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c19g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 95.35208098987627,
+      "sd": 0.2264294738373168,
+      "ci95": [
+        95.07093166408025,
+        95.6332303156723
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 19,
+      "gate_channels": 16,
+      "params": 5145,
+      "macs": 467519
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c19g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c19g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c19g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c19g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c19g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c2_paper",
+    "stats": {
+      "n": 5,
+      "mean": 63.338582677165356,
+      "sd": 1.489629850350555,
+      "ci95": [
+        61.488962921335414,
+        65.1882024329953
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 2,
+      "gate_channels": 32,
+      "params": 1150,
+      "macs": 64014
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c2-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c2-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c2-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c2-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c2-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c2g16_paper",
+    "stats": {
+      "n": 1,
+      "mean": 65.9392575928009,
+      "sd": null,
+      "ci95": null
+    },
+    "seeds": [
+      0
+    ],
+    "cost": {
+      "channels": 2,
+      "gate_channels": 16,
+      "params": 878,
+      "macs": 60590
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c2g16-seed0"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c4_paper",
+    "stats": {
+      "n": 5,
+      "mean": 82.86614173228347,
+      "sd": 0.8586737787511572,
+      "ci95": [
+        81.79995741500657,
+        83.93232604956036
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 4,
+      "gate_channels": 32,
+      "params": 1504,
+      "macs": 96940
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c4-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c4-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c4-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c4-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c4-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c4g16_paper",
+    "stats": {
+      "n": 1,
+      "mean": 80.04499437570304,
+      "sd": null,
+      "ci95": null
+    },
+    "seeds": [
+      0
+    ],
+    "cost": {
+      "channels": 4,
+      "gate_channels": 16,
+      "params": 1200,
+      "macs": 90284
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c4g16-seed0"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c6_paper",
+    "stats": {
+      "n": 5,
+      "mean": 87.8740157480315,
+      "sd": 0.6769747367078088,
+      "ci95": [
+        87.03344058976793,
+        88.71459090629506
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 32,
+      "params": 1906,
+      "macs": 134714
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c6-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c6g12_paper",
+    "stats": {
+      "n": 3,
+      "mean": 86.4116985376828,
+      "sd": 0.9673790776153011,
+      "ci95": [
+        84.00859568942037,
+        88.81480138594522
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 12,
+      "params": 1486,
+      "macs": 122354
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g12-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g12-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g12-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c6g16_paper",
+    "stats": {
+      "n": 3,
+      "mean": 87.19910011248594,
+      "sd": 0.6864407785103427,
+      "ci95": [
+        85.49388668770514,
+        88.90431353726673
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 16,
+      "params": 1570,
+      "macs": 124826
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g16-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c6g4_paper",
+    "stats": {
+      "n": 5,
+      "mean": 81.76827896512935,
+      "sd": 1.3602522374735868,
+      "ci95": [
+        80.07930273338229,
+        83.45725519687642
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 4,
+      "params": 1318,
+      "macs": 117410
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g4-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g4-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g4-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g4-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g4-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c6g8_paper",
+    "stats": {
+      "n": 5,
+      "mean": 85.80427446569179,
+      "sd": 0.9447479684407689,
+      "ci95": [
+        84.63121492590274,
+        86.97733400548084
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 8,
+      "params": 1402,
+      "macs": 119882
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g8-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g8-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c6g8-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c7g8_paper",
+    "stats": {
+      "n": 3,
+      "mean": 87.64904386951632,
+      "sd": 0.8785432706306638,
+      "ci95": [
+        85.46662139953821,
+        89.83146633949443
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 7,
+      "gate_channels": 8,
+      "params": 1597,
+      "macs": 138163
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c7g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c7g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c7g8-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c8_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.22609673790777,
+      "sd": 0.3248487981595894,
+      "ci95": [
+        90.82274368037325,
+        91.62944979544228
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 8,
+      "gate_channels": 32,
+      "params": 2356,
+      "macs": 177336
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c8g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 90.51068616422947,
+      "sd": 0.32344353361215783,
+      "ci95": [
+        90.10907797309144,
+        90.9122943553675
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 8,
+      "gate_channels": 16,
+      "params": 1988,
+      "macs": 164216
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c8g8_paper",
+    "stats": {
+      "n": 3,
+      "mean": 89.31383577052868,
+      "sd": 0.5637779116374197,
+      "ci95": [
+        87.91333379917832,
+        90.71433774187905
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 8,
+      "gate_channels": 8,
+      "params": 1804,
+      "macs": 157656
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c8g8-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c9g12_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.10011248593926,
+      "sd": 0.40544901061215183,
+      "ci95": [
+        90.59668104635482,
+        91.60354392552371
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 9,
+      "gate_channels": 12,
+      "params": 2119,
+      "macs": 182045
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g12-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g12-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g12-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g12-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g12-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c9g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.30708661417323,
+      "sd": 0.20655800101035754,
+      "ci95": [
+        91.05061098077773,
+        91.56356224756873
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 9,
+      "gate_channels": 16,
+      "params": 2215,
+      "macs": 185729
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g16-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g16-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g16-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g16-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c9g4_paper",
+    "stats": {
+      "n": 5,
+      "mean": 88.29246344206975,
+      "sd": 0.713838287543373,
+      "ci95": [
+        87.40611613988771,
+        89.17881074425178
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 9,
+      "gate_channels": 4,
+      "params": 1927,
+      "macs": 174677
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g4-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g4-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g4-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g4-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g4-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-dendritic-study-v2",
+    "model": "sparknet_c9g8_paper",
+    "stats": {
+      "n": 5,
+      "mean": 90.52418447694038,
+      "sd": 0.48392491722322317,
+      "ci95": [
+        89.92331232939057,
+        91.12505662449018
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 9,
+      "gate_channels": 8,
+      "params": 2023,
+      "macs": 178361
+    },
+    "runs": [
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g8-seed0",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g8-seed1",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g8-seed2",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g8-seed3",
+      "outputs/sparknet-dendritic-study-v2/scratch/c9g8-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c12g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 76.81889763779527,
+      "sd": 1.0978304961234646,
+      "ci95": [
+        75.4557610346286,
+        78.18203424096195
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 12,
+      "gate_channels": 16,
+      "params": 2968,
+      "macs": 257540
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c12g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c12g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c12g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c12g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c12g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c16g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 78.60967379077616,
+      "sd": 1.3008939300738867,
+      "ci95": [
+        76.9944006323216,
+        80.22494694923071
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 16,
+      "gate_channels": 16,
+      "params": 4140,
+      "macs": 370256
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c16g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c16g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c16g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c16g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c16g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c17g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 76.81439820022497,
+      "sd": 2.567765987475526,
+      "ci95": [
+        73.62609561776448,
+        80.00270078268547
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 17,
+      "gate_channels": 16,
+      "params": 4463,
+      "macs": 401465
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c17g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c17g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c17g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c17g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c17g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c18g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 78.73115860517436,
+      "sd": 0.9755326463754083,
+      "ci95": [
+        77.51987483909757,
+        79.94244237125115
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 18,
+      "gate_channels": 16,
+      "params": 4798,
+      "macs": 433886
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c18g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c18g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c18g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c18g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c18g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c4g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 56.43194600674916,
+      "sd": 5.459813036599972,
+      "ci95": [
+        49.652692722279404,
+        63.21119929121891
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 4,
+      "gate_channels": 16,
+      "params": 1200,
+      "macs": 90284
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c4g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c4g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c4g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c4g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c4g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c6g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 65.52980877390326,
+      "sd": 4.140381131993157,
+      "ci95": [
+        60.3888465834652,
+        70.6707709643413
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 16,
+      "params": 1570,
+      "macs": 124826
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c6g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c6g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c6g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c6g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c6g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "model": "sparknet_c8g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 68.0,
+      "sd": 8.312727654628471,
+      "ci95": [
+        57.678385344375016,
+        78.32161465562498
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 8,
+      "gate_channels": 16,
+      "params": 1988,
+      "macs": 164216
+    },
+    "runs": [
+      "outputs/sparknet-lowdata02/scratch/c8g16-seed0",
+      "outputs/sparknet-lowdata02/scratch/c8g16-seed1",
+      "outputs/sparknet-lowdata02/scratch/c8g16-seed2",
+      "outputs/sparknet-lowdata02/scratch/c8g16-seed3",
+      "outputs/sparknet-lowdata02/scratch/c8g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c10g16_paper",
+    "stats": {
+      "n": 3,
+      "mean": 87.25909261342332,
+      "sd": 0.2901468634743613,
+      "ci95": [
+        86.53832784792058,
+        87.97985737892606
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 10,
+      "gate_channels": 16,
+      "params": 2454,
+      "macs": 208454
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c10g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c10g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c10g16-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c12g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 88.34645669291338,
+      "sd": 0.4071307327526186,
+      "ci95": [
+        87.84093711949214,
+        88.85197626633462
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 12,
+      "gate_channels": 16,
+      "params": 2968,
+      "macs": 257540
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c12g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c12g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c12g16-seed2",
+      "outputs/sparknet-lowdata10/scratch/c12g16-seed3",
+      "outputs/sparknet-lowdata10/scratch/c12g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c14g16_paper",
+    "stats": {
+      "n": 10,
+      "mean": 88.94488188976378,
+      "sd": 0.4328979636243828,
+      "ci95": [
+        88.63520534190444,
+        89.25455843762312
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cost": {
+      "channels": 14,
+      "gate_channels": 16,
+      "params": 3530,
+      "macs": 311474
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed2",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed3",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed4",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed5",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed6",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed7",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed8",
+      "outputs/sparknet-lowdata10/scratch/c14g16-seed9"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c15g16_paper",
+    "stats": {
+      "n": 10,
+      "mean": 89.20809898762656,
+      "sd": 0.6509989773118037,
+      "ci95": [
+        88.74240237342671,
+        89.6737956018264
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cost": {
+      "channels": 15,
+      "gate_channels": 16,
+      "params": 3829,
+      "macs": 340259
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed2",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed3",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed4",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed5",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed6",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed7",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed8",
+      "outputs/sparknet-lowdata10/scratch/c15g16-seed9"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c16g16_paper",
+    "stats": {
+      "n": 20,
+      "mean": 89.56242969628796,
+      "sd": 0.5812481376342703,
+      "ci95": [
+        89.29039719417038,
+        89.83446219840555
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cost": {
+      "channels": 16,
+      "gate_channels": 16,
+      "params": 4140,
+      "macs": 370256
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed10",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed11",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed12",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed13",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed14",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed15",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed16",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed17",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed18",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed19",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed2",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed3",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed4",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed5",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed6",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed7",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed8",
+      "outputs/sparknet-lowdata10/scratch/c16g16-seed9"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c17g16_paper",
+    "stats": {
+      "n": 20,
+      "mean": 89.73228346456693,
+      "sd": 0.42242531834908403,
+      "ci95": [
+        89.53458232994304,
+        89.92998459919083
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cost": {
+      "channels": 17,
+      "gate_channels": 16,
+      "params": 4463,
+      "macs": 401465
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed10",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed11",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed12",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed13",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed14",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed15",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed16",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed17",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed18",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed19",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed2",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed3",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed4",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed5",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed6",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed7",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed8",
+      "outputs/sparknet-lowdata10/scratch/c17g16-seed9"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c18g16_paper",
+    "stats": {
+      "n": 10,
+      "mean": 90.09223847019123,
+      "sd": 0.3700010441441451,
+      "ci95": [
+        89.82755566804636,
+        90.35692127233611
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cost": {
+      "channels": 18,
+      "gate_channels": 16,
+      "params": 4798,
+      "macs": 433886
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed2",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed3",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed4",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed5",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed6",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed7",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed8",
+      "outputs/sparknet-lowdata10/scratch/c18g16-seed9"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c6g16_paper",
+    "stats": {
+      "n": 3,
+      "mean": 81.4923134608174,
+      "sd": 2.0143883678360983,
+      "ci95": [
+        76.48829535016455,
+        86.49633157147025
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 6,
+      "gate_channels": 16,
+      "params": 1570,
+      "macs": 124826
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c6g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c6g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c6g16-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "model": "sparknet_c8g16_paper",
+    "stats": {
+      "n": 3,
+      "mean": 84.26696662917135,
+      "sd": 0.5661668117938322,
+      "ci95": [
+        82.86053030085284,
+        85.67340295748986
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "cost": {
+      "channels": 8,
+      "gate_channels": 16,
+      "params": 1988,
+      "macs": 164216
+    },
+    "runs": [
+      "outputs/sparknet-lowdata10/scratch/c8g16-seed0",
+      "outputs/sparknet-lowdata10/scratch/c8g16-seed1",
+      "outputs/sparknet-lowdata10/scratch/c8g16-seed2"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata20",
+    "model": "sparknet_c16g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.7705286839145,
+      "sd": 0.286960427832053,
+      "ci95": [
+        91.4142202517663,
+        92.12683711606272
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 16,
+      "gate_channels": 16,
+      "params": 4140,
+      "macs": 370256
+    },
+    "runs": [
+      "outputs/sparknet-lowdata20/scratch/c16g16-seed0",
+      "outputs/sparknet-lowdata20/scratch/c16g16-seed1",
+      "outputs/sparknet-lowdata20/scratch/c16g16-seed2",
+      "outputs/sparknet-lowdata20/scratch/c16g16-seed3",
+      "outputs/sparknet-lowdata20/scratch/c16g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-lowdata20",
+    "model": "sparknet_c17g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.96850393700788,
+      "sd": 0.46078063325678265,
+      "ci95": [
+        91.3963692136234,
+        92.54063866039236
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": {
+      "channels": 17,
+      "gate_channels": 16,
+      "params": 4463,
+      "macs": 401465
+    },
+    "runs": [
+      "outputs/sparknet-lowdata20/scratch/c17g16-seed0",
+      "outputs/sparknet-lowdata20/scratch/c17g16-seed1",
+      "outputs/sparknet-lowdata20/scratch/c17g16-seed2",
+      "outputs/sparknet-lowdata20/scratch/c17g16-seed3",
+      "outputs/sparknet-lowdata20/scratch/c17g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_a12k2f3g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 93.76377952755905,
+      "sd": 0.35335627613582726,
+      "ci95": [
+        93.32502976094185,
+        94.20252929417626
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed0",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed1",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed2",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed3",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_a16k1f16b1g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.85264341957256,
+      "sd": 0.3663658580125498,
+      "ci95": [
+        94.39774012350735,
+        95.30754671563777
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed0",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed1",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed2",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed3",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_a16k1f4g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 95.01012373453318,
+      "sd": 0.17671394273705357,
+      "ci95": [
+        94.79070439385595,
+        95.22954307521042
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed0",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed1",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed2",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed3",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_a16k2f4g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 95.18110236220473,
+      "sd": 0.33193836402111243,
+      "ci95": [
+        94.76894644597705,
+        95.5932582784324
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed0",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed1",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed2",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed3",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_b0a16k2f8g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.67716535433071,
+      "sd": 0.2275443475093882,
+      "ci95": [
+        94.39463173003354,
+        94.95969897862788
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed0",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed1",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed2",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed3",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_b0a16k4f4g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.91113610798651,
+      "sd": 0.16562575765405008,
+      "ci95": [
+        94.70548456753225,
+        95.11678764844076
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed0",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed1",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed2",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed3",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_b0a9k1f8g12_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.41057367829022,
+      "sd": 0.42399888375755607,
+      "ci95": [
+        90.88410952904988,
+        91.93703782753056
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed0",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed1",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed2",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed3",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_b0a9k2f8g12_paper",
+    "stats": {
+      "n": 5,
+      "mean": 91.59955005624298,
+      "sd": 0.2978648061671691,
+      "ci95": [
+        91.22970205009327,
+        91.96939806239268
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed0",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed1",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed2",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed3",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_d14k2f3g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 92.94038245219348,
+      "sd": 0.20643545101380087,
+      "ci95": [
+        92.68405898471669,
+        93.19670591967026
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed0",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed1",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed2",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed3",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_d16k4f4g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.49718785151856,
+      "sd": 0.3402955302801174,
+      "ci95": [
+        94.07465514282008,
+        94.91972056021704
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed0",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed1",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed2",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed3",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_d18k2f4g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.0697412823397,
+      "sd": 0.26930928686875616,
+      "ci95": [
+        93.73534963645284,
+        94.40413292822657
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed0",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed1",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed2",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed3",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-native-dendrites",
+    "model": "sparknet_d20k2f3g16_paper",
+    "stats": {
+      "n": 5,
+      "mean": 94.64116985376828,
+      "sd": 0.32422498808195793,
+      "ci95": [
+        94.23859135874886,
+        95.04374834878769
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "cost": null,
+    "runs": [
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed0",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed1",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed2",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed3",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed4"
+    ]
+  },
+  {
+    "family": "sparknet-paper-replication",
+    "model": "sparknet_c16_paper",
+    "stats": {
+      "n": 6,
+      "mean": 94.93063367079115,
+      "sd": 0.2743058291439333,
+      "ci95": [
+        94.6427673574563,
+        95.21849998412601
+      ]
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "cost": {
+      "channels": 16,
+      "gate_channels": 32,
+      "params": 4636,
+      "macs": 396304
+    },
+    "runs": [
+      "outputs/sparknet-paper-replication/c16-seed0",
+      "outputs/sparknet-paper-replication/c16-seed1",
+      "outputs/sparknet-paper-replication/c16-seed2",
+      "outputs/sparknet-paper-replication/c16-seed3",
+      "outputs/sparknet-paper-replication/c16-seed4",
+      "outputs/sparknet-paper-replication/c16-seed5"
+    ]
+  }
+]

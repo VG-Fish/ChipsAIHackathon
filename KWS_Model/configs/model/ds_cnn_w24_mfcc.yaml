@@ -1,0 +1,8 @@
+# Params: 2,724 for 12 classes, input (32, 101) (speech_commands_v2_mfcc32_paper).
+# Scratch DS-CNN width sweep: stem 24, 2 blocks of width 24.
+name: ds_cnn_w24
+initial_channels: 24
+initial_kernel: 5
+initial_stride: 2
+block_channels: [24, 24]
+dropout: 0.2

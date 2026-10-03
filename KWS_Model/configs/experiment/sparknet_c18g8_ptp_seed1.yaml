@@ -1,0 +1,39 @@
+# SparkNet c18g8 "Pruning Then Perforating" run, seed 1 (batch 15, 2026-09-28).
+# Same protocol as sparknet_c16_ptp_seed*.yaml, but from a narrow-gate scratch source so one
+# fc dendrite costs only 108 (8*12+12) params instead of 396. Source trained with
+# configs/train/sparknet_narrow_paper_fast_io.yaml; compare against the g16 scratch frontier.
+source_checkpoint: outputs/sparknet-dendritic-study-v2/scratch/c18g8-seed1/models/checkpoints/paper_replication/best.pt
+source_validation_accuracy: null  # read from the checkpoint
+source_channels: 18
+teacher_checkpoint: null
+data_config: configs/data/speech_commands_v2_mfcc32_paper.yaml
+model_config: configs/model/sparknet_c18g8_paper.yaml
+train_config: configs/train/sparknet_ptp_paper.yaml
+output_dir: outputs/sparknet-c18g8-ptp/seed1
+seed: 1
+objective:
+  metric: validation_accuracy
+  use_test: false
+pruning:
+  method: group
+  criterion: l2_group
+  prune_rates: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+# Must equal the train config's perforatedai block exactly.
+perforatedai:
+  conversion: module_ids
+  module_ids: [.fc]
+  max_dendrites: 3
+  testing_dendrite_capacity: false
+  switch_mode: history
+  history_lookback: 1
+  n_epochs_to_switch: 10
+  improvement_threshold: [0.001, 0.0001, 0.0]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 100
+  max_dendrite_tries: 3
+  forward_function: sigmoid
+  retain_all_dendrites: false
+  output_dimensions: [-1, 0]
+  post_integration_lr_multiplier: 1.0
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: false

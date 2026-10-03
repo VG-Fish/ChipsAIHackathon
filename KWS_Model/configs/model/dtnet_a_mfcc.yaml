@@ -1,0 +1,17 @@
+# 4160 params (12 classes, input (32, 101)). Budget A ablation: raw MFCC order (no IDCT).
+# As dtnet_a_het but input_transform: none, so layer-1 local windows are cepstral bands, not mel bands.
+name: dtnet_a_mfcc
+family: dtnet
+neurons: [34, 34]
+fan_in: [8, 8]
+tau: hetero
+branch_activation: relu
+layout: local
+branch_norm: true
+soma_tau: true
+input_transform: none
+input_norm: cmvn
+branches: 4
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

@@ -1,0 +1,16 @@
+# 4137 params (12 classes, input (32, 101)). Budget A point-neuron control, 3 layers (depth substitute).
+# As dtnet_a_point with three leaky dense layers of 33 neurons.
+name: dtnet_a_point3
+family: dtnet
+neurons: [33, 33, 33]
+branches: 1
+fan_in: full
+tau: none
+branch_activation: identity
+branch_norm: false
+soma_tau: true
+input_transform: idct
+input_norm: cmvn
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

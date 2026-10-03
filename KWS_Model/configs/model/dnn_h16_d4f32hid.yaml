@@ -1,0 +1,9 @@
+# 15708 params (12 classes, input (32, 101)). Batch 17 ablation: dendrites on hidden layer only
+name: dnn_h16_d4f32hid
+family: dnn
+hidden: [16]
+dendrites: 4
+dendrite_fan_in: 32
+dendrite_layers: hidden
+time_pool: 4
+input_norm: cmvn

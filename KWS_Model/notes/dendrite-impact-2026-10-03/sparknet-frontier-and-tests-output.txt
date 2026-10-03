@@ -1,0 +1,49 @@
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c10g16_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c12g16_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c16g16_paper [('sparknet_c16g16_paper', 0.022)]
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c17g8_paper [('sparknet_c16g16_paper', 0.052)]
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c18g16_paper [('sparknet_c19g16_paper', 0.09)]
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c4_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c6g16_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c8g16_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c10g16_paper [('sparknet_c10g12_paper', 0.06), ('sparknet_c10g16_paper', 0.12)]
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c12g16_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c6g16_paper []
+DOMINANCE sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c8g16_paper []
+DOMINANCE sparknet-lowdata02 pointwise_b1-bn sparknet_c16g16_paper []
+DOMINANCE sparknet-lowdata02 pointwise_b1-bn sparknet_c8g16_paper [('sparknet_c8g16_paper', 0.036)]
+DOMINANCE sparknet-lowdata10 pointwise_b0-bn sparknet_c8g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn sparknet_c12g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn sparknet_c14g16_paper [('sparknet_c14g16_paper', 0.011)]
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn sparknet_c16g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn sparknet_c18g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn sparknet_c6g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn sparknet_c8g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b1-bn-sw5 sparknet_c16g16_paper []
+DOMINANCE sparknet-lowdata10 pointwise_b12-bn sparknet_c16g16_paper [('sparknet_c16g16_paper', 0.139), ('sparknet_c17g16_paper', 0.121)]
+DOMINANCE sparknet-lowdata10 pointwise_b123-bn sparknet_c16g16_paper [('sparknet_c16g16_paper', 0.121), ('sparknet_c17g16_paper', 0.103), ('sparknet_c18g16_paper', 0.675)]
+DOMINANCE sparknet-lowdata10 pointwise_b2-bn sparknet_c16g16_paper []
+DOMINANCE sparknet-lowdata20 pointwise_b1-bn sparknet_c16g16_paper []
+TEST pointwise_b2-bn/c12 accuracy 93.96728016359918 FAR 9.803921568627452 FRR 5.2528227785959745
+TEST pointwise_b2-bn-kd/c14 accuracy 94.3762781186094 FAR 9.558823529411764 FRR 4.835542464408444
+TEST pointwise_b2-bn/c16g16 accuracy 94.51942740286299 FAR 8.21078431372549 FRR 4.9337260677466865
+TEST pointwise_b2-bn/c17g8 accuracy 94.96932515337423 FAR 7.107843137254902 FRR 4.614629356897399
+TEST pointwise_b2-bn/c17g16 accuracy 95.07157464212679 FAR 8.57843137254902 FRR 4.197349042709867
+TEST pointwise_b2-bn/c18g8 accuracy 95.0920245398773 FAR 7.107843137254902 FRR 4.4673539518900345
+TEST pointwise_b2-bn/c16 accuracy 95.03067484662576 FAR 6.862745098039216 FRR 4.590083456062838
+TEST pointwise_b2-bn/c18g16 accuracy 95.6237218813906 FAR 5.0245098039215685 FRR 4.246440844378989
+TEST pointwise_b2-bn/c6 accuracy 87.54601226993866 FAR 16.911764705882355 FRR 11.536573392243495
+TEST pointwise_b0-bn/c10g16 accuracy 92.22903885480572 FAR 14.82843137254902 FRR 6.357388316151202
+TEST pointwise_b0-bn/c12g16 accuracy 92.78118609406954 FAR 12.132352941176471 FRR 6.2346588119784
+V2TEST 2 control mean 60.008179959100204 vs_control {'n': 5, 'mean': 0.0, 'sd': 0.0, 'ci95': [0.0, 0.0]}
+V2TEST 2 scratch mean 61.52556237218813 vs_control {'n': 5, 'mean': 1.5173824130879354, 'sd': 1.2881325499939322, 'ci95': [-0.08204539915394049, 3.1168102253298113]}
+V2TEST 4 control mean 81.71779141104295 vs_control {'n': 5, 'mean': 0.0, 'sd': 0.0, 'ci95': [0.0, 0.0]}
+V2TEST 4 scratch mean 82.25357873210633 vs_control {'n': 5, 'mean': 0.5357873210633946, 'sd': 0.44059920474117586, 'ci95': [-0.01128884910093264, 1.0828634912277217]}
+V2TEST 6 control mean 86.41308793456032 vs_control {'n': 5, 'mean': 0.0, 'sd': 0.0, 'ci95': [0.0, 0.0]}
+V2TEST 6 scratch mean 86.87525562372188 vs_control {'n': 5, 'mean': 0.46216768916155226, 'sd': 0.18210745898480887, 'ci95': [0.2360514135357465, 0.688283964787358]}
+V2TEST 8 control mean 90.57668711656441 vs_control {'n': 5, 'mean': 0.0, 'sd': 0.0, 'ci95': [0.0, 0.0]}
+V2TEST 8 scratch mean 90.80163599182004 vs_control {'n': 5, 'mean': 0.2249488752556239, 'sd': 0.3643871100451034, 'ci95': [-0.22749748069689413, 0.6773952312081419]}
+V2TEST 10 control mean 92.3721881390593 vs_control {'n': 5, 'mean': 0.0, 'sd': 0.0, 'ci95': [0.0, 0.0]}
+V2TEST 10 scratch mean 92.51124744376278 vs_control {'n': 5, 'mean': 0.13905930470347494, 'sd': 0.33459182555810074, 'ci95': [-0.2763913191852928, 0.5545099285922427]}
+V2TEST 12 control mean 93.33742331288344 vs_control {'n': 5, 'mean': 0.0, 'sd': 0.0, 'ci95': [0.0, 0.0]}
+V2TEST 12 scratch mean 93.73006134969324 vs_control {'n': 5, 'mean': 0.3926380368098137, 'sd': 0.3477685344700414, 'ci95': [-0.03917363214972147, 0.8244497057693488]}

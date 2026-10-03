@@ -1,0 +1,16 @@
+# 4101 params (12 classes, input (32, 101)). Budget A (c16g16 = 4140), dense control.
+# Every block computes the depthwise conv at dilations 1, 2, 4 and mixes the
+# concatenated 3*C_in channels with a plain dense 1x1 conv (MixConv-style
+# multi-scale, no dendrites). C=7 is the width that matches sparknet_msd_a_relu.
+#
+# Added 2026-09-30 for the multi-scale dendrite study. Not a published SparkNet
+# configuration.
+family: sparknet
+name: sparknet_msd_a_dense
+channels: 7
+gate_channels: 16
+block_type: msd
+msd_dilations: [1, 2, 4]
+msd_pointwise: dense
+msd_blocks: [0, 1, 2, 3]
+sparsity_weight: 1.0

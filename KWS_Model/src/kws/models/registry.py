@@ -10,7 +10,10 @@ from typing import Any
 
 import torch.nn as nn
 
+from kws.models.dnn import build_dnn
 from kws.models.ds_cnn import build_ds_cnn
+from kws.models.dtnet import build_dtnet
+from kws.models.ei_conv1d import build_ei_conv1d
 from kws.models.sparknet import build_sparknet
 
 DEFAULT_FAMILY = "ds_cnn"
@@ -18,6 +21,9 @@ DEFAULT_FAMILY = "ds_cnn"
 MODEL_BUILDERS: dict[str, Callable[[dict, tuple[int, int], int], nn.Module]] = {
     "ds_cnn": build_ds_cnn,
     "sparknet": build_sparknet,
+    "ei_conv1d": build_ei_conv1d,
+    "dnn": build_dnn,
+    "dtnet": build_dtnet,
 }
 
 

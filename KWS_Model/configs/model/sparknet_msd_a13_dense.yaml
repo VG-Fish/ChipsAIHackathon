@@ -1,0 +1,20 @@
+# 4189 params (12 classes, input (32, 101)). Budget A (c16g16 = 4140), dense control, blocks 1-3.
+# Blocks 1-3 compute the depthwise conv at dilations 1, 2, 4 and mix the
+# concatenated 3*C channels with a plain dense 1x1 conv (MixConv-style
+# multi-scale, no dendrites); blocks.0 stays a plain TCS block. C=10 is the
+# trunk width of sparknet_msd_a13_relu. gate_channels is 11, not 16: at G=16
+# no width matches (C=9: 3835, C=10: 4314), and the scratch gate sweep shows
+# c10g12 ~= c10g16 while G=8 costs ~0.7 pt. This control carries 55 more
+# params than the relu arm, so it is not handicapped on budget.
+#
+# Added 2026-09-30 for the multi-scale dendrite study. Not a published SparkNet
+# configuration.
+family: sparknet
+name: sparknet_msd_a13_dense
+channels: 10
+gate_channels: 11
+block_type: msd
+msd_dilations: [1, 2, 4]
+msd_pointwise: dense
+msd_blocks: [1, 2, 3]
+sparsity_weight: 1.0

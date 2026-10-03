@@ -3,6 +3,7 @@ import torch.nn as nn
 from typing import Protocol
 
 from kws.models.layers import DSConvBlock, DSConvBlockSequence
+from kws.models.sparknet import DendriticPointwise
 
 
 class FeatureModel(Protocol):
@@ -30,6 +31,7 @@ class DSCNN(nn.Module):
     pool: nn.AvgPool2d
     dropout: nn.Dropout
     fc: nn.Linear
+    fc_dendrite_branch: DendriticPointwise | None
 
     def __init__(
         self,
@@ -40,6 +42,9 @@ class DSCNN(nn.Module):
         initial_stride: int,
         block_channels: list[int],
         dropout: float = 0.2,
+        dendrites: tuple[int, int] | None = None,
+        dendrite_blocks: list[int] | None = None,
+        fc_dendrites: tuple[int, int] | None = None,
     ):
         super().__init__()
         self.input_shape = input_shape
@@ -54,8 +59,14 @@ class DSCNN(nn.Module):
 
         blocks: list[DSConvBlock] = []
         in_ch = initial_channels
-        for out_ch in block_channels:
-            blocks.append(DSConvBlock(in_ch, out_ch))
+        if dendrite_blocks is None:
+            dendrite_blocks = list(range(len(block_channels)))
+        bad = [i for i in dendrite_blocks if not 0 <= i < len(block_channels)]
+        if bad:
+            raise ValueError(f"dendrite_blocks {bad} out of range for {len(block_channels)} blocks")
+        for index, out_ch in enumerate(block_channels):
+            block_dendrites = dendrites if index in dendrite_blocks else None
+            blocks.append(DSConvBlock(in_ch, out_ch, dendrites=block_dendrites))
             in_ch = out_ch
         self.blocks = DSConvBlockSequence(*blocks)
 
@@ -63,6 +74,12 @@ class DSCNN(nn.Module):
         self.pool = nn.AvgPool2d(kernel_size=(pool_h, pool_w))
         self.dropout = nn.Dropout(dropout)
         self.fc = nn.Linear(in_ch, num_classes)
+        # Optional additive dendritic branch on the classifier, fed the same
+        # (dropped-out) pooled features as ``fc``.
+        self.fc_dendrite_branch = (
+            DendriticPointwise(num_classes, *fc_dendrites, in_channels=in_ch)
+            if fc_dendrites is not None else None
+        )
 
     def _compute_feature_map_size(self, input_shape: tuple[int, int]) -> tuple[int, int]:
         with torch.no_grad():
@@ -79,13 +96,30 @@ class DSCNN(nn.Module):
 
     def classify_features(self, features: torch.Tensor) -> torch.Tensor:
         """Classify a pooled encoder representation."""
-        return self.fc(self.dropout(features))
+        z = self.dropout(features)
+        logits = self.fc(z)
+        branch = getattr(self, "fc_dendrite_branch", None)  # absent on pre-dendrite pickles
+        if branch is not None:
+            logits = logits + torch.flatten(
+                branch(z.reshape(z.shape[0], z.shape[1], 1, 1)), 1
+            )
+        return logits
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.classify_features(self.forward_features(x))
 
 
+def _dendrite_pair(model_cfg: dict, count_key: str, fan_in_key: str) -> tuple[int, int] | None:
+    count = int(model_cfg.get(count_key, 0) or 0)
+    if count <= 0:
+        return None
+    if fan_in_key not in model_cfg:
+        raise ValueError(f"{count_key} is set but {fan_in_key} is missing")
+    return count, int(model_cfg[fan_in_key])
+
+
 def build_ds_cnn(model_cfg: dict, input_shape: tuple[int, int], num_classes: int) -> DSCNN:
+    dendrite_blocks = model_cfg.get("dendrite_blocks")
     return DSCNN(
         input_shape=input_shape,
         num_classes=num_classes,
@@ -94,4 +128,7 @@ def build_ds_cnn(model_cfg: dict, input_shape: tuple[int, int], num_classes: int
         initial_stride=model_cfg["initial_stride"],
         block_channels=model_cfg["block_channels"],
         dropout=model_cfg.get("dropout", 0.2),
+        dendrites=_dendrite_pair(model_cfg, "dendrites", "dendrite_fan_in"),
+        dendrite_blocks=None if dendrite_blocks is None else [int(i) for i in dendrite_blocks],
+        fc_dendrites=_dendrite_pair(model_cfg, "fc_dendrites", "fc_dendrite_fan_in"),
     )

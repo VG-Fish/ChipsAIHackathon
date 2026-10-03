@@ -32,6 +32,13 @@ from kws.optimize.dendritic_config import (
     project_dendritic_cost,
     validate_max_dendrites,
 )
+from kws.optimize.group_prune import (
+    CRITERIA as GROUP_PRUNE_CRITERIA,
+    count_trainable_params,
+    group_prune,
+    planned_params,
+    resolve_widths,
+)
 from kws.optimize.prune import prune_sparknet
 from kws.utils.artifacts import ArtifactLayout, resolve_resume_dir
 from kws.utils.logging import run_session
@@ -97,7 +104,9 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     widths = cfg.get("widths")
     pruning = cfg.get("pruning")
     pruning_method = pruning.get("method") if isinstance(pruning, Mapping) else None
-    if (
+    if pruning_method == "group":
+        _validate_group_pruning(cfg)
+    elif (
         not isinstance(widths, list)
         or not widths
         or any(isinstance(width, bool) or not isinstance(width, int) for width in widths)
@@ -113,6 +122,8 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "pruning.method=identity requires widths to contain only source_channels"
             )
+    elif pruning_method == "group":
+        pass
     elif pruning_method == "l1_filter":
         if any(width >= source_width for width in widths):
             raise ValueError(
@@ -120,7 +131,7 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
                 "than source_channels"
             )
     else:
-        raise ValueError("pruning.method must be identity or l1_filter")
+        raise ValueError("pruning.method must be identity, l1_filter or group")
 
     objective = cfg.get("objective")
     if not isinstance(objective, Mapping) or objective.get("metric") != "validation_accuracy":
@@ -159,6 +170,84 @@ def validate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(lookback, bool) or not isinstance(lookback, int) or lookback < 1:
         raise ValueError("perforatedai.history_lookback must be a positive integer")
     return cfg
+
+
+def _validate_group_pruning(cfg: Mapping[str, Any]) -> None:
+    """``pruning.method: group`` -- one-shot group pruning at parameter rates.
+
+    Candidates are defined by ``pruning.prune_rates`` (fractions of the
+    source's trainable parameters to remove), not by ``widths``; each rate is
+    resolved to the uniform backbone width whose parameter count is closest.
+    """
+    pruning = cfg["pruning"]
+    if cfg.get("widths") is not None:
+        raise ValueError(
+            "pruning.method=group derives widths from pruning.prune_rates; remove widths"
+        )
+    rates = pruning.get("prune_rates")
+    if (
+        not isinstance(rates, list)
+        or not rates
+        or any(isinstance(r, bool) or not isinstance(r, (int, float)) for r in rates)
+        or any(not 0.0 < float(r) < 1.0 for r in rates)
+        or len({float(r) for r in rates}) != len(rates)
+        or [float(r) for r in rates] != sorted(float(r) for r in rates)
+    ):
+        raise ValueError(
+            "pruning.prune_rates must be unique ascending parameter fractions in (0, 1)"
+        )
+    criterion = pruning.get("criterion", "l2_group")
+    if criterion not in GROUP_PRUNE_CRITERIA:
+        raise ValueError(
+            f"pruning.criterion must be one of {list(GROUP_PRUNE_CRITERIA)}"
+        )
+    taylor_batches = pruning.get("taylor_batches", 4)
+    if isinstance(taylor_batches, bool) or not isinstance(taylor_batches, int) or taylor_batches < 1:
+        raise ValueError("pruning.taylor_batches must be a positive integer")
+    unknown = set(pruning) - {"method", "prune_rates", "criterion", "taylor_batches"}
+    if unknown:
+        raise ValueError(f"unknown group pruning settings: {sorted(unknown)}")
+
+
+def is_group_pruning(cfg: Mapping[str, Any]) -> bool:
+    pruning = cfg.get("pruning")
+    return isinstance(pruning, Mapping) and pruning.get("method") == "group"
+
+
+def resolve_group_prune_plan(
+    source_model: SparkNet, prune_rates: Sequence[float]
+) -> list[dict[str, Any]]:
+    """Map each parameter prune rate to its uniform width and parameter count.
+
+    SparkNet's gate convolution, gate BN and classifier are never pruned, so
+    the achievable rate is bounded (C16/gate-32: 0.786 at width 1); a rate
+    whose closest width repeats an earlier one is rejected rather than run
+    twice under two labels.
+    """
+    original = count_trainable_params(source_model)
+    plan: list[dict[str, Any]] = []
+    seen: dict[int, float] = {}
+    for rate in prune_rates:
+        widths = resolve_widths(source_model, rate=float(rate))
+        (width,) = set(widths.values())
+        if width in seen:
+            raise ValueError(
+                f"prune rates {seen[width]} and {rate} both resolve to width {width}; "
+                "SparkNet cannot realise them as distinct models"
+            )
+        seen[width] = float(rate)
+        params = planned_params(source_model, widths)
+        plan.append(
+            {
+                "prune_rate": float(rate),
+                "width": int(width),
+                "pruned_params": int(params),
+                "source_params": int(original),
+                "achieved_rate": 1.0 - params / original,
+            }
+        )
+    # Candidates run widest first, like the explicit-width recipe.
+    return sorted(plan, key=lambda item: item["width"], reverse=True)
 
 
 def dendritic_delta(pai: Mapping[str, Any], baseline: Mapping[str, Any]) -> dict[str, int]:
@@ -292,6 +381,8 @@ def _load_resume_report(layout: ArtifactLayout, report: Mapping[str, Any]) -> di
         raise ValueError("existing aggregate report belongs to a different source checkpoint")
     if saved.get("perforatedai") != report["perforatedai"]:
         raise ValueError("existing aggregate report has different PerforatedAI settings")
+    if report.get("pruning", {}).get("method") == "group" and saved.get("pruning") != report["pruning"]:
+        raise ValueError("existing aggregate report has different group pruning settings")
     candidates = saved.get("candidates")
     if not isinstance(candidates, list):
         raise ValueError("existing aggregate report candidates must be a list")
@@ -387,7 +478,12 @@ def _load_inputs(
     gate_channels = int(source_model_cfg.get("gate_channels", -1))
     # prune_sparknet assumes the paper's gate width 32; a reduced-gate source
     # (e.g. c9g8) is accepted only for identity-width cycles, which never prune.
-    identity_only = all(int(width) == int(cfg["source_channels"]) for width in cfg["widths"])
+    # group_prune rebuilds any SparkNet gate width exactly (the gate and
+    # classifier are copied, never pruned), so the guard only binds the
+    # legacy prune_sparknet path.
+    identity_only = is_group_pruning(cfg) or all(
+        int(width) == int(cfg["source_channels"]) for width in cfg["widths"]
+    )
     if (
         model_family(configured_model) != "sparknet"
         or int(source_model_cfg.get("channels", -1)) != int(cfg["source_channels"])
@@ -397,13 +493,130 @@ def _load_inputs(
         raise ValueError(
             "targeted run requires a SparkNet source whose checkpoint width matches "
             f"source_channels={cfg['source_channels']} and whose gate width matches the "
-            "model config (gate width 32 unless every width is the identity width)"
+            "model config (gate width 32 unless every width is the identity width "
+            "or pruning.method is group)"
         )
     if train_cfg.get("perforatedai") != cfg.get("perforatedai"):
         raise ValueError("train and experiment PAI settings must match exactly")
     if train_cfg.get("objective") != cfg.get("objective"):
         raise ValueError("train and experiment objectives must match exactly")
     return data_cfg, configured_model, train_cfg, checkpoint, source_model
+
+
+def _group_pruned_checkpoint_path(layout: ArtifactLayout, baseline_name: str) -> Path:
+    return layout.checkpoint_path(
+        "sparsity", "group_prune", "best", candidate=baseline_name
+    )
+
+
+def _taylor_batches(data_cfg: Mapping[str, Any], train_cfg: Mapping[str, Any]):
+    """Seeded, non-augmented training batches for Taylor calibration."""
+    from kws.data.dataset import build_datasets
+    from kws.data.loader import build_data_loader
+    from kws.data.splits import TRAIN
+
+    datasets, _ = build_datasets(
+        dict(data_cfg),
+        augment=False,
+        seed=int(train_cfg.get("seed", 0)),
+        cache_features=False,
+        splits=(TRAIN,),
+    )
+    seed = int(train_cfg.get("seed", 0))
+    loader_cfg = {**dict(train_cfg), "num_workers": 0}
+
+    def batches():
+        generator = torch.Generator().manual_seed(seed + 17)
+        return iter(
+            build_data_loader(
+                datasets[TRAIN], loader_cfg, shuffle=True, generator=generator
+            )
+        )
+
+    return batches
+
+
+def _materialize_group_pruned_checkpoint(
+    layout: ArtifactLayout,
+    plan: Mapping[str, Any],
+    *,
+    source_model: SparkNet,
+    source_checkpoint: Mapping[str, Any],
+    source_path: str,
+    pruning: Mapping[str, Any],
+    data_cfg: Mapping[str, Any],
+    train_cfg: Mapping[str, Any],
+) -> Path:
+    """Group-prune the source once and save it as the cycle's source checkpoint.
+
+    The checkpoint carries the manifest run id (``run_cycle`` validates it)
+    and the pruning summary; an existing file is reused only when that
+    summary matches, so a resumed run cannot mix channel selections.
+    """
+    record = plan["record"]
+    group_record = record["group_prune"]
+    width = int(record["width"])
+    criterion = str(pruning.get("criterion", "l2_group"))
+    path = _group_pruned_checkpoint_path(layout, plan["baseline_name"])
+    run_id = layout.manifest_run_id
+    expected = {
+        "criterion": criterion,
+        "target_rate": float(group_record["prune_rate"]),
+        "width": width,
+        "source_checkpoint": str(source_path),
+    }
+    if path.exists():
+        saved = torch.load(path, map_location="cpu", weights_only=False)
+        summary = saved.get("group_prune") or {}
+        if (
+            saved.get("run_id") == run_id
+            and {key: summary.get(key) for key in expected} == expected
+        ):
+            return path
+        raise ValueError(
+            f"existing group-pruned checkpoint {path} does not match this plan; "
+            "start a fresh output directory"
+        )
+    kwargs: dict[str, Any] = {}
+    if criterion == "taylor":
+        label_smoothing = float(train_cfg.get("label_smoothing", 0.0))
+        kwargs = {
+            "batches": _taylor_batches(data_cfg, train_cfg),
+            "loss_fn": torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing),
+            "taylor_batches": int(pruning.get("taylor_batches", 4)),
+        }
+    result = group_prune(
+        source_model, width=width, criterion=criterion, **kwargs
+    )
+    if int(result.pruned_params) != int(group_record["pruned_params"]):
+        raise AssertionError(
+            f"group_prune produced {result.pruned_params} params, planned "
+            f"{group_record['pruned_params']}"
+        )
+    payload = {
+        key: value
+        for key, value in source_checkpoint.items()
+        if key not in {"model_state_dict", "model_cfg", "run_id", "val_acc"}
+    }
+    payload.update(
+        {
+            "model_state_dict": result.model.state_dict(),
+            "model_cfg": dict(plan["model_cfg"]),
+            "run_id": run_id,
+            "source_val_acc": source_checkpoint.get("val_acc"),
+            "group_prune": {
+                **{k: v for k, v in result.summary().items() if k != "keep"},
+                "keep": result.keep,
+                # group_prune ran at the resolved width; the rate is the
+                # parameter prune rate that width was resolved from.
+                "target_rate": float(group_record["prune_rate"]),
+                "width": width,
+                "source_checkpoint": str(source_path),
+            },
+        }
+    )
+    layout.atomic_torch_save(path, payload)
+    return path
 
 
 def run_experiment(
@@ -447,13 +660,31 @@ def run_experiment(
     if source_accuracy is None:
         raise ValueError("source checkpoint/config must record validation accuracy")
 
+    group = is_group_pruning(cfg)
+    group_plan = (
+        resolve_group_prune_plan(source_model, cfg["pruning"]["prune_rates"])
+        if group
+        else None
+    )
+    widths = (
+        [item["width"] for item in group_plan]
+        if group_plan is not None
+        else list(cfg["widths"])
+    )
+    logged_splits = list(train_cfg.get("pai_eval_splits") or [])
     report: dict[str, Any] = {
         "status": "planned" if dry_run else "running",
         "dry_run": dry_run,
         "resume": resume,
         "seed": effective_seed,
         "selection_split": "validation",
-        "test_split_used": False,
+        # With ``pai_eval_splits: [test]`` the test split is evaluated and
+        # logged every PAI epoch for offline budget analysis; it never feeds
+        # PAI, the scheduler or checkpoint selection.
+        "test_split_used": "test" in logged_splits,
+        "test_split_role": (
+            "per_epoch_logging_only" if "test" in logged_splits else None
+        ),
         "knowledge_distillation": {"enabled": False, "teacher_checkpoint": None},
         "budget": None,
         "budget_enforced": False,
@@ -464,31 +695,51 @@ def run_experiment(
             "validation_accuracy": float(source_accuracy),
             **source_cost,
         },
-        "widths": list(cfg["widths"]),
+        "widths": widths,
         "pruning": dict(cfg["pruning"]),
         "perforatedai": dict(cfg["perforatedai"]),
         "candidates": [],
     }
 
     plans: list[dict[str, Any]] = []
-    for width in cfg["widths"]:
+    group_by_width = {item["width"]: item for item in group_plan or []}
+    for width in widths:
         identity_width = int(width) == int(cfg["source_channels"])
-        pruned = (
-            copy.deepcopy(source_model)
-            if identity_width
-            else prune_sparknet(source_model, int(width))
-        ).eval()
+        group_item = group_by_width.get(int(width))
+        if group_item is not None:
+            # Cost only depends on the width; the criterion picks which
+            # channels survive and runs once, at execution time.
+            pruned = group_prune(source_model, width=int(width)).model.eval()
+        else:
+            pruned = (
+                copy.deepcopy(source_model)
+                if identity_width
+                else prune_sparknet(source_model, int(width))
+            ).eval()
         baseline_cost = _model_cost(pruned, input_shape)
         target_model_cfg = dict(configured_model)
         target_model_cfg["name"] = f"sparknet_c{width}"
         target_model_cfg["channels"] = int(width)
         cycle_train_cfg = copy.deepcopy(train_cfg)
-        cycle_train_cfg["pruning"] = {
-            "kind": "structured",
-            "method": "identity" if identity_width else "l1_filter",
-            "keep_ratio": float(width) / int(cfg["source_channels"]),
-            "target_channels": int(width),
-        }
+        if group_item is not None:
+            # The cycle starts from a materialised group-pruned checkpoint of
+            # exactly this width, so inside run_cycle it is an identity width.
+            cycle_train_cfg["pruning"] = {
+                "kind": "structured",
+                "method": "group",
+                "criterion": cfg["pruning"].get("criterion", "l2_group"),
+                "prune_rate": group_item["prune_rate"],
+                "keep_ratio": 1.0,
+                "target_channels": int(width),
+                "source_channels": int(cfg["source_channels"]),
+            }
+        else:
+            cycle_train_cfg["pruning"] = {
+                "kind": "structured",
+                "method": "identity" if identity_width else "l1_filter",
+                "keep_ratio": float(width) / int(cfg["source_channels"]),
+                "target_channels": int(width),
+            }
         placement_module_names(pruned, cycle_train_cfg["perforatedai"])
         projection = project_dendritic_cost(
             pruned,
@@ -552,6 +803,17 @@ def run_experiment(
             },
             "comparison": None,
         }
+        if group_item is not None:
+            record["group_prune"] = {
+                "criterion": cfg["pruning"].get("criterion", "l2_group"),
+                "prune_rate": group_item["prune_rate"],
+                "achieved_rate": group_item["achieved_rate"],
+                "pruned_params": group_item["pruned_params"],
+                "source_params": group_item["source_params"],
+                "pruned_checkpoint": layout.relative(
+                    _group_pruned_checkpoint_path(layout, baseline_name)
+                ),
+            }
         report["candidates"].append(record)
         plans.append(
             {
@@ -597,8 +859,22 @@ def run_experiment(
     for plan in plans:
         if plan["record"]["width"] in completed_widths:
             continue
+        cycle_source = source_path
+        if "group_prune" in plan["record"]:
+            cycle_source = str(
+                _materialize_group_pruned_checkpoint(
+                    layout,
+                    plan,
+                    source_model=source_model,
+                    source_checkpoint=checkpoint,
+                    source_path=source_path,
+                    pruning=cfg["pruning"],
+                    data_cfg=data_cfg,
+                    train_cfg=train_cfg,
+                )
+            )
         cycle = selected_runner(
-            source_path,
+            cycle_source,
             data_cfg,
             plan["model_cfg"],
             plan["train_cfg"],

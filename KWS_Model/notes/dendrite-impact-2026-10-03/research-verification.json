@@ -1,0 +1,28 @@
+{
+  "checked_utc": "2026-10-03T22:52:42.077679+00:00",
+  "checks": {
+    "json": 21,
+    "csv": 13,
+    "python": 18,
+    "svg": 2,
+    "markdown": 5,
+    "local_links": 40
+  },
+  "csv_rows": {
+    "faithful-arm-summary.csv": 59,
+    "faithful-equal-epoch-budget-effects.csv": 294,
+    "faithful-native-model-costs.csv": 62,
+    "faithful-native-paired-validation-effects.csv": 51,
+    "faithful-native-students-inventory.csv": 211,
+    "faithful-native-students-summary.csv": 67,
+    "faithful-paired-effects.csv": 98,
+    "faithful-research-queue-provenance.csv": 1000,
+    "faithful-research-queue-status.csv": 25,
+    "faithful-run-inventory.csv": 292,
+    "pruning_candidates.csv": 138,
+    "source-artifact-census.csv": 4646,
+    "sparknet-growth-aggregates.csv": 93
+  },
+  "errors": [],
+  "scope": "New research artifacts only; no model execution or training."
+}

@@ -120,6 +120,10 @@ def _copy_bn_subset(old_bn: nn.BatchNorm2d, new_bn: nn.BatchNorm2d, indices: tor
 
 
 def prune_ds_cnn(model: DSCNN, keep_ratio: float) -> DSCNN:
+    if getattr(model, "fc_dendrite_branch", None) is not None or any(
+        getattr(block, "dendrite_branch", None) is not None for block in model.blocks
+    ):
+        raise ValueError("prune_ds_cnn does not support DS-CNNs with native dendrite branches")
     old_block_channels = [block.pointwise.out_channels for block in model.blocks]
     new_block_channels = [max(1, int(round(c * keep_ratio))) for c in old_block_channels]
     stem_conv = cast(nn.Conv2d, model.stem[0])

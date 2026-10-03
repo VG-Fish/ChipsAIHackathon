@@ -1,0 +1,295 @@
+comparison,budget_epochs,n,test_delta_pp
+pb-all-max1-tanh-sw25-c4x8 vs same base,100,5,2.674846625766869
+pb-all-max1-tanh-sw25-c4x8 vs same base,200,5,4.715746421267892
+pb-all-max1-tanh-sw25-c4x8 vs same base,300,5,4.834355828220858
+pb-all-max1-tanh-sw25-c4x8 vs same base,400,5,4.834355828220858
+pb-all-max1-tanh-sw25-c4x8 vs same base,500,5,4.834355828220858
+pb-all-max1-tanh-sw25-c4x8 vs same base,600,5,4.834355828220858
+pb-all-max1-tanh-sw25-c4x8 vs width,100,5,-9.312883435582824
+pb-all-max1-tanh-sw25-c4x8 vs width,200,5,-7.321063394683027
+pb-all-max1-tanh-sw25-c4x8 vs width,300,5,-7.2024539877300615
+pb-all-max1-tanh-sw25-c4x8 vs width,400,5,-7.2024539877300615
+pb-all-max1-tanh-sw25-c4x8 vs width,500,5,-7.2024539877300615
+pb-all-max1-tanh-sw25-c4x8 vs width,600,5,-7.2024539877300615
+gd-all-max1-tanh-sw25-c4x8 vs same base,100,5,3.6400817995910018
+gd-all-max1-tanh-sw25-c4x8 vs same base,200,5,4.850715746421268
+gd-all-max1-tanh-sw25-c4x8 vs same base,300,5,4.850715746421268
+gd-all-max1-tanh-sw25-c4x8 vs same base,400,5,4.850715746421268
+gd-all-max1-tanh-sw25-c4x8 vs same base,500,5,4.850715746421268
+gd-all-max1-tanh-sw25-c4x8 vs same base,600,5,4.850715746421268
+gd-all-max1-tanh-sw25-c4x8 vs width,100,5,-8.34764826175869
+gd-all-max1-tanh-sw25-c4x8 vs width,200,5,-7.186094069529652
+gd-all-max1-tanh-sw25-c4x8 vs width,300,5,-7.186094069529652
+gd-all-max1-tanh-sw25-c4x8 vs width,400,5,-7.186094069529652
+gd-all-max1-tanh-sw25-c4x8 vs width,500,5,-7.186094069529652
+gd-all-max1-tanh-sw25-c4x8 vs width,600,5,-7.186094069529652
+pb-all-max1-relu-sw25-c4x8 vs same base,100,5,0.167689161554192
+pb-all-max1-relu-sw25-c4x8 vs same base,200,5,1.2883435582822078
+pb-all-max1-relu-sw25-c4x8 vs same base,300,5,1.8404907975460127
+pb-all-max1-relu-sw25-c4x8 vs same base,400,5,1.8404907975460127
+pb-all-max1-relu-sw25-c4x8 vs same base,500,5,1.8404907975460127
+pb-all-max1-relu-sw25-c4x8 vs same base,600,5,1.8404907975460127
+pb-all-max1-relu-sw25-c4x8 vs width,100,5,-11.8200408997955
+pb-all-max1-relu-sw25-c4x8 vs width,200,5,-10.748466257668712
+pb-all-max1-relu-sw25-c4x8 vs width,300,5,-10.196319018404907
+pb-all-max1-relu-sw25-c4x8 vs width,400,5,-10.196319018404907
+pb-all-max1-relu-sw25-c4x8 vs width,500,5,-10.196319018404907
+pb-all-max1-relu-sw25-c4x8 vs width,600,5,-10.196319018404907
+PB vs GD low width,100,5,-0.9652351738241327
+PB vs GD low width,200,5,-0.13496932515337567
+PB vs GD low width,300,5,-0.016359918200410384
+PB vs GD low width,400,5,-0.016359918200410384
+PB vs GD low width,500,5,-0.016359918200410384
+PB vs GD low width,600,5,-0.016359918200410384
+main PB c8x16 vs none-c8x16,100,5,-0.08179959100204526
+main PB c8x16 vs none-c8x16,200,5,2.6257668711656446
+main PB c8x16 vs none-c8x16,300,5,2.936605316973415
+main PB c8x16 vs none-c8x16,400,5,2.936605316973415
+main PB c8x16 vs none-c8x16,500,5,2.936605316973415
+main PB c8x16 vs none-c8x16,600,5,2.936605316973415
+main PB c8x16 vs none-r25-c8x16,100,5,0.539877300613496
+main PB c8x16 vs none-r25-c8x16,200,5,1.5051124744376287
+main PB c8x16 vs none-r25-c8x16,300,5,1.6359918200409007
+main PB c8x16 vs none-r25-c8x16,400,5,1.5460122699386525
+main PB c8x16 vs none-r25-c8x16,500,5,1.4723926380368102
+main PB c8x16 vs none-r25-c8x16,600,5,1.4723926380368102
+main PB c8x16 vs none-c16x32,100,5,-2.498977505112474
+main PB c8x16 vs none-c16x32,200,5,-0.02862985685071706
+main PB c8x16 vs none-c16x32,300,5,0.2822085889570536
+main PB c8x16 vs none-c16x32,400,5,0.2822085889570536
+main PB c8x16 vs none-c16x32,500,5,0.2822085889570536
+main PB c8x16 vs none-c16x32,600,5,0.2822085889570536
+main PB c8x16 vs none-r25-c16x32,100,5,-1.092024539877301
+main PB c8x16 vs none-r25-c16x32,200,5,0.588957055214725
+main PB c8x16 vs none-r25-c16x32,300,5,0.4580777096114508
+main PB c8x16 vs none-r25-c16x32,400,5,0.4580777096114508
+main PB c8x16 vs none-r25-c16x32,500,5,0.10633946830265861
+main PB c8x16 vs none-r25-c16x32,600,5,0.09406952965235194
+main linear max3 vs none-c8x16,100,5,-0.08179959100204526
+main linear max3 vs none-c8x16,200,5,1.018404907975461
+main linear max3 vs none-c8x16,300,5,1.3496932515337412
+main linear max3 vs none-c8x16,400,5,1.660531697341514
+main linear max3 vs none-c8x16,500,5,2.286298568507159
+main linear max3 vs none-c8x16,600,5,2.3026584867075672
+main linear max3 vs none-r25-c8x16,100,5,0.539877300613496
+main linear max3 vs none-r25-c8x16,200,5,-0.1022494887525549
+main linear max3 vs none-r25-c8x16,300,5,0.04907975460122671
+main linear max3 vs none-r25-c8x16,400,5,0.26993865030675135
+main linear max3 vs none-r25-c8x16,500,5,0.8220858895705541
+main linear max3 vs none-r25-c8x16,600,5,0.8384458077709622
+main linear max3 vs none-c16x32,100,5,-2.498977505112474
+main linear max3 vs none-c16x32,200,5,-1.6359918200409007
+main linear max3 vs none-c16x32,300,5,-1.3047034764826204
+main linear max3 vs none-c16x32,400,5,-0.9938650306748475
+main linear max3 vs none-c16x32,500,5,-0.36809815950920255
+main linear max3 vs none-c16x32,600,5,-0.3517382413087944
+main linear max3 vs none-c28x56,100,5,0.9652351738241327
+main linear max3 vs none-c28x56,200,5,0.6421267893660576
+main linear max3 vs none-c28x56,300,5,0.9734151329243378
+main linear max3 vs none-c28x56,400,5,1.2842535787321108
+main linear max3 vs none-c28x56,500,5,1.9100204498977558
+main linear max3 vs none-c28x56,600,5,1.926380368098164
+full tracked ReLU vs base,100,5,-0.08179959100204526
+full tracked ReLU vs base,200,5,0.5644171779141116
+full tracked ReLU vs base,300,5,1.0184049079754587
+full tracked ReLU vs base,400,5,1.0756646216768906
+full tracked ReLU vs base,500,5,1.0756646216768906
+full tracked ReLU vs base,600,5,1.0756646216768906
+full detached ReLU vs detached base,100,5,-0.458077709611453
+full detached ReLU vs detached base,200,5,-1.6809815950920237
+full detached ReLU vs detached base,300,5,0.19631901840490684
+full detached ReLU vs detached base,400,5,-0.12678936605317048
+full detached ReLU vs detached base,500,5,-0.07770961145194155
+full detached ReLU vs detached base,600,5,-0.4948875255623708
+full ReLU detached minus tracked,100,5,-0.7689161554192214
+full ReLU detached minus tracked,200,5,-1.464212678936605
+full ReLU detached minus tracked,300,5,-0.212678936605315
+full ReLU detached minus tracked,400,5,-0.4539877300613471
+full ReLU detached minus tracked,500,5,-0.4539877300613471
+full ReLU detached minus tracked,600,5,-0.4539877300613471
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c8x16,100,5,0.0
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c8x16,200,5,0.9284253578732082
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c8x16,300,5,1.2188139059304692
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c8x16,400,5,1.2188139059304692
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c8x16,500,5,1.2188139059304692
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c8x16,600,5,1.2188139059304692
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,100,5,0.17995910020449868
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,200,5,0.31492842535787213
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,300,5,0.5603271983640079
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,400,5,0.4498977505112478
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,500,5,0.0572597137014319
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,600,5,0.0572597137014319
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c16x32,100,5,-1.4396728016359917
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c16x32,200,5,-1.0961145194274002
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c16x32,300,5,-0.8752556237218778
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c16x32,400,5,-0.8752556237218778
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c16x32,500,5,-0.8752556237218778
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-c16x32,600,5,-0.8752556237218778
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,100,5,-1.3578732106339486
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,200,5,-1.3128834355828234
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,300,5,-0.6543967280163598
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,400,5,-1.1329243353783225
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,500,5,-1.1860940695296507
+20pct pb-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,600,5,-1.3128834355828212
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c8x16,100,5,0.0
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c8x16,200,5,1.0593047034764802
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c8x16,300,5,1.6646216768916156
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c8x16,400,5,1.6646216768916156
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c8x16,500,5,1.6646216768916156
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c8x16,600,5,1.6646216768916156
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c8x16,100,5,0.17995910020449868
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c8x16,200,5,0.4458077709611441
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c8x16,300,5,1.0061349693251542
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c8x16,400,5,0.8957055214723941
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c8x16,500,5,0.5030674846625782
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c8x16,600,5,0.5030674846625782
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c16x32,100,5,-1.4396728016359917
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c16x32,200,5,-0.9652351738241283
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c16x32,300,5,-0.4294478527607315
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c16x32,400,5,-0.4294478527607315
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c16x32,500,5,-0.4294478527607315
+20pct pb-all-max1-relu-sw25-c8x16 vs none-c16x32,600,5,-0.4294478527607315
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c16x32,100,5,-1.3578732106339486
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c16x32,200,5,-1.1820040899795514
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c16x32,300,5,-0.20858895705521352
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c16x32,400,5,-0.6871165644171762
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c16x32,500,5,-0.7402862985685044
+20pct pb-all-max1-relu-sw25-c8x16 vs none-r25-c16x32,600,5,-0.8670756646216748
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c8x16,100,5,-0.08588957055214674
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c8x16,200,5,0.9611451942740246
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c8x16,300,5,1.0715746421267869
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c8x16,400,5,1.0715746421267869
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c8x16,500,5,1.0715746421267869
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c8x16,600,5,1.0715746421267869
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,100,5,0.09406952965235194
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,200,5,0.34764826175868846
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,300,5,0.41308793456032555
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,400,5,0.30265848670756546
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,500,5,-0.08997955010225045
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c8x16,600,5,-0.08997955010225045
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c16x32,100,5,-1.5255623721881384
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c16x32,200,5,-1.063394683026584
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c16x32,300,5,-1.0224948875255602
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c16x32,400,5,-1.0224948875255602
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c16x32,500,5,-1.0224948875255602
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-c16x32,600,5,-1.0224948875255602
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,100,5,-1.4437627811860954
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,200,5,-1.280163599182007
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,300,5,-0.8016359918200422
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,400,5,-1.2801635991820048
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,500,5,-1.333333333333333
+20pct gd-all-max1-tanh-sw25-c8x16 vs none-r25-c16x32,600,5,-1.4601226993865035
+20pct PB vs GD tanh,100,5,0.08588957055214674
+20pct PB vs GD tanh,200,5,-0.03271983640081633
+20pct PB vs GD tanh,300,5,0.14723926380368235
+20pct PB vs GD tanh,400,5,0.14723926380368235
+20pct PB vs GD tanh,500,5,0.14723926380368235
+20pct PB vs GD tanh,600,5,0.14723926380368235
+20pct detached ReLU vs detached base,100,5,0.02862985685071706
+20pct detached ReLU vs detached base,200,5,0.42535787321063445
+20pct detached ReLU vs detached base,300,5,0.9815950920245409
+20pct detached ReLU vs detached base,400,5,1.0388548057259728
+20pct detached ReLU vs detached base,500,5,0.7566462167689192
+20pct detached ReLU vs detached base,600,5,0.3476482617586929
+20pct PB c4 vs base,100,5,0.13087934560327197
+20pct PB c4 vs base,200,5,0.9161554192229082
+20pct PB c4 vs base,300,5,1.5214723926380413
+20pct PB c4 vs base,400,5,1.5214723926380413
+20pct PB c4 vs base,500,5,1.5214723926380413
+20pct PB c4 vs base,600,5,1.5214723926380413
+20pct PB c4 vs width,100,5,-7.799591002044988
+20pct PB c4 vs width,200,5,-7.406952965235174
+20pct PB c4 vs width,300,5,-6.768916155419222
+20pct PB c4 vs width,400,5,-6.768916155419222
+20pct PB c4 vs width,500,5,-6.768916155419222
+20pct PB c4 vs width,600,5,-6.768916155419222
+CPU b22 sigmoid minus tanh,100,5,-0.10633946830265861
+CPU b22 sigmoid minus tanh,200,5,0.06134969325153117
+CPU b22 sigmoid minus tanh,300,5,0.07361963190184007
+CPU b22 sigmoid minus tanh,400,5,0.06952965235173858
+CPU b22 sigmoid minus tanh,500,5,0.06952965235173858
+CPU b22 sigmoid minus tanh,600,5,0.06952965235173858
+CPU b22 PB c8 vs width c16x32,100,5,-0.9120654396728023
+CPU b22 PB c8 vs width c16x32,200,5,-0.004089979550099265
+CPU b22 PB c8 vs width c16x32,300,5,0.16359918200409274
+CPU b22 PB c8 vs width c16x32,400,5,0.16768916155419422
+CPU b22 PB c8 vs width c16x32,500,5,0.16768916155419422
+CPU b22 PB c8 vs width c16x32,600,5,0.16768916155419422
+CPU b22 PB c8 vs 3conv same params,100,5,-9.680981595092025
+CPU b22 PB c8 vs 3conv same params,200,5,-8.539877300613494
+CPU b22 PB c8 vs 3conv same params,300,5,-8.372188139059302
+CPU b22 PB c8 vs 3conv same params,400,5,-8.3680981595092
+CPU b22 PB c8 vs 3conv same params,500,5,-8.3680981595092
+CPU b22 PB c8 vs 3conv same params,600,5,-8.3680981595092
+CPU b22 PB c12 vs base,100,5,0.11860940695296529
+CPU b22 PB c12 vs base,200,5,0.4008179959100211
+CPU b22 PB c12 vs base,300,5,1.8241308793456024
+CPU b22 PB c12 vs base,400,5,1.873210633946829
+CPU b22 PB c12 vs base,500,5,1.873210633946829
+CPU b22 PB c12 vs base,600,5,1.873210633946829
+CPU b22 PB c12 vs 3conv same params,100,5,-8.777096114519427
+CPU b22 PB c12 vs 3conv same params,200,5,-8.327198364008177
+CPU b22 PB c12 vs 3conv same params,300,5,-6.903885480572596
+CPU b22 PB c12 vs 3conv same params,400,5,-6.854805725971369
+CPU b22 PB c12 vs 3conv same params,500,5,-6.854805725971369
+CPU b22 PB c12 vs 3conv same params,600,5,-6.854805725971369
+CPU b23 PB c6x12x24 vs base,100,5,0.0
+CPU b23 PB c6x12x24 vs base,200,5,2.01635991820041
+CPU b23 PB c6x12x24 vs base,300,5,2.1513292433537834
+CPU b23 PB c6x12x24 vs base,400,5,2.1513292433537834
+CPU b23 PB c6x12x24 vs base,500,5,2.1513292433537834
+CPU b23 PB c6x12x24 vs base,600,5,2.1513292433537834
+CPU b23 PB c6x12x24 vs width,100,5,-4.449897750511247
+CPU b23 PB c6x12x24 vs width,200,5,-2.523517382413085
+CPU b23 PB c6x12x24 vs width,300,5,-2.3885480572597118
+CPU b23 PB c6x12x24 vs width,400,5,-2.3885480572597118
+CPU b23 PB c6x12x24 vs width,500,5,-2.3885480572597118
+CPU b23 PB c6x12x24 vs width,600,5,-2.3885480572597118
+CPU b23 PB c8x20x40 vs base,100,5,-0.36809815950920255
+CPU b23 PB c8x20x40 vs base,200,5,0.3885480572597122
+CPU b23 PB c8x20x40 vs base,300,5,0.9938650306748475
+CPU b23 PB c8x20x40 vs base,400,5,1.0306748466257676
+CPU b23 PB c8x20x40 vs base,500,5,1.0306748466257676
+CPU b23 PB c8x20x40 vs base,600,5,1.0306748466257676
+CPU b23 PB c8x20x40 vs width,100,5,-2.4948875255623726
+CPU b23 PB c8x20x40 vs width,200,5,-1.746421267893663
+CPU b23 PB c8x20x40 vs width,300,5,-1.1411042944785277
+CPU b23 PB c8x20x40 vs width,400,5,-1.1042944785276076
+CPU b23 PB c8x20x40 vs width,500,5,-1.1042944785276076
+CPU b23 PB c8x20x40 vs width,600,5,-1.1042944785276076
+CPU b24 all PB vs base b22,100,5,0.0
+CPU b24 all PB vs base b22,200,5,-0.10633946830265861
+CPU b24 all PB vs base b22,300,5,0.3926380368098159
+CPU b24 all PB vs base b22,400,5,0.3926380368098159
+CPU b24 all PB vs base b22,500,5,0.49488752556237303
+CPU b24 all PB vs base b22,600,5,0.49488752556237303
+CPU b24 all PB vs near-matched width,100,5,0.9202453987730053
+CPU b24 all PB vs near-matched width,200,5,0.7321063394683036
+CPU b24 all PB vs near-matched width,300,5,1.2310838445807781
+CPU b24 all PB vs near-matched width,400,5,1.2310838445807781
+CPU b24 all PB vs near-matched width,500,5,1.3333333333333353
+CPU b24 all PB vs near-matched width,600,5,1.3333333333333353
+CPU b24 linear PB vs base b22,100,5,0.0
+CPU b24 linear PB vs base b22,200,5,0.1308793456032742
+CPU b24 linear PB vs base b22,300,5,0.15132924335378384
+CPU b24 linear PB vs base b22,400,5,0.2331288343558291
+CPU b24 linear PB vs base b22,500,5,0.25357873210634096
+CPU b24 linear PB vs base b22,600,5,0.25357873210634096
+CPU b24 linear PB vs near-matched width,100,5,0.3885480572597122
+CPU b24 linear PB vs near-matched width,200,5,0.49079754601227155
+CPU b24 linear PB vs near-matched width,300,5,0.5112474437627812
+CPU b24 linear PB vs near-matched width,400,5,0.5930470347648265
+CPU b24 linear PB vs near-matched width,500,5,0.6134969325153383
+CPU b24 linear PB vs near-matched width,600,5,0.6134969325153383
+CPU b24 all PB vs 4conv near-matched params,100,5,-0.9815950920245387
+CPU b24 all PB vs 4conv near-matched params,200,5,-1.2351738241308818
+CPU b24 all PB vs 4conv near-matched params,300,5,-0.7361963190184073
+CPU b24 all PB vs 4conv near-matched params,400,5,-0.7361963190184073
+CPU b24 all PB vs 4conv near-matched params,500,5,-0.6339468302658502
+CPU b24 all PB vs 4conv near-matched params,600,5,-0.6339468302658502
+CPU b24 all PB minus linear PB,100,5,0.0
+CPU b24 all PB minus linear PB,200,5,-0.2372188139059328
+CPU b24 all PB minus linear PB,300,5,0.24130879345603207
+CPU b24 all PB minus linear PB,400,5,0.1595092024539868
+CPU b24 all PB minus linear PB,500,5,0.24130879345603207
+CPU b24 all PB minus linear PB,600,5,0.24130879345603207

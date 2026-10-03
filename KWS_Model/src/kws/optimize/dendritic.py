@@ -52,7 +52,7 @@ UPA: Any = import_pai_module("perforatedai.utils_perforatedai")
 
 from kws.data.dataset import build_datasets
 from kws.data.loader import build_data_loader
-from kws.data.splits import TRAIN, VAL
+from kws.data.splits import TEST, TRAIN, VAL
 from kws.models.ds_cnn import FeatureModel
 from kws.models.ds_cnn import DSCNN
 from kws.models.layers import DSConvBlock
@@ -73,8 +73,11 @@ from kws.optimize.kd import (
 )
 from kws.optimize.prune import prune_ds_cnn, prune_sparknet
 from kws.train import (
+    PLATEAU_SCHEDULER,
     _task_loss_scale,
     build_lr_scheduler,
+    build_plateau_scheduler,
+    resolve_scheduler_name,
     collect_auxiliary_losses,
     evaluate_loss_acc,
     resolve_manifest_run_id,
@@ -671,6 +674,7 @@ def _pai_epoch_record(
     restructured: bool,
     model: nn.Module,
     seed: int,
+    extra: Mapping[str, Any] | None = None,
 ) -> dict:
     """Build the canonical PAI epoch record, including all KD components.
 
@@ -715,6 +719,7 @@ def _pai_epoch_record(
         "restructured": restructured,
         "parameter_count": UPA.count_params(model),
         **describe_learning_phase(model),
+        **dict(extra or {}),
     }
 
 
@@ -979,6 +984,9 @@ _PRUNE_FINETUNE_IRRELEVANT_KEYS = frozenset(
         "objective",
         "deployment",
         "perforatedai",
+        # PAI-phase-only knobs; absent from every older recipe.
+        "pai_lr_scheduler",
+        "pai_eval_splits",
     }
 )
 
@@ -1032,6 +1040,14 @@ def _same_model_state(
         and torch.equal(left[name], right[name])
         for name in left
     )
+
+
+def _prune_finetune_early_stopped(latest: Mapping[str, Any]) -> bool:
+    stage_state = latest.get("stage_specific_state")
+    if not isinstance(stage_state, Mapping):
+        return False
+    early = stage_state.get("early_stopping")
+    return isinstance(early, Mapping) and bool(early.get("stopped", False))
 
 
 def _load_reusable_prune_finetune_checkpoint(
@@ -1090,7 +1106,11 @@ def _load_reusable_prune_finetune_checkpoint(
         latest.get("stage") == "sparsity"
         and latest.get("phase") == expected_phase
         and int(latest.get("target_epochs", -1)) == target_epochs
-        and int(latest.get("completed_epoch", -1)) >= target_epochs
+        and (
+            int(latest.get("completed_epoch", -1)) >= target_epochs
+            # An early-stopped phase is complete before its epoch cap.
+            or _prune_finetune_early_stopped(latest)
+        )
         and isinstance(recipe, Mapping)
         and _same_path(recipe.get("source_checkpoint"), checkpoint_path)
         and recorded_teacher_matches
@@ -1972,6 +1992,26 @@ def configure_perforatedai(config: dict, device: torch.device) -> None:
             [DSConvBlock, nn.Conv2d, nn.BatchNorm2d, nn.Linear]
         )
     GPA.pc.set_perforated_backpropagation(True)
+    # Explicit settings are applied only when a recipe names them, so older
+    # recipes keep PerforatedAI's library defaults exactly.
+    if "retain_all_dendrites" in config:
+        retain = config["retain_all_dendrites"]
+        if not isinstance(retain, bool):
+            raise ValueError("perforatedai.retain_all_dendrites must be a boolean")
+        GPA.pc.set_retain_all_dendrites(retain)
+    if "output_dimensions" in config:
+        dims = config["output_dimensions"]
+        if (
+            not isinstance(dims, (list, tuple))
+            or not dims
+            or any(isinstance(d, bool) or not isinstance(d, int) or d < -1 for d in dims)
+            or sum(1 for d in dims if d == 0) != 1
+        ):
+            raise ValueError(
+                "perforatedai.output_dimensions must list -1 (batch/free) or a "
+                "non-negative size per axis with exactly one 0 (the neuron axis)"
+            )
+        GPA.pc.set_output_dimensions(list(dims))
     GPA.pc.set_dendrite_update_mode(True)
     GPA.pc.set_unwrapped_modules_confirmed(True)
     GPA.pc.set_configuration_confirmed(True)
@@ -2009,6 +2049,61 @@ def pai_lr_schedule_epochs(train_cfg: Mapping[str, Any]) -> int:
     return epochs
 
 
+def pai_uses_plateau(train_cfg: Mapping[str, Any]) -> bool:
+    """Whether the PAI phase uses ReduceLROnPlateau instead of its cosine.
+
+    Controlled by ``pai_lr_scheduler`` (default ``cosine``) so that the
+    prune-fine-tune ``scheduler`` choice never silently changes the PAI
+    phase of an existing recipe.
+    """
+    name = resolve_scheduler_name(train_cfg, key="pai_lr_scheduler")
+    if name not in {"cosine", PLATEAU_SCHEDULER}:
+        raise ValueError("pai_lr_scheduler must be cosine or plateau")
+    return name == PLATEAU_SCHEDULER
+
+
+PAI_EVAL_SPLITS = ("test", "train")
+
+
+def pai_eval_splits(train_cfg: Mapping[str, Any]) -> tuple[str, ...]:
+    """Extra per-epoch evaluations logged during PAI (never used for selection).
+
+    ``test`` evaluates the held-out test split; ``train`` evaluates a clean
+    (non-augmented, eval-mode) copy of the training split.  Default: none,
+    so older recipes neither load the test split nor pay for the passes.
+    """
+    raw = train_cfg.get("pai_eval_splits") or []
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        raise ValueError("pai_eval_splits must be a list drawn from ['test', 'train']")
+    splits = tuple(str(item).lower() for item in raw)
+    unknown = set(splits) - set(PAI_EVAL_SPLITS)
+    if unknown or len(set(splits)) != len(splits):
+        raise ValueError(
+            f"pai_eval_splits must be unique entries of {list(PAI_EVAL_SPLITS)}; got {list(raw)}"
+        )
+    return splits
+
+
+def clean_train_view(dataset):
+    """A non-augmented, feature-cached copy of a training split for evaluation."""
+    from kws.data.dataset import SpeechCommandsKWSDataset
+
+    view = SpeechCommandsKWSDataset(
+        dataset.entries,
+        dataset.dataset_root,
+        dataset.feature_extractor,
+        dataset.sample_rate,
+        dataset.clip_len,
+        dataset.silence_sampler,
+        None,
+        None,
+        cache_features=True,
+        silence_clips=dataset.silence_clips,
+    )
+    view.precompute_features()
+    return view
+
+
 def _make_optimizer_and_scheduler(
     model,
     train_cfg: dict,
@@ -2030,11 +2125,21 @@ def _make_optimizer_and_scheduler(
         lr=learning_rate,
         weight_decay=train_cfg["weight_decay"],
     )
-    scheduler = build_lr_scheduler(
-        optimizer,
-        pai_lr_schedule_epochs(train_cfg) * loader_length,
-        train_cfg["warmup_fraction"],
-    )
+    plateau = pai_uses_plateau(train_cfg)
+
+    def make_scheduler(opt):
+        if plateau:
+            # Epoch-level ReduceLROnPlateau, re-created (and so reset) with
+            # the optimizer at the start and after every restructure; its
+            # floor is relative to this phase's initial learning rate.
+            return build_plateau_scheduler(opt, train_cfg, base_lr=learning_rate)
+        return build_lr_scheduler(
+            opt,
+            pai_lr_schedule_epochs(train_cfg) * loader_length,
+            train_cfg["warmup_fraction"],
+        )
+
+    scheduler = make_scheduler(optimizer)
     GPA.pai_tracker.set_optimizer_instance(optimizer)
 
     adapter_optimizer = None
@@ -2047,11 +2152,7 @@ def _make_optimizer_and_scheduler(
                 lr=learning_rate,
                 weight_decay=train_cfg["weight_decay"],
             )
-            adapter_scheduler = build_lr_scheduler(
-                adapter_optimizer,
-                pai_lr_schedule_epochs(train_cfg) * loader_length,
-                train_cfg["warmup_fraction"],
-            )
+            adapter_scheduler = make_scheduler(adapter_optimizer)
 
     return optimizer, scheduler, adapter_optimizer, adapter_scheduler
 
@@ -2526,6 +2627,8 @@ def run_cycle(
         ),
     )
 
+    extra_eval_splits = pai_eval_splits(train_cfg)
+    use_pai_plateau = pai_uses_plateau(train_cfg)
     datasets, label_map = build_datasets(
         data_cfg,
         augment=train_cfg["augment"],
@@ -2533,7 +2636,9 @@ def run_cycle(
         cache_features=bool(train_cfg.get("cache_features", True)),
         cache_train_features=bool(train_cfg.get("cache_train_features", False)),
         augmentation=train_cfg.get("augmentation"),
-        splits=(TRAIN, VAL),
+        # TEST is appended after TRAIN/VAL, so the shared split RNG draws the
+        # same TRAIN/VAL entries as a run that never loads it.
+        splits=(TRAIN, VAL, TEST) if "test" in extra_eval_splits else (TRAIN, VAL),
     )
 
     if teacher_checkpoint and run_id is not None and (
@@ -2665,6 +2770,20 @@ def run_cycle(
     val_loader = build_data_loader(
         datasets[VAL], train_cfg, shuffle=False, generator=val_generator
     )
+    # Logging-only evaluations: never fed to PAI, the scheduler or any
+    # checkpoint selection.  Their loaders are unshuffled and own a private
+    # generator, so they cannot perturb the train/val RNG streams.
+    extra_eval_loaders: dict[str, Any] = {}
+    if "test" in extra_eval_splits:
+        extra_eval_loaders["test"] = build_data_loader(
+            datasets[TEST], train_cfg, shuffle=False,
+            generator=torch.Generator().manual_seed(int(train_cfg["seed"]) + 2),
+        )
+    if "train" in extra_eval_splits:
+        extra_eval_loaders["train_eval"] = build_data_loader(
+            clean_train_view(datasets[TRAIN]), train_cfg, shuffle=False,
+            generator=torch.Generator().manual_seed(int(train_cfg["seed"]) + 3),
+        )
 
     configure_perforatedai(pai_cfg, device)
     # PAI treats save_name as a filename prefix and explicitly rejects path
@@ -2859,9 +2978,10 @@ def run_cycle(
             optimizer.step()
             if adapter_optimizer is not None:
                 adapter_optimizer.step()
-            scheduler.step()
-            if adapter_scheduler is not None:
-                adapter_scheduler.step()
+            if not use_pai_plateau:
+                scheduler.step()
+                if adapter_scheduler is not None:
+                    adapter_scheduler.step()
             for name, value in losses.items():
                 contribution = value.detach() * labels.size(0)
                 running_losses[name] = (
@@ -2880,6 +3000,21 @@ def run_cycle(
         if kd is not None:
             kd.eval()
         val_loss, val_acc = evaluate_loss_acc(model, val_loader, device, criterion)
+        extra_epoch_fields: dict[str, Any] = {}
+        if extra_eval_loaders:
+            # The architecture that produced this epoch's scores.  The
+            # record's ``parameter_count`` is read after PAI's validation
+            # step and so already describes the *next* architecture whenever
+            # PAI adds or reverts a dendrite at this epoch.
+            extra_epoch_fields["evaluated_parameter_count"] = int(
+                UPA.count_params(model)
+            )
+            for name, loader in extra_eval_loaders.items():
+                split_loss, split_acc = evaluate_loss_acc(
+                    model, loader, device, criterion
+                )
+                extra_epoch_fields[f"{name}_loss"] = split_loss
+                extra_epoch_fields[f"{name}_accuracy"] = split_acc
         GPA.pai_tracker.add_extra_score(train_acc, "Train")
         # add_validation_score writes PAI's own latest.pt and the architecture
         # CSVs through the relative save_name, so it has to run inside the scope.
@@ -2935,9 +3070,17 @@ def run_cycle(
                     restructured=restructured,
                     model=model,
                     seed=int(train_cfg["seed"]),
+                    extra=extra_epoch_fields,
                 )
             )
 
+        if use_pai_plateau and not restructured:
+            # PerforatedAI's own tracker steps a ReduceLROnPlateau scheduler
+            # with the validation score every epoch in both phases; a
+            # restructure replaces optimizer and scheduler instead.
+            scheduler.step(val_acc)
+            if adapter_scheduler is not None:
+                adapter_scheduler.step(val_acc)
         if restructured:
             restart_multiplier = _restructure_lr_multiplier(
                 phase_mode,

@@ -1,0 +1,19 @@
+# 4160 params (12 classes, input (32, 101)). Budget A main arm (target ~4150, SparkNet c16g16 = 4140p).
+# DTNet: IDCT -> log-mel (tonotopic) -> cmvn -> 2 DTLayers of 34 neurons x 4 ReLU branches, fan-in 8 (local
+# mel/hidden windows), heterogeneous per-branch leaky time constants (init log-spaced 1..50 frames), branch BN,
+# soma leaky integration -> BN -> ReLU; time-mean readout -> fc.
+name: dtnet_a_het
+family: dtnet
+neurons: [34, 34]
+fan_in: [8, 8]
+tau: hetero
+branch_activation: relu
+layout: local
+branch_norm: true
+soma_tau: true
+input_transform: idct
+input_norm: cmvn
+branches: 4
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

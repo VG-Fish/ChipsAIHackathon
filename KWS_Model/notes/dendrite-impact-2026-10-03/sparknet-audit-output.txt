@@ -1,0 +1,60 @@
+sparknet-dendritic-study-v2 runs 291 kinds {'PAI_posthoc': 150, 'scratch': 141} status {'complete': 291}
+sparknet-grow-dendrites-v3 runs 187 kinds {'PAI_grow': 183, 'PAI_grow_no_report': 4} status {'complete': 182, 'incomplete': 1, 'missing_summary': 4}
+sparknet-pai-documented runs 13 kinds {'PAI_posthoc': 13} status {'complete': 10, 'running': 3}
+sparknet-lowdata02 runs 45 kinds {'PAI_grow': 10, 'scratch': 35} status {'complete': 45}
+sparknet-lowdata10 runs 158 kinds {'PAI_grow': 74, 'scratch': 84} status {'complete': 158}
+sparknet-lowdata20 runs 15 kinds {'PAI_grow': 5, 'scratch': 10} status {'complete': 15}
+sparknet-native-dendrites runs 60 kinds {'scratch': 60} status {'complete': 60}
+sparknet-paper-replication runs 10 kinds {'scratch': 10} status {'missing_summary': 4, 'complete': 6}
+growth pairs 262 aggregates 93 pre-switch mismatches 1
+sparknet-grow-dendrites-v3 depthwise sparknet_c8g16_paper n 3 gain 0.06 CI (-0.166, 0.286) val 90.446 cost 2388 204616 pre diff 0
+sparknet-grow-dendrites-v3 fc sparknet_c18g16_paper n 5 gain -0.054 CI (-0.175, 0.067) val 95.145 cost 5014 434090 pre diff 0
+sparknet-grow-dendrites-v3 fc sparknet_c6g4_paper n 3 gain 0.105 CI (-0.859, 1.069) val 81.642 cost 1390 117470 pre diff 0
+sparknet-grow-dendrites-v3 fc sparknet_c9g4_paper n 3 gain 0.075 CI (-0.599, 0.749) val 88.166 cost 1999 174737 pre diff 0
+sparknet-grow-dendrites-v3 gate_conv sparknet_c9g4_paper n 3 gain 0.112 CI (0.001, 0.224) val 88.204 cost 1971 178717 pre diff 0
+sparknet-grow-dendrites-v3 gate_conv sparknet_c9g8_paper n 3 gain 0.082 CI (-0.469, 0.634) val 90.551 cost 2111 186441 pre diff 0
+sparknet-grow-dendrites-v3 gate_conv-bn sparknet_c6g4_paper n 5 gain 0.247 CI (-0.346, 0.841) val 82.016 cost 1358 120238 pre diff 0
+sparknet-grow-dendrites-v3 gate_conv-bn sparknet_c9g4_paper n 5 gain 0.112 CI (-0.082, 0.307) val 88.405 cost 1979 178717 pre diff 0
+sparknet-grow-dendrites-v3 gate_conv-bn sparknet_c9g8_paper n 5 gain -0.009 CI (-0.242, 0.224) val 90.515 cost 2127 186441 pre diff 0
+sparknet-grow-dendrites-v3 gate_conv-bn-sw5 sparknet_c9g4_paper n 5 gain 0.283 CI (-0.967, 1.534) val 88.576 cost 1979 178717 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b0-bn sparknet_c10g16_paper n 3 gain 0.165 CI (-0.694, 1.024) val 92.531 cost 2804 241784 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b0-bn sparknet_c12g16_paper n 3 gain 0.142 CI (-0.083, 0.368) val 93.438 cost 3388 297536 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b0-bn sparknet_c8g16_paper n 3 gain 0.435 CI (0.223, 0.647) val 90.821 cost 2268 190880 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b0-bn-sw5 sparknet_c8g16_paper n 3 gain 0.262 CI (-1.681, 2.206) val 90.649 cost 2268 190880 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn sparknet_c10g16_paper n 3 gain 0.165 CI (-0.047, 0.377) val 92.531 cost 2584 219564 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn sparknet_c12g16_paper n 3 gain 0.052 CI (-0.563, 0.668) val 93.348 cost 3148 273296 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn sparknet_c8g16_paper n 3 gain 0.277 CI (-0.665, 1.22) val 90.664 cost 2076 171488 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-relu sparknet_c8g16_paper n 3 gain 0.367 CI (0.081, 0.654) val 90.754 cost 2076 171488 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-sigmoid sparknet_c8g16_paper n 3 gain 0.172 CI (-0.335, 0.68) val 90.559 cost 2076 171488 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-sw1 sparknet_c8g16_paper n 3 gain -0.112 CI (-0.556, 0.331) val 90.274 cost 2076 171488 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-sw5 sparknet_c17g16_paper n 3 gain 0.06 CI (-0.824, 0.944) val 94.908 cost 4803 432371 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-sw5 sparknet_c6g12_paper n 3 gain 0.082 CI (-0.383, 0.548) val 86.494 cost 1540 126596 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-sw5 sparknet_c8g16_paper n 5 gain -0.027 CI (-0.671, 0.617) val 90.484 cost 2076 171488 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b1-bn-sw5 sparknet_c9g8_paper n 5 gain 0.351 CI (0.008, 0.694) val 90.875 cost 2131 187451 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b12-bn-sw5 sparknet_c8g16_paper n 3 gain 0.6 CI (-1.882, 3.082) val 90.986 cost 2164 178760 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c10g16_paper n 3 gain 0.045 CI (-0.391, 0.481) val 92.411 cost 2584 219564 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c12g16_paper n 3 gain 0.187 CI (-0.317, 0.691) val 93.483 cost 3148 273296 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c16g16_paper n 3 gain -0.022 CI (-0.302, 0.257) val 94.931 cost 4444 397728 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c17g8_paper n 3 gain 0.24 CI (-0.115, 0.595) val 94.901 cost 4547 418539 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c18g16_paper n 5 gain 0.063 CI (-0.051, 0.177) val 95.262 cost 5176 468428 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c4_paper n 3 gain 0.36 CI (-0.087, 0.807) val 83.495 cost 1532 98960 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c6g16_paper n 3 gain 0.157 CI (-0.447, 0.762) val 87.357 cost 1624 129068 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn sparknet_c8g16_paper n 3 gain 0.075 CI (-0.266, 0.416) val 90.461 cost 2076 171488 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c10g16_paper n 3 gain -0.12 CI (-0.346, 0.106) val 92.246 cost 2584 219564 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c12g16_paper n 3 gain 0.007 CI (-0.397, 0.412) val 93.303 cost 3148 273296 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c6g16_paper n 3 gain 0.03 CI (-0.278, 0.338) val 87.229 cost 1624 129068 pre diff 0
+sparknet-grow-dendrites-v3 pointwise_b2-bn-sham sparknet_c8g16_paper n 3 gain 0.075 CI (-0.528, 0.678) val 90.461 cost 2076 171488 pre diff 0
+sparknet-lowdata02 pointwise_b1-bn sparknet_c16g16_paper n 5 gain 0.166 CI (-0.052, 0.385) val 78.776 cost 4444 397728 pre diff 0
+sparknet-lowdata02 pointwise_b1-bn sparknet_c8g16_paper n 5 gain -0.036 CI (-0.331, 0.259) val 67.964 cost 2076 171488 pre diff 0
+sparknet-lowdata10 pointwise_b0-bn sparknet_c8g16_paper n 3 gain 0.21 CI (-0.742, 1.162) val 84.477 cost 2268 190880 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn sparknet_c12g16_paper n 5 gain 0.054 CI (-0.172, 0.28) val 88.4 cost 3148 273296 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn sparknet_c14g16_paper n 10 gain -0.011 CI (-0.116, 0.094) val 88.934 cost 3768 332684 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn sparknet_c16g16_paper n 20 gain 0.002 CI (-0.082, 0.086) val 89.565 cost 4444 397728 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn sparknet_c18g16_paper n 5 gain 0.049 CI (-0.059, 0.158) val 90.146 cost 5176 468428 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn sparknet_c6g16_paper n 3 gain 0.045 CI (-0.391, 0.481) val 81.537 cost 1624 129068 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn sparknet_c8g16_paper n 3 gain 0.045 CI (-0.494, 0.584) val 84.312 cost 2076 171488 pre diff 0
+sparknet-lowdata10 pointwise_b1-bn-sw5 sparknet_c16g16_paper n 5 gain 0.036 CI (-0.275, 0.347) val 89.579 cost 4444 397728 pre diff 0
+sparknet-lowdata10 pointwise_b12-bn sparknet_c16g16_paper n 5 gain -0.139 CI (-0.31, 0.031) val 89.404 cost 4748 425200 pre diff 0
+sparknet-lowdata10 pointwise_b123-bn sparknet_c16g16_paper n 5 gain -0.121 CI (-0.312, 0.069) val 89.422 cost 5052 452672 pre diff 0
+sparknet-lowdata10 pointwise_b2-bn sparknet_c16g16_paper n 10 gain 0.002 CI (-0.115, 0.12) val 89.789 cost 4444 397728 pre diff 0
+sparknet-lowdata20 pointwise_b1-bn sparknet_c16g16_paper n 5 gain 0.072 CI (-0.028, 0.172) val 91.843 cost 4444 397728 pre diff 0

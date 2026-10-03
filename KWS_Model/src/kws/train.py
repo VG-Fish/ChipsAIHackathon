@@ -162,6 +162,144 @@ def build_lr_scheduler(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_hold_lambda)
 
 
+PLATEAU_SCHEDULER = "plateau"
+
+
+def resolve_scheduler_name(train_cfg: Mapping, *, key: str = "scheduler") -> str:
+    """The configured learning-rate schedule name, ``cosine`` when unset.
+
+    ``lr_scheduler`` is accepted as an alias of ``scheduler`` so a recipe can
+    spell the plateau schedule the way the "Pruning Then Perforating" protocol
+    does; setting both to different values is ambiguous and rejected.
+    """
+    primary = train_cfg.get(key)
+    alias = train_cfg.get("lr_scheduler") if key == "scheduler" else None
+    if primary is not None and alias is not None and str(primary).lower() != str(alias).lower():
+        raise ValueError(
+            f"scheduler={primary!r} and lr_scheduler={alias!r} disagree; set only one"
+        )
+    name = primary if primary is not None else alias
+    return str(name if name is not None else "cosine").lower()
+
+
+def is_plateau_scheduler(scheduler) -> bool:
+    return isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
+
+
+def build_plateau_scheduler(optimizer, train_cfg: Mapping, *, base_lr: float | None = None):
+    """``ReduceLROnPlateau`` on validation accuracy, configured by ``plateau:``.
+
+    Defaults follow the "Pruning Then Perforating" protocol: mode ``max``,
+    factor 0.1, patience 3, and a floor of ``min_lr_scale`` (0.01) times the
+    phase's initial learning rate.  ``threshold``/``threshold_mode`` keep
+    PyTorch's defaults unless configured.  The scheduler is stepped once per
+    epoch with the validation accuracy, never per batch.
+    """
+    cfg = dict(train_cfg.get("plateau") or {})
+    unknown = set(cfg) - {
+        "mode", "factor", "patience", "min_lr_scale", "min_lr", "threshold",
+        "threshold_mode", "cooldown",
+    }
+    if unknown:
+        raise ValueError(f"unknown plateau settings: {sorted(unknown)}")
+    if base_lr is None:
+        base_lr = float(optimizer.param_groups[0]["lr"])
+    if "min_lr" in cfg and "min_lr_scale" in cfg:
+        raise ValueError("set plateau.min_lr or plateau.min_lr_scale, not both")
+    min_lr = (
+        float(cfg["min_lr"])
+        if "min_lr" in cfg
+        else float(cfg.get("min_lr_scale", 0.01)) * float(base_lr)
+    )
+    factor = float(cfg.get("factor", 0.1))
+    patience = int(cfg.get("patience", 3))
+    if not 0.0 < factor < 1.0:
+        raise ValueError("plateau.factor must be in (0, 1)")
+    if patience < 0 or min_lr < 0:
+        raise ValueError("plateau.patience and the minimum learning rate must be non-negative")
+    return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode=str(cfg.get("mode", "max")),
+        factor=factor,
+        patience=patience,
+        threshold=float(cfg.get("threshold", 1e-4)),
+        threshold_mode=str(cfg.get("threshold_mode", "rel")),
+        cooldown=int(cfg.get("cooldown", 0)),
+        min_lr=min_lr,
+    )
+
+
+@dataclass
+class EarlyStopping:
+    """Patience-based early stopping on validation accuracy (maximised).
+
+    An epoch counts as an improvement only when it beats the best value seen
+    so far by more than ``min_delta``; ``patience`` consecutive epochs
+    without one stop training.  This bookkeeping is independent of the
+    best-weight tracking, which always keeps the strictly best validation
+    epoch, so ``restore_best_weights`` restores the best-validation epoch.
+    """
+
+    patience: int
+    min_delta: float = 0.0
+    restore_best_weights: bool = True
+    best: float = float("-inf")
+    wait: int = 0
+    stopped: bool = False
+    stopped_epoch: int | None = None
+
+    @classmethod
+    def from_config(cls, train_cfg: Mapping) -> "EarlyStopping | None":
+        cfg = train_cfg.get("early_stopping")
+        if cfg is None or cfg is False:
+            return None
+        if not isinstance(cfg, Mapping):
+            raise ValueError("early_stopping must be a mapping of patience/min_delta")
+        unknown = set(cfg) - {"patience", "min_delta", "restore_best_weights"}
+        if unknown:
+            raise ValueError(f"unknown early_stopping settings: {sorted(unknown)}")
+        patience = cfg.get("patience")
+        if isinstance(patience, bool) or not isinstance(patience, int) or patience < 1:
+            raise ValueError("early_stopping.patience must be a positive integer")
+        min_delta = float(cfg.get("min_delta", 0.0))
+        if min_delta < 0:
+            raise ValueError("early_stopping.min_delta must be non-negative")
+        return cls(
+            patience=patience,
+            min_delta=min_delta,
+            restore_best_weights=bool(cfg.get("restore_best_weights", True)),
+        )
+
+    def update(self, value: float, epoch: int) -> bool:
+        """Record one epoch's metric; return True when training should stop."""
+        if value > self.best + self.min_delta:
+            self.best = float(value)
+            self.wait = 0
+        else:
+            self.wait += 1
+        if self.wait >= self.patience:
+            self.stopped = True
+            self.stopped_epoch = int(epoch)
+        return self.stopped
+
+    def state_dict(self) -> dict:
+        return {
+            "patience": self.patience,
+            "min_delta": self.min_delta,
+            "best": self.best,
+            "wait": self.wait,
+            "stopped": self.stopped,
+            "stopped_epoch": self.stopped_epoch,
+        }
+
+    def load_state_dict(self, state: Mapping) -> None:
+        self.best = float(state.get("best", float("-inf")))
+        self.wait = int(state.get("wait", 0))
+        self.stopped = bool(state.get("stopped", False))
+        stopped_epoch = state.get("stopped_epoch")
+        self.stopped_epoch = int(stopped_epoch) if stopped_epoch is not None else None
+
+
 def build_optimizer(parameters: Iterable[nn.Parameter], train_cfg: Mapping) -> torch.optim.Optimizer:
     """Build the requested optimiser while preserving AdamW as the default."""
     name = str(train_cfg.get("optimizer", "adamw")).lower()
@@ -326,15 +464,25 @@ def run_finetune(
         raise ValueError(f"{label}: no trainable parameters were selected")
 
     optimizer = build_optimizer(active, train_cfg)
-    scheduler = build_lr_scheduler(
-        optimizer,
-        max(target_epochs * len(train_loader), 1),
-        train_cfg["warmup_fraction"],
-        name=str(train_cfg.get("scheduler", "cosine")),
-        hold_fraction=float(train_cfg.get("hold_fraction", 0.0)),
-        min_lr=float(train_cfg.get("min_lr", 0.0)),
-        power=float(train_cfg.get("polynomial_power", 2.0)),
-    )
+    scheduler_name = resolve_scheduler_name(train_cfg)
+    if scheduler_name == PLATEAU_SCHEDULER:
+        # Stepped once per epoch on validation accuracy (see below), so it has
+        # no step horizon and ignores warmup/hold settings.
+        scheduler = build_plateau_scheduler(optimizer, train_cfg)
+    else:
+        scheduler = build_lr_scheduler(
+            optimizer,
+            max(target_epochs * len(train_loader), 1),
+            train_cfg["warmup_fraction"],
+            name=scheduler_name,
+            hold_fraction=float(train_cfg.get("hold_fraction", 0.0)),
+            min_lr=float(train_cfg.get("min_lr", 0.0)),
+            power=float(train_cfg.get("polynomial_power", 2.0)),
+        )
+    plateau = is_plateau_scheduler(scheduler)
+    # ``None`` unless ``early_stopping`` is configured: every existing recipe
+    # keeps its fixed epoch budget and exact behaviour.
+    early_stopping = EarlyStopping.from_config(train_cfg)
 
     phase = phase or label
     if resume_state is None and recorder is not None and recorder.count:
@@ -378,6 +526,8 @@ def run_finetune(
         if state.get("scheduler_state_dict") is not None:
             scheduler.load_state_dict(state["scheduler_state_dict"])
         restore_rng_state(state)
+        if early_stopping is not None and checkpoint_stage_state.get("early_stopping"):
+            early_stopping.load_state_dict(checkpoint_stage_state["early_stopping"])
         start_epoch = int(state.get("completed_epoch", 0))
         global_step = int(state.get("global_step", 0))
         best_val_acc = float(state.get("best_metric_value", float("-inf")))
@@ -438,6 +588,11 @@ def run_finetune(
             upstream=upstream,
             stage_specific_state={
                 **(stage_specific_state or {}),
+                **(
+                    {"early_stopping": early_stopping.state_dict()}
+                    if early_stopping is not None
+                    else {}
+                ),
                 "kd_state_dict": (
                     copy.deepcopy(kd.state_dict()) if kd is not None else None
                 ),
@@ -453,7 +608,10 @@ def run_finetune(
         state_payload["history"] = copy.deepcopy(history)
         atomic_torch_save(latest_path, state_payload)
 
+    completed_epoch = start_epoch
     for epoch in range(start_epoch, target_epochs):
+        if early_stopping is not None and early_stopping.stopped:
+            break
         epoch_started = time.monotonic()
         set_train_mode_preserving_frozen_batchnorm(model)
         if kd is not None:
@@ -493,7 +651,8 @@ def run_finetune(
                     losses["total"] = losses["total"] + weight * value
             losses["total"].backward()
             optimizer.step()
-            scheduler.step()
+            if not plateau:
+                scheduler.step()
             if post_step is not None:
                 post_step(model)
             for name, value in losses.items():
@@ -509,6 +668,11 @@ def run_finetune(
             kd.eval()
         val_loss, val_acc = evaluate_loss_acc(model, val_loader, device, criterion)
         final_val_acc = val_acc
+        stop_now = (
+            early_stopping.update(val_acc, epoch + 1)
+            if early_stopping is not None
+            else False
+        )
         record = {
             "schema_version": 1,
             "stage": stage,
@@ -538,6 +702,8 @@ def run_finetune(
                 })
         if extra_epoch_fields is not None:
             record.update(dict(extra_epoch_fields()))
+        if early_stopping is not None:
+            record["early_stopping_wait"] = early_stopping.wait
         global_step += len(train_loader)
         history.append(record)
         metric_digest = recorder.append(record) if recorder is not None else None
@@ -566,10 +732,38 @@ def run_finetune(
                         "run_id": run_id,
                     },
                 )
+        if plateau:
+            # Epoch-level plateau decay on the metric the phase selects by.
+            scheduler.step(val_acc)
+        if stop_now:
+            assert early_stopping is not None
+            logger.info(
+                "%s early stopping at epoch %d: no validation gain above %.4g "
+                "for %d epochs (best %.4f at epoch %d)",
+                label, epoch + 1, early_stopping.min_delta,
+                early_stopping.patience, best_val_acc, best_epoch,
+            )
+        completed_epoch = epoch + 1
         save_latest(epoch + 1)
         if on_epoch_end is not None:
             on_epoch_end({**record, "metric_digest": metric_digest})
 
+    if early_stopping is not None and early_stopping.restore_best_weights and best_state:
+        # The protocol reports the best-validation epoch with its weights
+        # restored; leave the in-memory model in that state for the caller.
+        model.load_state_dict(best_state, strict=True)
+
+    if early_stopping is not None:
+        epochs_run = max(completed_epoch, start_epoch)
+        return FinetuneResult(
+            best_val_acc=0.0 if best_val_acc == float("-inf") else best_val_acc,
+            final_val_acc=final_val_acc,
+            epochs=epochs_run,
+            history=history,
+            global_step=global_step,
+            completed_epoch=epochs_run,
+            run_id=run_id,
+        )
     return FinetuneResult(
         best_val_acc=0.0 if best_val_acc == float("-inf") else best_val_acc,
         final_val_acc=final_val_acc,

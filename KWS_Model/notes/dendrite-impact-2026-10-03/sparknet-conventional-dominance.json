@@ -1,0 +1,1504 @@
+[
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "depthwise",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.44619422572178,
+    "params": 2388,
+    "macs": 204616,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g8_paper",
+        "mean_val_pct": 90.4686914135733,
+        "params": 2023,
+        "macs": 178361,
+        "gain_over_growth_pp": 0.022497187851513445
+      },
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.09861267341583,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.6524184476940462
+      },
+      {
+        "model": "sparknet_c9g16_paper",
+        "mean_val_pct": 91.27859017622797,
+        "params": 2215,
+        "macs": 185729,
+        "gain_over_growth_pp": 0.8323959505061822
+      },
+      {
+        "model": "sparknet_c10g8_paper",
+        "mean_val_pct": 91.57855268091488,
+        "params": 2254,
+        "macs": 200278,
+        "gain_over_growth_pp": 1.1323584551930992
+      },
+      {
+        "model": "sparknet_c10g12_paper",
+        "mean_val_pct": 92.30596175478065,
+        "params": 2354,
+        "macs": 204366,
+        "gain_over_growth_pp": 1.859767529058871
+      },
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.45856767904013,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 1.0123734533183466
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc",
+    "model": "sparknet_c16g16_paper",
+    "n": 1,
+    "mean_val_pct": 95.23059617547807,
+    "params": 4356,
+    "macs": 370460,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 95.29808773903262,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.06749156355455455
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc",
+    "model": "sparknet_c17g16_paper",
+    "n": 1,
+    "mean_val_pct": 94.73565804274465,
+    "params": 4679,
+    "macs": 401669,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 95.29808773903262,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.5624296962879782
+      },
+      {
+        "model": "sparknet_c17g8_paper",
+        "mean_val_pct": 95.09561304836896,
+        "params": 4207,
+        "macs": 387633,
+        "gain_over_growth_pp": 0.3599550056243146
+      },
+      {
+        "model": "sparknet_c17g16_paper",
+        "mean_val_pct": 94.73565804274465,
+        "params": 4463,
+        "macs": 401465,
+        "gain_over_growth_pp": 0.0
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc",
+    "model": "sparknet_c18g16_paper",
+    "n": 5,
+    "mean_val_pct": 95.14510686164229,
+    "params": 5014,
+    "macs": 434090,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c18g16_paper",
+        "mean_val_pct": 95.19910011248594,
+        "params": 4798,
+        "macs": 433886,
+        "gain_over_growth_pp": 0.05399325084364648
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc",
+    "model": "sparknet_c6g4_paper",
+    "n": 3,
+    "mean_val_pct": 81.64229471316085,
+    "params": 1390,
+    "macs": 117470,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.45106861642294,
+    "params": 2764,
+    "macs": 177732,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.022497187851527656
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc",
+    "model": "sparknet_c9g4_paper",
+    "n": 3,
+    "mean_val_pct": 88.16647919010123,
+    "params": 1999,
+    "macs": 174737,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8g8_paper",
+        "mean_val_pct": 89.31383577052868,
+        "params": 1804,
+        "macs": 157656,
+        "gain_over_growth_pp": 1.1473565804274557
+      },
+      {
+        "model": "sparknet_c8g16_paper",
+        "mean_val_pct": 90.3862017247844,
+        "params": 1988,
+        "macs": 164216,
+        "gain_over_growth_pp": 2.2197225346831715
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc-sham",
+    "model": "sparknet_c18g16_paper",
+    "n": 1,
+    "mean_val_pct": 95.97300337457818,
+    "params": 5014,
+    "macs": 434090,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c18g16_paper",
+        "mean_val_pct": 95.97300337457818,
+        "params": 4798,
+        "macs": 433886,
+        "gain_over_growth_pp": 0.0
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc-sham",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.40607424071992,
+    "params": 2764,
+    "macs": 177732,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.06749156355455455
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc-switch170",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.45106861642294,
+    "params": 2764,
+    "macs": 177732,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.022497187851527656
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "fc-wd1e-3",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.40607424071992,
+    "params": 2764,
+    "macs": 177732,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.06749156355455455
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "gate_conv",
+    "model": "sparknet_c9g4_paper",
+    "n": 3,
+    "mean_val_pct": 88.2039745031871,
+    "params": 1971,
+    "macs": 178717,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8g8_paper",
+        "mean_val_pct": 89.31383577052868,
+        "params": 1804,
+        "macs": 157656,
+        "gain_over_growth_pp": 1.1098612673415857
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "gate_conv",
+    "model": "sparknet_c9g8_paper",
+    "n": 3,
+    "mean_val_pct": 90.5511811023622,
+    "params": 2111,
+    "macs": 186441,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "gate_conv-bn",
+    "model": "sparknet_c6g4_paper",
+    "n": 5,
+    "mean_val_pct": 82.01574803149606,
+    "params": 1358,
+    "macs": 120238,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "gate_conv-bn",
+    "model": "sparknet_c9g4_paper",
+    "n": 5,
+    "mean_val_pct": 88.40494938132734,
+    "params": 1979,
+    "macs": 178717,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "gate_conv-bn",
+    "model": "sparknet_c9g8_paper",
+    "n": 5,
+    "mean_val_pct": 90.51518560179977,
+    "params": 2127,
+    "macs": 186441,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g8_paper",
+        "mean_val_pct": 90.52418447694038,
+        "params": 2023,
+        "macs": 178361,
+        "gain_over_growth_pp": 0.008998875140605378
+      },
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.10011248593925,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.5849268841394775
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "gate_conv-bn-sw5",
+    "model": "sparknet_c9g4_paper",
+    "n": 5,
+    "mean_val_pct": 88.57592800899887,
+    "params": 1979,
+    "macs": 178717,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.45106861642294,
+    "params": 2500,
+    "macs": 191880,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.022497187851527656
+      },
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.022497187851527656
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise-in75",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.45106861642294,
+    "params": 2500,
+    "macs": 191880,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.022497187851527656
+      },
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.022497187851527656
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c10g16_paper",
+    "n": 3,
+    "mean_val_pct": 92.53093363329585,
+    "params": 2804,
+    "macs": 241784,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c12g16_paper",
+    "n": 3,
+    "mean_val_pct": 93.43832020997375,
+    "params": 3388,
+    "macs": 297536,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c13g16_paper",
+        "mean_val_pct": 93.80577427821522,
+        "params": 3243,
+        "macs": 283901,
+        "gain_over_growth_pp": 0.36745406824147153
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c2g16_paper",
+    "n": 1,
+    "mean_val_pct": 67.22159730033745,
+    "params": 948,
+    "macs": 67256,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c4g16_paper",
+    "n": 1,
+    "mean_val_pct": 81.03487064116986,
+    "params": 1340,
+    "macs": 103616,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c6g16_paper",
+    "n": 1,
+    "mean_val_pct": 86.83914510686164,
+    "params": 1780,
+    "macs": 144824,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c7g8_paper",
+        "mean_val_pct": 88.21147356580428,
+        "params": 1597,
+        "macs": 138163,
+        "gain_over_growth_pp": 1.372328458942647
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.82114735658043,
+    "params": 2268,
+    "macs": 190880,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.09861267341583,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.27746531683540354
+      },
+      {
+        "model": "sparknet_c9g16_paper",
+        "mean_val_pct": 91.27859017622797,
+        "params": 2215,
+        "macs": 185729,
+        "gain_over_growth_pp": 0.4574428196475395
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b0-bn-sw5",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.64866891638546,
+    "params": 2268,
+    "macs": 190880,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.09861267341583,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.4499437570303684
+      },
+      {
+        "model": "sparknet_c9g16_paper",
+        "mean_val_pct": 91.27859017622797,
+        "params": 2215,
+        "macs": 185729,
+        "gain_over_growth_pp": 0.6299212598425044
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c10g16_paper",
+    "n": 3,
+    "mean_val_pct": 92.53093363329585,
+    "params": 2584,
+    "macs": 219564,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c12g16_paper",
+    "n": 3,
+    "mean_val_pct": 93.34833145856769,
+    "params": 3148,
+    "macs": 273296,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c2g16_paper",
+    "n": 1,
+    "mean_val_pct": 66.20922384701913,
+    "params": 888,
+    "macs": 61196,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c4g16_paper",
+    "n": 1,
+    "mean_val_pct": 80.08998875140607,
+    "params": 1228,
+    "macs": 92304,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c6g16_paper",
+    "n": 1,
+    "mean_val_pct": 86.99662542182227,
+    "params": 1624,
+    "macs": 129068,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.6636670416198,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-relu",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.75365579302587,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-sigmoid",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.55868016497938,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-sw1",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.2737157855268,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8g16_paper",
+        "mean_val_pct": 90.3862017247844,
+        "params": 1988,
+        "macs": 164216,
+        "gain_over_growth_pp": 0.11248593925759565
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-sw5",
+    "model": "sparknet_c17g16_paper",
+    "n": 3,
+    "mean_val_pct": 94.90813648293963,
+    "params": 4803,
+    "macs": 432371,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 94.95313085864267,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.0449943757030411
+      },
+      {
+        "model": "sparknet_c18g8_paper",
+        "mean_val_pct": 94.92313460817398,
+        "params": 4534,
+        "macs": 419246,
+        "gain_over_growth_pp": 0.014998125234356507
+      },
+      {
+        "model": "sparknet_c18g12_paper",
+        "mean_val_pct": 95.34308211473565,
+        "params": 4666,
+        "macs": 426566,
+        "gain_over_growth_pp": 0.4349456317960261
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-sw5",
+    "model": "sparknet_c6g12_paper",
+    "n": 3,
+    "mean_val_pct": 86.49418822647169,
+    "params": 1540,
+    "macs": 126596,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-sw5",
+    "model": "sparknet_c8g16_paper",
+    "n": 5,
+    "mean_val_pct": 90.48368953880765,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8g16_paper",
+        "mean_val_pct": 90.51068616422947,
+        "params": 1988,
+        "macs": 164216,
+        "gain_over_growth_pp": 0.026996625421816134
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b1-bn-sw5",
+    "model": "sparknet_c9g8_paper",
+    "n": 5,
+    "mean_val_pct": 90.87514060742407,
+    "params": 2131,
+    "macs": 187451,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.10011248593925,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.22497187851517708
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b12-bn-sw5",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.98612673415823,
+    "params": 2164,
+    "macs": 178760,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b123-bn",
+    "model": "sparknet_c4_paper",
+    "n": 1,
+    "mean_val_pct": 83.35208098987627,
+    "params": 1588,
+    "macs": 103000,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b123-bn",
+    "model": "sparknet_c8_paper",
+    "n": 1,
+    "mean_val_pct": 91.92350956130484,
+    "params": 2620,
+    "macs": 199152,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-auto",
+    "model": "sparknet_c12_paper",
+    "n": 1,
+    "mean_val_pct": 94.4206974128234,
+    "params": 3556,
+    "macs": 292880,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c12_paper",
+        "mean_val_pct": 94.55568053993251,
+        "params": 3400,
+        "macs": 277124,
+        "gain_over_growth_pp": 0.1349831271091091
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c10g16_paper",
+    "n": 3,
+    "mean_val_pct": 92.41094863142108,
+    "params": 2584,
+    "macs": 219564,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c10g8_paper",
+    "n": 1,
+    "mean_val_pct": 92.17097862767154,
+    "params": 2384,
+    "macs": 211388,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c10g8_paper",
+        "mean_val_pct": 92.17097862767154,
+        "params": 2254,
+        "macs": 200278,
+        "gain_over_growth_pp": 0.0
+      },
+      {
+        "model": "sparknet_c10g12_paper",
+        "mean_val_pct": 93.18335208098988,
+        "params": 2354,
+        "macs": 204366,
+        "gain_over_growth_pp": 1.0123734533183324
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c12_paper",
+    "n": 1,
+    "mean_val_pct": 94.62317210348706,
+    "params": 3580,
+    "macs": 292880,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c12g16_paper",
+    "n": 3,
+    "mean_val_pct": 93.4833145856768,
+    "params": 3148,
+    "macs": 273296,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 3,
+    "mean_val_pct": 94.93063367079115,
+    "params": 4444,
+    "macs": 397728,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 94.95313085864267,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.022497187851513445
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c17g16_paper",
+    "n": 2,
+    "mean_val_pct": 94.75815523059617,
+    "params": 4803,
+    "macs": 432371,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 94.98312710911136,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.2249718785151913
+      },
+      {
+        "model": "sparknet_c17g16_paper",
+        "mean_val_pct": 94.75815523059617,
+        "params": 4463,
+        "macs": 401465,
+        "gain_over_growth_pp": 0.0
+      },
+      {
+        "model": "sparknet_c18g8_paper",
+        "mean_val_pct": 95.11811023622047,
+        "params": 4534,
+        "macs": 419246,
+        "gain_over_growth_pp": 0.3599550056243004
+      },
+      {
+        "model": "sparknet_c18g12_paper",
+        "mean_val_pct": 95.30933633295837,
+        "params": 4666,
+        "macs": 426566,
+        "gain_over_growth_pp": 0.5511811023621931
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c17g8_paper",
+    "n": 3,
+    "mean_val_pct": 94.90063742032245,
+    "params": 4547,
+    "macs": 418539,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 94.95313085864267,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.05249343832021225
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c18g16_paper",
+    "n": 5,
+    "mean_val_pct": 95.26209223847019,
+    "params": 5176,
+    "macs": 468428,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c19g16_paper",
+        "mean_val_pct": 95.35208098987627,
+        "params": 5145,
+        "macs": 467519,
+        "gain_over_growth_pp": 0.0899887514060822
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c18g8_paper",
+    "n": 1,
+    "mean_val_pct": 95.32058492688414,
+    "params": 4912,
+    "macs": 453788,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c18g8_paper",
+        "mean_val_pct": 95.45556805399326,
+        "params": 4534,
+        "macs": 419246,
+        "gain_over_growth_pp": 0.1349831271091233
+      },
+      {
+        "model": "sparknet_c18g12_paper",
+        "mean_val_pct": 95.34308211473565,
+        "params": 4666,
+        "macs": 426566,
+        "gain_over_growth_pp": 0.022497187851513445
+      },
+      {
+        "model": "sparknet_c18g16_paper",
+        "mean_val_pct": 95.97300337457818,
+        "params": 4798,
+        "macs": 433886,
+        "gain_over_growth_pp": 0.6524184476940462
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c2_paper",
+    "n": 2,
+    "mean_val_pct": 62.767154105736786,
+    "params": 1160,
+    "macs": 64620,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c2g16_paper",
+    "n": 1,
+    "mean_val_pct": 64.58942632170978,
+    "params": 888,
+    "macs": 61196,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c2g16_paper",
+        "mean_val_pct": 65.9392575928009,
+        "params": 878,
+        "macs": 60590,
+        "gain_over_growth_pp": 1.3498312710911193
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c4_paper",
+    "n": 3,
+    "mean_val_pct": 83.49456317960255,
+    "params": 1532,
+    "macs": 98960,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c4g16_paper",
+    "n": 1,
+    "mean_val_pct": 80.33745781777279,
+    "params": 1228,
+    "macs": 92304,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c6_paper",
+    "n": 2,
+    "mean_val_pct": 88.177727784027,
+    "params": 1960,
+    "macs": 138956,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c6g16_paper",
+    "n": 3,
+    "mean_val_pct": 87.35658042744657,
+    "params": 1624,
+    "macs": 129068,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c8_paper",
+    "n": 2,
+    "mean_val_pct": 91.36107986501688,
+    "params": 2444,
+    "macs": 184608,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8_paper",
+        "mean_val_pct": 91.48481439820021,
+        "params": 2356,
+        "macs": 177336,
+        "gain_over_growth_pp": 0.12373453318333816
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.46119235095614,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c9g8_paper",
+    "n": 1,
+    "mean_val_pct": 90.79865016872891,
+    "params": 2131,
+    "macs": 187451,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g8_paper",
+        "mean_val_pct": 90.84364454443194,
+        "params": 2023,
+        "macs": 178361,
+        "gain_over_growth_pp": 0.04499437570302689
+      },
+      {
+        "model": "sparknet_c9g12_paper",
+        "mean_val_pct": 91.47356580427447,
+        "params": 2119,
+        "macs": 182045,
+        "gain_over_growth_pp": 0.6749156355455597
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-kd",
+    "model": "sparknet_c4_paper",
+    "n": 1,
+    "mean_val_pct": 81.88976377952756,
+    "params": 1532,
+    "macs": 98960,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c4_paper",
+        "mean_val_pct": 82.87964004499437,
+        "params": 1504,
+        "macs": 96940,
+        "gain_over_growth_pp": 0.989876265466819
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-sham",
+    "model": "sparknet_c10g16_paper",
+    "n": 3,
+    "mean_val_pct": 92.24596925384327,
+    "params": 2584,
+    "macs": 219564,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c10g12_paper",
+        "mean_val_pct": 92.30596175478065,
+        "params": 2354,
+        "macs": 204366,
+        "gain_over_growth_pp": 0.0599925009373834
+      },
+      {
+        "model": "sparknet_c10g16_paper",
+        "mean_val_pct": 92.36595425571804,
+        "params": 2454,
+        "macs": 208454,
+        "gain_over_growth_pp": 0.1199850018747668
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-sham",
+    "model": "sparknet_c12g16_paper",
+    "n": 3,
+    "mean_val_pct": 93.30333708286463,
+    "params": 3148,
+    "macs": 273296,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-sham",
+    "model": "sparknet_c4_paper",
+    "n": 1,
+    "mean_val_pct": 83.19460067491563,
+    "params": 1532,
+    "macs": 98960,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-sham",
+    "model": "sparknet_c4g16_paper",
+    "n": 1,
+    "mean_val_pct": 79.86501687289089,
+    "params": 1228,
+    "macs": 92304,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c4g16_paper",
+        "mean_val_pct": 80.04499437570304,
+        "params": 1200,
+        "macs": 90284,
+        "gain_over_growth_pp": 0.1799775028121502
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-sham",
+    "model": "sparknet_c6g16_paper",
+    "n": 3,
+    "mean_val_pct": 87.22909636295462,
+    "params": 1624,
+    "macs": 129068,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b2-bn-sham",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 90.46119235095614,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b23-bn",
+    "model": "sparknet_c10g16_paper",
+    "n": 1,
+    "mean_val_pct": 92.62092238470191,
+    "params": 2714,
+    "macs": 230674,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c10g12_paper",
+        "mean_val_pct": 93.18335208098988,
+        "params": 2354,
+        "macs": 204366,
+        "gain_over_growth_pp": 0.562429696287964
+      },
+      {
+        "model": "sparknet_c10g16_paper",
+        "mean_val_pct": 92.68841394825647,
+        "params": 2454,
+        "macs": 208454,
+        "gain_over_growth_pp": 0.06749156355455455
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b23-bn",
+    "model": "sparknet_c2g16_paper",
+    "n": 1,
+    "mean_val_pct": 65.17435320584927,
+    "params": 898,
+    "macs": 61802,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c2g16_paper",
+        "mean_val_pct": 65.9392575928009,
+        "params": 878,
+        "macs": 60590,
+        "gain_over_growth_pp": 0.7649043869516277
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b23-bn",
+    "model": "sparknet_c6g16_paper",
+    "n": 1,
+    "mean_val_pct": 86.88413948256468,
+    "params": 1678,
+    "macs": 133310,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b23-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 1,
+    "mean_val_pct": 90.23622047244095,
+    "params": 2164,
+    "macs": 178760,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c9g8_paper",
+        "mean_val_pct": 90.84364454443194,
+        "params": 2023,
+        "macs": 178361,
+        "gain_over_growth_pp": 0.6074240719909909
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c10g16_paper",
+    "n": 1,
+    "mean_val_pct": 92.5984251968504,
+    "params": 2584,
+    "macs": 219564,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c10g12_paper",
+        "mean_val_pct": 93.18335208098988,
+        "params": 2354,
+        "macs": 204366,
+        "gain_over_growth_pp": 0.5849268841394775
+      },
+      {
+        "model": "sparknet_c10g16_paper",
+        "mean_val_pct": 92.68841394825647,
+        "params": 2454,
+        "macs": 208454,
+        "gain_over_growth_pp": 0.08998875140606799
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c12g16_paper",
+    "n": 1,
+    "mean_val_pct": 93.27334083239595,
+    "params": 3148,
+    "macs": 273296,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c18g16_paper",
+    "n": 1,
+    "mean_val_pct": 95.95050618672666,
+    "params": 5176,
+    "macs": 468428,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c18g16_paper",
+        "mean_val_pct": 95.97300337457818,
+        "params": 4798,
+        "macs": 433886,
+        "gain_over_growth_pp": 0.022497187851527656
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c2g16_paper",
+    "n": 1,
+    "mean_val_pct": 64.61192350956131,
+    "params": 888,
+    "macs": 61196,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c2g16_paper",
+        "mean_val_pct": 65.9392575928009,
+        "params": 878,
+        "macs": 60590,
+        "gain_over_growth_pp": 1.3273340832395917
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c4g16_paper",
+    "n": 1,
+    "mean_val_pct": 79.73003374578178,
+    "params": 1228,
+    "macs": 92304,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c4g16_paper",
+        "mean_val_pct": 80.04499437570304,
+        "params": 1200,
+        "macs": 90284,
+        "gain_over_growth_pp": 0.3149606299212593
+      }
+    ]
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c6g16_paper",
+    "n": 1,
+    "mean_val_pct": 86.81664791901012,
+    "params": 1624,
+    "macs": 129068,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-grow-dendrites-v3",
+    "arm": "pointwise_b3-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 1,
+    "mean_val_pct": 90.0562429696288,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8g16_paper",
+        "mean_val_pct": 90.07874015748033,
+        "params": 1988,
+        "macs": 164216,
+        "gain_over_growth_pp": 0.022497187851527656
+      }
+    ]
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 5,
+    "mean_val_pct": 78.77615298087738,
+    "params": 4444,
+    "macs": 397728,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata02",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 5,
+    "mean_val_pct": 67.96400449943756,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c8g16_paper",
+        "mean_val_pct": 68.0,
+        "params": 1988,
+        "macs": 164216,
+        "gain_over_growth_pp": 0.03599550056243572
+      }
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b0-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 84.4769403824522,
+    "params": 2268,
+    "macs": 190880,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c12g16_paper",
+    "n": 5,
+    "mean_val_pct": 88.40044994375702,
+    "params": 3148,
+    "macs": 273296,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c14g16_paper",
+    "n": 10,
+    "mean_val_pct": 88.93363329583802,
+    "params": 3768,
+    "macs": 332684,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c14g16_paper",
+        "mean_val_pct": 88.94488188976378,
+        "params": 3530,
+        "macs": 311474,
+        "gain_over_growth_pp": 0.011248593925756722
+      }
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 20,
+    "mean_val_pct": 89.56467941507312,
+    "params": 4444,
+    "macs": 397728,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c18g16_paper",
+    "n": 5,
+    "mean_val_pct": 90.14623172103488,
+    "params": 5176,
+    "macs": 468428,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c6g16_paper",
+    "n": 3,
+    "mean_val_pct": 81.53730783652044,
+    "params": 1624,
+    "macs": 129068,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c8g16_paper",
+    "n": 3,
+    "mean_val_pct": 84.31196100487439,
+    "params": 2076,
+    "macs": 171488,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b1-bn-sw5",
+    "model": "sparknet_c16g16_paper",
+    "n": 5,
+    "mean_val_pct": 89.5793025871766,
+    "params": 4444,
+    "macs": 397728,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b12-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 5,
+    "mean_val_pct": 89.40382452193477,
+    "params": 4748,
+    "macs": 425200,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 89.54330708661418,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.13948256467941178
+      },
+      {
+        "model": "sparknet_c17g16_paper",
+        "mean_val_pct": 89.52530933633295,
+        "params": 4463,
+        "macs": 401465,
+        "gain_over_growth_pp": 0.12148481439818681
+      }
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b123-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 5,
+    "mean_val_pct": 89.42182227221598,
+    "params": 5052,
+    "macs": 452672,
+    "conventional_dominators": [
+      {
+        "model": "sparknet_c16g16_paper",
+        "mean_val_pct": 89.54330708661418,
+        "params": 4140,
+        "macs": 370256,
+        "gain_over_growth_pp": 0.12148481439820102
+      },
+      {
+        "model": "sparknet_c17g16_paper",
+        "mean_val_pct": 89.52530933633295,
+        "params": 4463,
+        "macs": 401465,
+        "gain_over_growth_pp": 0.10348706411697606
+      },
+      {
+        "model": "sparknet_c18g16_paper",
+        "mean_val_pct": 90.09673790776154,
+        "params": 4798,
+        "macs": 433886,
+        "gain_over_growth_pp": 0.6749156355455597
+      }
+    ]
+  },
+  {
+    "family": "sparknet-lowdata10",
+    "arm": "pointwise_b2-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 10,
+    "mean_val_pct": 89.78852643419573,
+    "params": 4444,
+    "macs": 397728,
+    "conventional_dominators": []
+  },
+  {
+    "family": "sparknet-lowdata20",
+    "arm": "pointwise_b1-bn",
+    "model": "sparknet_c16g16_paper",
+    "n": 5,
+    "mean_val_pct": 91.84251968503936,
+    "params": 4444,
+    "macs": 397728,
+    "conventional_dominators": []
+  }
+]

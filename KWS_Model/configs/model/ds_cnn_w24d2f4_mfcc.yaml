@@ -1,0 +1,10 @@
+# Params: 3,300 for 12 classes, input (32, 101) (speech_commands_v2_mfcc32_paper).
+# DS-CNN w24 with an additive native dendrite branch (2 dendrites x fan-in 4) on every block's pointwise conv.
+name: ds_cnn_w24d2f4
+initial_channels: 24
+initial_kernel: 5
+initial_stride: 2
+block_channels: [24, 24]
+dropout: 0.2
+dendrites: 2
+dendrite_fan_in: 4

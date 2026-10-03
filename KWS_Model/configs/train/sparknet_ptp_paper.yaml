@@ -1,0 +1,123 @@
+# SparkNet C16 "Pruning Then Perforating" (PTP) replication recipe.
+#
+# Protocol (paper, Appendix D, Study A), applied to SparkNet C16 / SC-v2:
+#   * one-shot group-L2 structured pruning at a *parameter* rate, per-layer
+#     uniform, classifier (and SparkNet's gate) untouched -- set by the
+#     experiment config's `pruning:` block (method: group);
+#   * pruned model fine-tuned TO CONVERGENCE: AdamW lr 5e-4, wd 1e-4,
+#     ReduceLROnPlateau on val acc (max, factor 0.1, patience 3, floor
+#     0.01x initial), early stopping patience 8 / min delta 0.001, weights
+#     restored to the best-validation epoch.  `epochs` is only a safety cap;
+#   * perforation starts from that converged checkpoint with the SAME
+#     optimizer and plateau schedule, re-initialised at the start and after
+#     every restructure (post-integration lr multiplier 1.0, no cosine
+#     horizon); PAI: perforated backprop, max 3 dendrites, 3 tries,
+#     retain_all_dendrites false, classifier (.fc) only, output_dimensions
+#     [-1, 0];
+#   * every PAI epoch logs val, TEST and clean-TRAIN accuracy plus the
+#     evaluated parameter count, so budget-N can be computed offline
+#     (scripts/analyze_ptp.py).  The test split never feeds selection.
+#
+# Kept from the C16 no-KD study (configs/train/sparknet_c16_dendritic_prune_no_kd.yaml),
+# because they are properties of the SparkNet source rather than of the
+# paper's ResNet recipe:
+#   * the paper data config (1x unknown/silence, materialised silence) the
+#     C16 sources were trained on -- set in the experiment config;
+#   * the augmentation block;
+#   * task_loss_scale: 100 -- sparknet_c16_paper.yaml carries
+#     sparsity_weight 1.0 against the paper's 100 * CE + 1 * gate sparsity;
+#     omitting it would fine-tune at 1:1 and crush the learned gates;
+#   * batch size 256 and the loader/caching settings (the paper's 32 is an
+#     image-model batch; 256 keeps a run at KWS throughput).
+# label_smoothing is 0.0: the paper uses none, and neither did the source
+# training recipe (sparknet_c16_paper.yaml).
+augment: true
+augmentation:
+  time_shift_ms: 100
+  time_shift_mode: zero_fill
+  time_shift_probability: 0.8
+  speed_factor_range: null
+  background_noise_probability: 0.0
+  white_noise_probability: 0.8
+  white_noise_db_range: [-90, -46]
+  white_noise_integer_db: true
+  spec_augment: false
+
+# Safety cap only: early stopping ends the prune fine-tune (paper: no cap).
+epochs: 400
+batch_size: 256
+num_workers: 8
+persistent_workers: true
+prefetch_factor: 2
+cache_features: true
+cache_train_features: false
+optimizer: adamw
+lr: 0.0005
+weight_decay: 0.0001
+label_smoothing: 0.0
+warmup_fraction: 0.0
+task_loss_scale: 100.0
+seed: 0
+
+# Prune fine-tune schedule (kws.train.run_finetune).
+lr_scheduler: plateau
+plateau:
+  mode: max
+  factor: 0.1
+  patience: 3
+  min_lr_scale: 0.01
+early_stopping:
+  patience: 8
+  min_delta: 0.001
+  restore_best_weights: true
+
+# PAI phase: the same plateau schedule, rebuilt with each optimizer restart.
+pai_lr_scheduler: plateau
+# Logged every PAI epoch: test accuracy and clean (non-augmented, eval-mode)
+# train accuracy, plus evaluated_parameter_count.
+pai_eval_splits: [test, train]
+
+# The paper reports the perforated model as trained; no post-search resume.
+resume_epochs: 0
+
+objective:
+  metric: validation_accuracy
+  use_test: false
+
+deployment:
+  bits_per_weight: 8
+  latency_iterations: 50
+  profile_device: cpu
+
+# The runner overwrites this per candidate.
+pruning:
+  kind: structured
+  method: group
+  keep_ratio: 1.0
+  target_channels: 16
+
+# PerforatedAI settings named by the paper are set explicitly; the rest are
+# PerforatedAI 3.2.x library defaults written out (history switching with
+# lookback 1 and a 10-epoch switch window, improvement thresholds
+# [0.001, 0.0001, 0.0], 100 correlation batches, sigmoid dendrites) so the
+# recipe does not depend on the installed defaults.  The base BatchNorm
+# statistics are NOT pinned during the dendrite phase: stock PAI, which the
+# paper ran, does not pin them.
+perforatedai:
+  conversion: module_ids
+  module_ids: [.fc]
+  max_dendrites: 3
+  testing_dendrite_capacity: false
+  switch_mode: history
+  history_lookback: 1
+  n_epochs_to_switch: 10
+  improvement_threshold: [0.001, 0.0001, 0.0]
+  candidate_weight_initialization_multiplier: 0.01
+  initial_correlation_batches: 100
+  max_dendrite_tries: 3
+  forward_function: sigmoid
+  retain_all_dendrites: false
+  output_dimensions: [-1, 0]
+  post_integration_lr_multiplier: 1.0
+  enforce_base_weight_freeze: false
+  freeze_base_batchnorm_in_dendrite_phase: false

@@ -1,0 +1,24 @@
+# 4116 params (12 classes, input (32, 101)). Budget A (c16g16 = 4140), MSD arm.
+# SparkNet with every block a multi-scale dendritic (MSD) TCS block: the
+# depthwise conv runs at dilations 1, 2, 4 (receptive fields k, ~2k, ~4k), and
+# each of the C=8 pointwise neurons has 3 ReLU branches, branch j reading a
+# 7-channel local window of scale j mod 3; the soma sums the branches.
+# Hypothesis: per-branch nonlinearity over different timescales (Zheng et al.
+# 2024, Nat Commun) buys what a linear mix or a wider single-scale net cannot.
+#
+# Added 2026-09-30 for the multi-scale dendrite study. Controls at equal params:
+# sparknet_msd_a_lin (identity branches), sparknet_msd_a_dense (dense
+# multi-scale pointwise), sparknet_msd_a_1scale (single scale, dendrites).
+# Not a published SparkNet configuration.
+family: sparknet
+name: sparknet_msd_a_relu
+channels: 8
+gate_channels: 16
+block_type: msd
+msd_dilations: [1, 2, 4]
+msd_pointwise: dendritic
+msd_branches: 3
+msd_fan_in: 7
+msd_activation: relu
+msd_blocks: [0, 1, 2, 3]
+sparsity_weight: 1.0

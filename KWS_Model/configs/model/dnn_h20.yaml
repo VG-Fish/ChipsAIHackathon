@@ -1,0 +1,7 @@
+# 16912 params (12 classes, input (32, 101)). Width control.
+# Hello Edge DNN: avg-pool time x4 (101->26), flatten time-major (832) -> Linear(h)+ReLU -> Linear(12).
+name: dnn_h20
+family: dnn
+hidden: [20]
+time_pool: 4
+input_norm: cmvn

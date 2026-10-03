@@ -1,0 +1,6 @@
+# 15863 params (12 classes, input (32, 101)). Batch 18: 2-layer MLP width control (vs h16x59_hd2)
+name: dnn_h16x87
+family: dnn
+hidden: [16, 87]
+time_pool: 4
+input_norm: cmvn

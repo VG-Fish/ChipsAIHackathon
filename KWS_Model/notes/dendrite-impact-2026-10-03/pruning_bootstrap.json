@@ -1,0 +1,60 @@
+[
+  {
+    "family": "sparknet-c16-ptp",
+    "seed_units": 6,
+    "bootstrap_replicates": 10000,
+    "bootstrap_gain_ci95_pp": [
+      -8.280441185771775,
+      -6.652152695153212
+    ],
+    "strict_common_rates": [
+      0.4,
+      0.5,
+      0.6,
+      0.7
+    ],
+    "strict_common_gain_ci95_pp": [
+      -13.374309147473447,
+      -10.727272786940054
+    ]
+  },
+  {
+    "family": "sparknet-c16g16-ptp",
+    "seed_units": 5,
+    "bootstrap_replicates": 10000,
+    "bootstrap_gain_ci95_pp": [
+      -3.143601761722177,
+      -2.7678220803323876
+    ],
+    "strict_common_rates": [
+      0.3,
+      0.4,
+      0.5,
+      0.6
+    ],
+    "strict_common_gain_ci95_pp": [
+      -4.274199105313076,
+      -3.8224897667153486
+    ]
+  },
+  {
+    "family": "sparknet-c18g8-ptp",
+    "seed_units": 5,
+    "bootstrap_replicates": 10000,
+    "bootstrap_gain_ci95_pp": [
+      -1.402929921169019,
+      -1.0080986363409523
+    ],
+    "strict_common_rates": [
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6
+    ],
+    "strict_common_gain_ci95_pp": [
+      -1.7080557827034353,
+      -1.2068427553085188
+    ]
+  }
+]

@@ -1,0 +1,197 @@
+{
+  "snapshot_utc": "2026-10-03T22:36:01.370315+00:00",
+  "artifact_count": 4646,
+  "warning": "Artifact counts are not independent run/replicate counts. PAI snapshots excluded; active outputs can change.",
+  "families": {
+    "compression-run": {
+      "run_manifest": 1,
+      "canonical_epoch_log": 9,
+      "training_summary": 1,
+      "canonical_pai_architecture_scores": 3,
+      "stage_report": 1
+    },
+    "dendritic_framework_w18": {
+      "canonical_pai_architecture_scores": 1
+    },
+    "full-run-20260912T063022Z": {
+      "run_manifest": 1,
+      "canonical_epoch_log": 7,
+      "training_summary": 1,
+      "canonical_pai_architecture_scores": 2,
+      "stage_report": 2
+    },
+    "pai-faithful": {
+      "canonical_epoch_log": 80,
+      "faithful_result": 80
+    },
+    "pai-faithful-b21": {
+      "canonical_epoch_log": 85,
+      "faithful_result": 85
+    },
+    "pai-faithful-b21-f10-aborted": {
+      "canonical_epoch_log": 11,
+      "faithful_result": 7
+    },
+    "pai-faithful-b21-interrupted-1940": {
+      "canonical_epoch_log": 6
+    },
+    "pai-faithful-b22": {
+      "canonical_epoch_log": 45,
+      "faithful_result": 45
+    },
+    "pai-faithful-b22-interrupted-1038": {
+      "canonical_epoch_log": 7
+    },
+    "pai-faithful-b23": {
+      "canonical_epoch_log": 25,
+      "faithful_result": 25
+    },
+    "pai-faithful-b23-interrupted-1038": {
+      "canonical_epoch_log": 3
+    },
+    "pai-faithful-b24": {
+      "canonical_epoch_log": 25,
+      "faithful_result": 25
+    },
+    "pai-faithful-interrupted-1940": {
+      "canonical_epoch_log": 5
+    },
+    "phase_b": {
+      "run_manifest": 10,
+      "canonical_epoch_log": 10,
+      "training_summary": 9,
+      "stage_report": 2
+    },
+    "rp2040": {
+      "run_manifest": 7,
+      "stage_report": 7
+    },
+    "sparknet-c12-dendritic-prune-no-kd-fc-only-d3": {
+      "run_manifest": 1,
+      "canonical_epoch_log": 5,
+      "training_summary": 1,
+      "canonical_pai_architecture_scores": 2,
+      "stage_report": 1
+    },
+    "sparknet-c12-dendritic-prune-no-kd-unlimited": {
+      "run_manifest": 1,
+      "canonical_epoch_log": 2,
+      "training_summary": 1,
+      "canonical_pai_architecture_scores": 1,
+      "stage_report": 1
+    },
+    "sparknet-c16-dendritic-prune-no-kd-fc-only-d3": {
+      "run_manifest": 5,
+      "canonical_epoch_log": 45,
+      "training_summary": 5,
+      "canonical_pai_architecture_scores": 15,
+      "stage_report": 5
+    },
+    "sparknet-c16-dendritic-prune-no-kd-gate-conv-d3": {
+      "run_manifest": 5,
+      "canonical_epoch_log": 8,
+      "training_summary": 3,
+      "canonical_pai_architecture_scores": 3,
+      "stage_report": 5
+    },
+    "sparknet-c16-ptp": {
+      "run_manifest": 6,
+      "canonical_epoch_log": 84,
+      "training_summary": 6,
+      "canonical_pai_architecture_scores": 42,
+      "stage_report": 6
+    },
+    "sparknet-c16g16-ptp": {
+      "run_manifest": 5,
+      "canonical_epoch_log": 60,
+      "training_summary": 5,
+      "canonical_pai_architecture_scores": 30,
+      "stage_report": 5
+    },
+    "sparknet-c18g8-ptp": {
+      "run_manifest": 5,
+      "canonical_epoch_log": 60,
+      "training_summary": 5,
+      "canonical_pai_architecture_scores": 30,
+      "stage_report": 5
+    },
+    "sparknet-dendritic-study-v2": {
+      "run_manifest": 291,
+      "canonical_epoch_log": 562,
+      "training_summary": 291,
+      "stage_report": 150,
+      "canonical_pai_architecture_scores": 121
+    },
+    "sparknet-grow-dendrites-v3": {
+      "run_manifest": 187,
+      "canonical_epoch_log": 187,
+      "stage_report": 186
+    },
+    "sparknet-lowdata02": {
+      "run_manifest": 45,
+      "canonical_epoch_log": 45,
+      "stage_report": 10,
+      "training_summary": 35
+    },
+    "sparknet-lowdata10": {
+      "run_manifest": 158,
+      "canonical_epoch_log": 158,
+      "stage_report": 74,
+      "training_summary": 84
+    },
+    "sparknet-lowdata20": {
+      "run_manifest": 15,
+      "canonical_epoch_log": 15,
+      "stage_report": 5,
+      "training_summary": 10
+    },
+    "sparknet-native-dendrites": {
+      "run_manifest": 60,
+      "canonical_epoch_log": 60,
+      "training_summary": 60
+    },
+    "sparknet-pai-documented": {
+      "run_manifest": 13,
+      "canonical_epoch_log": 30,
+      "training_summary": 13,
+      "stage_report": 13,
+      "canonical_pai_architecture_scores": 7
+    },
+    "sparknet-paper-replication": {
+      "run_manifest": 10,
+      "canonical_epoch_log": 8,
+      "training_summary": 6,
+      "stage_report": 2
+    },
+    "students-dnn": {
+      "run_manifest": 110,
+      "canonical_epoch_log": 110,
+      "training_summary": 110
+    },
+    "students-dscnn": {
+      "run_manifest": 24,
+      "canonical_epoch_log": 24,
+      "training_summary": 24
+    },
+    "students-dtnet": {
+      "run_manifest": 30,
+      "canonical_epoch_log": 30,
+      "training_summary": 30
+    },
+    "students-ei": {
+      "run_manifest": 12,
+      "canonical_epoch_log": 12,
+      "training_summary": 12
+    },
+    "students-ei-adamw": {
+      "run_manifest": 5,
+      "canonical_epoch_log": 5,
+      "training_summary": 5
+    },
+    "students-msd": {
+      "run_manifest": 30,
+      "canonical_epoch_log": 30,
+      "training_summary": 30
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# 11196 params (12 classes, input (32, 101)). Dendritic head arm.
+# Edge Impulse default KWS CNN (arXiv 2605.15647 baseline): Conv1d(32->c1,k3,same)+ReLU
+# +MaxPool(2,same)+Dropout(0.25) -> Conv1d(c1->c2)+ReLU+MaxPool+Dropout -> Flatten(c2*26) -> Linear(12).
+# Additive head dendrite: 1/class reading all 416 flattened inputs (Brenner/PAI style).
+name: ei_c8x16_hd1full
+family: ei_conv1d
+c1: 8
+c2: 16
+dropout: 0.25
+head_dendrites: 1
+head_dendrite_layout: full
+input_norm: cmvn

@@ -1,0 +1,9 @@
+# 8691 params (12 classes, input (32, 101)). Width-sweep control.
+# Edge Impulse default KWS CNN (arXiv 2605.15647 baseline): Conv1d(32->c1,k3,same)+ReLU
+# +MaxPool(2,same)+Dropout(0.25) -> Conv1d(c1->c2)+ReLU+MaxPool+Dropout -> Flatten(c2*26) -> Linear(12).
+name: ei_c11x22
+family: ei_conv1d
+c1: 11
+c2: 22
+dropout: 0.25
+input_norm: cmvn

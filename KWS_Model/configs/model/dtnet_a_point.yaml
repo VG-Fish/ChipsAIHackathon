@@ -1,0 +1,17 @@
+# 4183 params (12 classes, input (32, 101)). Budget A point-neuron control, 2 layers.
+# Plain leaky dense layers: 1 identity branch with full fan-in, one learnable soma time constant per neuron
+# (init log-spaced 1..50), BN, ReLU; same IDCT + cmvn input and time-mean readout as dtnet_a_het.
+name: dtnet_a_point
+family: dtnet
+neurons: [43, 43]
+branches: 1
+fan_in: full
+tau: none
+branch_activation: identity
+branch_norm: false
+soma_tau: true
+input_transform: idct
+input_norm: cmvn
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

@@ -227,3 +227,207 @@ def test_build_sparknet_swaps_only_the_c_to_c_pointwise_convs_for_dendrites():
     assert kinds == ["Conv2d", "DendriticPointwise", "DendriticPointwise", "DendriticPointwise"]
     assert sum(p.numel() for p in model.parameters()) == 4474
     assert model(torch.randn(2, 1, 32, 101)).shape == (2, 12)
+
+
+def test_additive_dendrites_keep_the_pointwise_conv_and_add_a_branch():
+    cfg = {"channels": 16, "gate_channels": 16, "dendrites": 1, "dendrite_fan_in": 16,
+           "dendrite_mode": "add", "dendrite_blocks": [1]}
+    model = build_sparknet(cfg, (32, 101), 12)
+    assert all(isinstance(block.pointwise, torch.nn.Conv2d) for block in model.blocks)
+    assert [block.dendrite_branch is not None for block in model.blocks] == [False, True, False, False]
+    # A full-fan-in branch costs what a PAI blocks.1 pointwise dendrite does: C * (C + 2).
+    assert sum(p.numel() for p in model.parameters()) == 4140 + 16 * 18
+    assert model(torch.randn(2, 1, 32, 101)).shape == (2, 12)
+
+
+def test_block0_dendrites_tile_local_windows_of_the_feature_bins():
+    layer = DendriticPointwise(channels=4, dendrites=1, fan_in=8, in_channels=32)
+    windows = layer.index.view(4, 8)
+    assert windows[:, 0].tolist() == [0, 8, 16, 24]
+    cfg = {"channels": 16, "gate_channels": 16, "dendrites": 2, "dendrite_fan_in": 8,
+           "dendrite_mode": "add", "dendrite_blocks": [0]}
+    model = build_sparknet(cfg, (32, 101), 12)
+    assert sum(p.numel() for p in model.parameters()) == 4140 + 16 * 2 * (8 + 2)
+    assert model(torch.randn(2, 1, 32, 101)).shape == (2, 12)
+
+
+# --- Multi-scale dendritic (MSD) blocks -------------------------------------
+
+MSD_CONFIGS = ("a_relu", "a_lin", "a_dense", "a_1scale", "a13_relu", "a13_lin", "a13_dense",
+               "b_relu", "b_lin", "b_dense")
+
+
+def _msd_block(**kwargs):
+    from kws.models.sparknet import MSDBlock
+    defaults = dict(in_channels=6, out_channels=4, kernel_size=5, residual=True,
+                    dilations=(1, 2, 4), pointwise="dendritic", branches=6, fan_in=2)
+    defaults.update(kwargs)
+    return MSDBlock(**defaults)
+
+
+def test_msd_block_shapes_and_param_counts():
+    for in_channels, residual in ((32, False), (8, True)):
+        C, S, K, f, k = 8, 3, 3, 7, 11
+        block = _msd_block(in_channels=in_channels, out_channels=C, kernel_size=k,
+                           residual=residual, branches=K, fan_in=f)
+        x = torch.randn(2, in_channels, 1, 101)
+        assert block(x).shape == (2, C, 1, 101)
+        assert [conv.dilation for conv in block.depthwise] == [(1, 1), (1, 2), (1, 4)]
+        expected = S * in_channels * k + C * K * (f + 2) + 2 * C
+        if residual:
+            expected += in_channels * C + 2 * C
+        assert sum(p.numel() for p in block.parameters()) == expected
+
+        dense = _msd_block(in_channels=in_channels, out_channels=C, kernel_size=k,
+                           residual=residual, pointwise="dense")
+        assert isinstance(dense.pointwise, torch.nn.Conv2d)
+        assert dense(x).shape == (2, C, 1, 101)
+        expected = S * in_channels * k + S * in_channels * C + 2 * C
+        if residual:
+            expected += in_channels * C + 2 * C
+        assert sum(p.numel() for p in dense.parameters()) == expected
+
+
+def test_msd_branch_j_reads_scale_j_mod_s():
+    torch.manual_seed(0)
+    block = _msd_block().eval()  # 4 neurons x 6 branches, 3 scales
+    captured = {}
+    block.pointwise.dendrite.register_forward_hook(
+        lambda module, inputs, output: captured.update(h=output.detach().clone()))
+    x = torch.randn(2, 6, 1, 13)
+    with torch.no_grad():
+        block(x)
+        base = captured["h"]
+        branch_scale = torch.arange(4 * 6) % 6 % 3  # unit n * K + j reads scale j % 3
+        for s in range(3):
+            saved = block.depthwise[s].weight.data.clone()
+            block.depthwise[s].weight.data.zero_()
+            block(x)
+            block.depthwise[s].weight.data.copy_(saved)
+            changed = (captured["h"] - base).abs().flatten(2).amax(dim=(0, 2)) > 0
+            assert changed.tolist() == (branch_scale == s).tolist()
+
+
+def test_msd_neuron_reads_only_its_local_windows():
+    block = _msd_block(in_channels=12, out_channels=4, branches=3, fan_in=2, residual=False)
+    x = torch.randn(3, 12, 1, 9, requires_grad=True)
+    block.pointwise(torch.cat([conv(x) for conv in block.depthwise], dim=1))[:, 1].sum().backward()
+    # Neuron 1 starts at channel 1 * 12 // 4 = 3 and has one window position (K / S = 1).
+    touched = (x.grad.abs().sum(dim=(0, 2, 3)) > 0).nonzero().flatten().tolist()
+    assert touched == [3, 4]
+    index = block.pointwise.index.view(4, 3, 2)
+    assert (index // 12).tolist()[1] == [[0, 0], [1, 1], [2, 2]]
+
+
+def test_msd_identity_branches_equal_an_explicit_linear_map():
+    torch.manual_seed(0)
+    block = _msd_block(activation="identity")
+    pw = block.pointwise
+    C, K, f, width = 4, 6, 2, 6 * 3
+    w_dendrite = pw.dendrite.weight.detach().view(C, K, f)
+    w_soma = pw.soma.weight.detach().view(C, K)
+    index = pw.index.view(C, K, f)
+    weight = torch.zeros(C, width)
+    for n in range(C):
+        for j in range(K):
+            for i in range(f):
+                weight[n, index[n, j, i]] += w_soma[n, j] * w_dendrite[n, j, i]
+    bias = (w_soma * pw.dendrite.bias.detach().view(C, K)).sum(dim=1)
+    d = torch.randn(2, width, 1, 7)
+    expected = F.conv2d(d, weight[:, :, None, None], bias)
+    assert torch.allclose(pw(d), expected, atol=1e-5)
+    block_relu = _msd_block(activation="relu")
+    block_relu.load_state_dict(block.state_dict())
+    assert not torch.allclose(block_relu.pointwise(d), expected, atol=1e-3)
+
+
+def test_msd_options_validate():
+    import pytest
+    with pytest.raises(ValueError, match="multiple"):
+        _msd_block(branches=4)
+    with pytest.raises(ValueError, match="need block_type: msd"):
+        build_sparknet({"channels": 8, "gate_channels": 16, "msd_branches": 3}, (32, 101), 12)
+    with pytest.raises(ValueError, match="cannot be both"):
+        build_sparknet({"channels": 8, "gate_channels": 16, "block_type": "msd",
+                        "msd_branches": 3, "msd_fan_in": 2, "dendrites": 2,
+                        "dendrite_fan_in": 4}, (32, 101), 12)
+
+
+def test_default_configs_still_build_plain_tcs_blocks():
+    from kws.models.sparknet import TCSBlock
+    model = build_sparknet({"channels": 16, "gate_channels": 16}, (32, 101), 12)
+    assert all(type(block) is TCSBlock for block in model.blocks)
+    assert sum(p.numel() for p in model.parameters()) == 4140
+
+
+def test_msd_blocks_selects_which_blocks_are_multi_scale():
+    cfg = {"channels": 5, "gate_channels": 8, "block_type": "msd", "msd_branches": 3,
+           "msd_fan_in": 3, "msd_blocks": [1, 3]}
+    model = build_sparknet(cfg, (32, 101), 12)
+    assert [type(block).__name__ for block in model.blocks] == [
+        "TCSBlock", "MSDBlock", "TCSBlock", "MSDBlock"]
+    assert model(torch.randn(2, 1, 32, 101)).shape == (2, 12)
+
+
+def test_msd_qat_fusion_pairs_only_convs_that_feed_their_bn():
+    import copy
+    from kws.optimize.quantize_qat import _fuse_conv_bn_for_qat
+
+    x = torch.randn(2, 1, 32, 101)
+    for pointwise, expected in (("dense", {"pointwise+bn", "res_conv+res_bn"}),
+                                ("dendritic", {"res_conv+res_bn"})):
+        cfg = {"channels": 6, "gate_channels": 8, "block_type": "msd",
+               "msd_pointwise": pointwise, "msd_branches": 3, "msd_fan_in": 3}
+        model = build_sparknet(cfg, (32, 101), 12)
+        model.train()
+        model(x)  # populate BatchNorm running stats
+        model.eval()
+        with torch.no_grad():
+            before = model(x)
+        fused = _fuse_conv_bn_for_qat(copy.deepcopy(model))
+        msd_pairs = {pair.split(":")[1] for pair in fused if pair.startswith("MSDBlock:")}
+        assert msd_pairs == expected
+        fused_model = copy.deepcopy(model)
+        _fuse_conv_bn_for_qat(fused_model)
+        fused_model.eval()
+        with torch.no_grad():
+            assert torch.allclose(fused_model(x), before, atol=1e-5)
+
+
+def test_msd_model_configs_record_their_exact_params():
+    import re
+
+    import yaml
+    from kws.models.registry import build_model
+
+    for name in MSD_CONFIGS:
+        path = f"configs/model/sparknet_msd_{name}.yaml"
+        with open(path) as f:
+            first_line = f.readline()
+            f.seek(0)
+            model_cfg = yaml.safe_load(f)
+        recorded = int(re.match(r"# ([\d,]+) params", first_line).group(1).replace(",", ""))
+        model = build_model(model_cfg, (32, 101), 12)
+        assert isinstance(model, SparkNet)
+        assert sum(p.numel() for p in model.parameters()) == recorded, path
+        budget = 4140 if name.startswith("a") else 2023
+        assert abs(recorded - budget) / budget <= 0.015, path
+        assert count_macs(model, (32, 101)) > 0
+        assert model(torch.randn(2, 1, 32, 101)).shape == (2, 12)
+
+
+def test_msd_checkpoint_loads_through_the_evaluate_dispatch(tmp_path):
+    import yaml
+    with open("configs/model/sparknet_msd_a_relu.yaml") as f:
+        model_cfg = yaml.safe_load(f)
+    model = build_sparknet(model_cfg, input_shape=(32, 101), num_classes=12)
+    checkpoint_path = tmp_path / "msd.pt"
+    torch.save({
+        "model_family": "sparknet", "model_cfg": model_cfg, "input_shape": [32, 101],
+        "num_classes": 12, "num_keywords": 10, "label_map": {},
+        "model_state_dict": model.state_dict(),
+    }, checkpoint_path)
+    loaded_model, _ = load_model_from_checkpoint(str(checkpoint_path), torch.device("cpu"))
+    x = torch.randn(1, 1, 32, 101)
+    with torch.no_grad():
+        assert torch.allclose(loaded_model(x), model.eval()(x))

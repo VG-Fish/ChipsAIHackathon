@@ -1,0 +1,6 @@
+# 16588 params (12 classes, input (32, 101)). Batch 17 ablation: 2-hidden-layer MLP depth control (vs h16_d4f32)
+name: dnn_h16x112
+family: dnn
+hidden: [16, 112]
+time_pool: 4
+input_norm: cmvn

@@ -1,0 +1,355 @@
+[
+  {
+    "name": "c10g16-b2-seed0",
+    "source": {
+      "kind": "grow_run",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c10g16-seed0",
+      "arm": "pointwise_b2-bn",
+      "width": 10,
+      "seed": 0,
+      "state": "best_clean",
+      "state_sha256": "b5b1abb0eb9950a119e2e55aafa0bbb3cb415535e18d7b883b4ff246fd379087",
+      "distillation": null,
+      "val_acc_at_training": 92.62092238470191
+    },
+    "float_params": 2584,
+    "folded_params": 2472,
+    "chosen": {
+      "calibration": "p99.99",
+      "act_bits": 16
+    },
+    "test_float": {
+      "accuracy": 92.127,
+      "frr": 7.167,
+      "far": 11.397,
+      "keyword_f1": 92.615
+    },
+    "test_int": {
+      "accuracy": 92.127,
+      "frr": 7.167,
+      "far": 11.397,
+      "keyword_f1": 92.58
+    },
+    "agreement": 99.325,
+    "weight_int8_bytes": 2354,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 7.21
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c10g16-b2-seed0/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "05e86c4dd94cd185cc833248456e52c42f310bbde7daf88e9218d3bb5d2b4589",
+      "binary_bytes": 155120,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  },
+  {
+    "name": "c10g16-b2-seed2",
+    "source": {
+      "kind": "grow_run",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c10g16-seed2",
+      "arm": "pointwise_b2-bn",
+      "width": 10,
+      "seed": 2,
+      "state": "best_clean",
+      "state_sha256": "19a172202642e6e369db0af49c834c67dd88516c3b499de53447d363e4d1b5fc",
+      "distillation": null,
+      "val_acc_at_training": 92.80089988751406
+    },
+    "float_params": 2584,
+    "folded_params": 2472,
+    "chosen": {
+      "calibration": "p99.99",
+      "act_bits": 8
+    },
+    "test_float": {
+      "accuracy": 92.331,
+      "frr": 6.676,
+      "far": 12.623,
+      "keyword_f1": 92.905
+    },
+    "test_int": {
+      "accuracy": 92.209,
+      "frr": 6.873,
+      "far": 12.377,
+      "keyword_f1": 92.765
+    },
+    "agreement": 99.08,
+    "weight_int8_bytes": 2354,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 8.68
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c10g16-b2-seed2/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "ff350743c7a94eb3699cf80295f59d42e1ce3405e7740df4dbf0b86ca8a6f461",
+      "binary_bytes": 155352,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  },
+  {
+    "name": "c16-seed0-scratch",
+    "source": {
+      "kind": "checkpoint",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-paper-replication/c16-seed0/models/checkpoints/paper_replication/best.pt",
+      "sha256": "b48a0326cbbc20c04114851e85d9ffdbe6709529baae0e532252c641ded734a5",
+      "model": "sparknet_c16_paper",
+      "val_acc_at_training": 95.32058492688414
+    },
+    "float_params": 4636,
+    "folded_params": 4460,
+    "chosen": {
+      "calibration": "max",
+      "act_bits": 16
+    },
+    "test_float": {
+      "accuracy": 95.01,
+      "frr": 4.492,
+      "far": 7.475,
+      "keyword_f1": 95.285
+    },
+    "test_int": {
+      "accuracy": 95.031,
+      "frr": 4.541,
+      "far": 7.108,
+      "keyword_f1": 95.227
+    },
+    "agreement": 99.448,
+    "weight_int8_bytes": 4304,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 4.861
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c16-seed0-scratch/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "a8636cbc2ba7d8476c93a78e6e96fc7584a6132ed33990fbfb5ab4a6194dd2eb",
+      "binary_bytes": 157328,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  },
+  {
+    "name": "c18g16-b2-seed0",
+    "source": {
+      "kind": "grow_run",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c18g16-seed0",
+      "arm": "pointwise_b2-bn",
+      "width": 18,
+      "seed": 0,
+      "state": "best_clean",
+      "state_sha256": "cf629f5c60c8cd0eb90b8b4436134b24347aecf310720822e4b685380d66cdf3",
+      "distillation": null,
+      "val_acc_at_training": 96.1079865016873
+    },
+    "float_params": 5176,
+    "folded_params": 5000,
+    "chosen": {
+      "calibration": "p99.99",
+      "act_bits": 16
+    },
+    "test_float": {
+      "accuracy": 95.521,
+      "frr": 4.296,
+      "far": 5.392,
+      "keyword_f1": 95.676
+    },
+    "test_int": {
+      "accuracy": 95.562,
+      "frr": 4.246,
+      "far": 5.392,
+      "keyword_f1": 95.734
+    },
+    "agreement": 99.673,
+    "weight_int8_bytes": 4810,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 12.712
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c18g16-b2-seed0/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "bc98d6aca5434ccc406be3f108e41142857d75fa6ea9acaf610321446b745812",
+      "binary_bytes": 158664,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  },
+  {
+    "name": "c18g16-fc-seed0",
+    "source": {
+      "kind": "grow_run",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-grow-dendrites-v3/fc/c18g16-seed0",
+      "arm": "fc",
+      "width": 18,
+      "seed": 0,
+      "state": "best_clean",
+      "state_sha256": "5b97588b64d54027fe3b9119e9a4936edc775c6f32ade70649d37aec6ac0a30c",
+      "distillation": null,
+      "val_acc_at_training": 95.90551181102363
+    },
+    "float_params": 5014,
+    "folded_params": 4856,
+    "chosen": {
+      "calibration": "p99.9",
+      "act_bits": 16
+    },
+    "test_float": {
+      "accuracy": 95.542,
+      "frr": 4.418,
+      "far": 4.657,
+      "keyword_f1": 95.712
+    },
+    "test_int": {
+      "accuracy": 95.542,
+      "frr": 4.246,
+      "far": 5.515,
+      "keyword_f1": 95.712
+    },
+    "agreement": 99.039,
+    "weight_int8_bytes": 4678,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 14.97
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c18g16-fc-seed0/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "3ee48e5850a22a0b0a69d6c19c4ac38698d064224088a19cf535b1e9f5e1a1fc",
+      "binary_bytes": 158736,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  },
+  {
+    "name": "c6g16-b2-seed0",
+    "source": {
+      "kind": "grow_run",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c6g16-seed0",
+      "arm": "pointwise_b2-bn",
+      "width": 6,
+      "seed": 0,
+      "state": "best_clean",
+      "state_sha256": "922ad36f6c82c64b36d0ff6e55546daf364cd0c2b1be912a552daae3ce29864f",
+      "distillation": null,
+      "val_acc_at_training": 86.45669291338582
+    },
+    "float_params": 1624,
+    "folded_params": 1544,
+    "chosen": {
+      "calibration": "p99.99",
+      "act_bits": 8
+    },
+    "test_float": {
+      "accuracy": 85.685,
+      "frr": 13.328,
+      "far": 19.24,
+      "keyword_f1": 86.214
+    },
+    "test_int": {
+      "accuracy": 85.787,
+      "frr": 13.23,
+      "far": 19.118,
+      "keyword_f1": 86.317
+    },
+    "agreement": 98.691,
+    "weight_int8_bytes": 1462,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 4.901
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c6g16-b2-seed0/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "bb563b948d1cf7e3da15f5f7842fd7d10bd169f0a395dbbfe27e2a70b16de6a4",
+      "binary_bytes": 153672,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  },
+  {
+    "name": "c6g16-b2-seed1",
+    "source": {
+      "kind": "grow_run",
+      "path": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c6g16-seed1",
+      "arm": "pointwise_b2-bn",
+      "width": 6,
+      "seed": 1,
+      "state": "best_clean",
+      "state_sha256": "253a723d6d0fcde1e2c5df905a765cd3a808261a1b40a946910eebf4059fb808",
+      "distillation": null,
+      "val_acc_at_training": 87.96400449943758
+    },
+    "float_params": 1624,
+    "folded_params": 1544,
+    "chosen": {
+      "calibration": "p99.99",
+      "act_bits": 16
+    },
+    "test_float": {
+      "accuracy": 87.178,
+      "frr": 11.389,
+      "far": 19.73,
+      "keyword_f1": 87.826
+    },
+    "test_int": {
+      "accuracy": 87.035,
+      "frr": 11.586,
+      "far": 19.608,
+      "keyword_f1": 87.612
+    },
+    "agreement": 98.037,
+    "weight_int8_bytes": 1462,
+    "scratch_bytes": 19392,
+    "host_parity": {
+      "compiler": "cc",
+      "clips": 4890,
+      "bit_exact_clips": 4890,
+      "bit_exact": true,
+      "max_abs_logit_difference_q16": 0,
+      "same_prediction": true,
+      "host_seconds": 4.088
+    },
+    "firmware": {
+      "uf2": "/Users/vishy/Desktop/ChipsAIHackathon/KWS_Model/outputs/rp2040/c6g16-b2-seed1/models/exported/rp2040/firmware/kws_rp2040.uf2",
+      "uf2_sha256": "671df39cca392dd966eb3073c0281457418af669fe5bd38d2ba505f40c7f7eb1",
+      "binary_bytes": 153904,
+      "static_ram_bytes_approx": 24940,
+      "self_test_clips": 20
+    }
+  }
+]

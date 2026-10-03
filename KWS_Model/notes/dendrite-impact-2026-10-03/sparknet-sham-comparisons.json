@@ -1,0 +1,368 @@
+{
+  "pairs": [
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "fc",
+      "model": "sparknet_c18g16_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/fc/c18g16-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/fc-sham/c18g16-seed0",
+      "gain_pp": -0.06749156355455588,
+      "final_gain_pp": -0.2474690663667123
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "fc",
+      "model": "sparknet_c8_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/fc/c8-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/fc-sham/c8-seed0",
+      "gain_pp": 0.04499437570303355,
+      "final_gain_pp": -0.15748031496062298
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c10g16_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c10g16-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c10g16-seed0",
+      "gain_pp": 0.13498312710911176,
+      "final_gain_pp": -0.06749156355455588
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c10g16_paper",
+      "seed": 1,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c10g16-seed1",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c10g16-seed1",
+      "gain_pp": 0.0899887514060671,
+      "final_gain_pp": 0.13498312710911176
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c10g16_paper",
+      "seed": 2,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c10g16-seed2",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c10g16-seed2",
+      "gain_pp": 0.2699662542182235,
+      "final_gain_pp": 0.11248593925758943
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c12g16_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c12g16-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c12g16-seed0",
+      "gain_pp": 0.2699662542182235,
+      "final_gain_pp": 0.3374578177727794
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c12g16_paper",
+      "seed": 1,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c12g16-seed1",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c12g16-seed1",
+      "gain_pp": 0.11248593925760053,
+      "final_gain_pp": 0.06749156355455588
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c12g16_paper",
+      "seed": 2,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c12g16-seed2",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c12g16-seed2",
+      "gain_pp": 0.15748031496063408,
+      "final_gain_pp": 0.22497187851518996
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c4_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c4-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c4-seed0",
+      "gain_pp": 0.04499437570304465,
+      "final_gain_pp": 0.6974128233970811
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c4g16_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c4g16-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c4g16-seed0",
+      "gain_pp": 0.47244094488189115,
+      "final_gain_pp": 0.6524184476940365
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c4g16_paper",
+      "seed": 1,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c4g16-seed1",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c4g16-seed1",
+      "gain_pp": 0.1799775028121453,
+      "final_gain_pp": 0.49493813273340237
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c4g16_paper",
+      "seed": 2,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c4g16-seed2",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c4g16-seed2",
+      "gain_pp": 0.29246344206973474,
+      "final_gain_pp": 0.022497187851522327
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c6g16_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c6g16-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c6g16-seed0",
+      "gain_pp": 0.06749156355455588,
+      "final_gain_pp": -0.0899887514060782
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c6g16_paper",
+      "seed": 1,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c6g16-seed1",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c6g16-seed1",
+      "gain_pp": 0.0,
+      "final_gain_pp": 0.11248593925758943
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c6g16_paper",
+      "seed": 2,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c6g16-seed2",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c6g16-seed2",
+      "gain_pp": 0.31496062992125706,
+      "final_gain_pp": 0.539932508436447
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c8g16_paper",
+      "seed": 0,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c8g16-seed0",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c8g16-seed0",
+      "gain_pp": -0.20247469066366763,
+      "final_gain_pp": -0.1799775028121453
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c8g16_paper",
+      "seed": 1,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c8g16-seed1",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c8g16-seed1",
+      "gain_pp": 0.15748031496063408,
+      "final_gain_pp": 0.0
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c8g16_paper",
+      "seed": 2,
+      "real_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn/c8g16-seed2",
+      "sham_run": "outputs/sparknet-grow-dendrites-v3/pointwise_b2-bn-sham/c8g16-seed2",
+      "gain_pp": 0.04499437570304465,
+      "final_gain_pp": 0.06749156355455588
+    }
+  ],
+  "aggregates": [
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "fc",
+      "model": "sparknet_c18g16_paper",
+      "stats": {
+        "n": 1,
+        "mean": -0.06749156355455588,
+        "sd": null,
+        "ci95": null,
+        "wins": 0
+      },
+      "final_stats": {
+        "n": 1,
+        "mean": -0.2474690663667123,
+        "sd": null,
+        "ci95": null,
+        "wins": 0
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "fc",
+      "model": "sparknet_c8_paper",
+      "stats": {
+        "n": 1,
+        "mean": 0.04499437570303355,
+        "sd": null,
+        "ci95": null,
+        "wins": 1
+      },
+      "final_stats": {
+        "n": 1,
+        "mean": -0.15748031496062298,
+        "sd": null,
+        "ci95": null,
+        "wins": 0
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c10g16_paper",
+      "stats": {
+        "n": 3,
+        "mean": 0.1649793775778008,
+        "sd": 0.09366326206822068,
+        "ci95": [
+          -0.06769306393142038,
+          0.39765181908702196
+        ],
+        "wins": 3
+      },
+      "final_stats": {
+        "n": 3,
+        "mean": 0.05999250093738177,
+        "sd": 0.11097599240306463,
+        "ci95": [
+          -0.21568714688998922,
+          0.33567214876475276
+        ],
+        "wins": 2
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c12g16_paper",
+      "stats": {
+        "n": 3,
+        "mean": 0.17997750281215272,
+        "sd": 0.08111476435239236,
+        "ci95": [
+          -0.021522742295366493,
+          0.38147774791967193
+        ],
+        "wins": 3
+      },
+      "final_stats": {
+        "n": 3,
+        "mean": 0.20997375328084175,
+        "sd": 0.13560660907405478,
+        "ci95": [
+          -0.12689173828260222,
+          0.5468392448442857
+        ],
+        "wins": 3
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c4_paper",
+      "stats": {
+        "n": 1,
+        "mean": 0.04499437570304465,
+        "sd": null,
+        "ci95": null,
+        "wins": 1
+      },
+      "final_stats": {
+        "n": 1,
+        "mean": 0.6974128233970811,
+        "sd": null,
+        "ci95": null,
+        "wins": 1
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c4g16_paper",
+      "stats": {
+        "n": 3,
+        "mean": 0.31496062992125706,
+        "sd": 0.14752392630600944,
+        "ci95": [
+          -0.05150911880097753,
+          0.6814303786434917
+        ],
+        "wins": 3
+      },
+      "final_stats": {
+        "n": 3,
+        "mean": 0.38995125609298703,
+        "sd": 0.3278214172387573,
+        "ci95": [
+          -0.42440228918924977,
+          1.2043048013752238
+        ],
+        "wins": 3
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c6g16_paper",
+      "stats": {
+        "n": 3,
+        "mean": 0.12748406449193764,
+        "sd": 0.16582935423693862,
+        "ci95": [
+          -0.28445888808324593,
+          0.5394270170671213
+        ],
+        "wins": 2
+      },
+      "final_stats": {
+        "n": 3,
+        "mean": 0.18747656542931943,
+        "sd": 0.32158652632008644,
+        "ci95": [
+          -0.6113886521931974,
+          0.9863417830518363
+        ],
+        "wins": 2
+      }
+    },
+    {
+      "family": "sparknet-grow-dendrites-v3",
+      "arm": "pointwise_b2-bn",
+      "model": "sparknet_c8g16_paper",
+      "stats": {
+        "n": 3,
+        "mean": 3.700743415417189e-15,
+        "sd": 0.1841474189397657,
+        "ci95": [
+          -0.45744754790975517,
+          0.4574475479097626
+        ],
+        "wins": 2
+      },
+      "final_stats": {
+        "n": 3,
+        "mean": -0.037495313085863145,
+        "sd": 0.12792442526607992,
+        "ci95": [
+          -0.35527720214331904,
+          0.2802865759715928
+        ],
+        "wins": 1
+      }
+    }
+  ]
+}

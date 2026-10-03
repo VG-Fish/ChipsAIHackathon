@@ -1,0 +1,17 @@
+# 4160 params (12 classes, input (32, 101)). Budget A ablation: linear branches.
+# As dtnet_a_het but branch_activation: identity (only nonlinearity is the soma ReLU; same params).
+name: dtnet_a_lin
+family: dtnet
+neurons: [34, 34]
+fan_in: [8, 8]
+tau: hetero
+branch_activation: identity
+layout: local
+branch_norm: true
+soma_tau: true
+input_transform: idct
+input_norm: cmvn
+branches: 4
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

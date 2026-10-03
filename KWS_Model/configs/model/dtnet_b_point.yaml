@@ -1,0 +1,16 @@
+# 2029 params (12 classes, input (32, 101)). Budget B point-neuron control, 2 layers.
+# As dtnet_a_point with widths [25, 26].
+name: dtnet_b_point
+family: dtnet
+neurons: [25, 26]
+branches: 1
+fan_in: full
+tau: none
+branch_activation: identity
+branch_norm: false
+soma_tau: true
+input_transform: idct
+input_norm: cmvn
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

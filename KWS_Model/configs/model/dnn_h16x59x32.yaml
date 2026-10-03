@@ -1,0 +1,6 @@
+# 16647 params (12 classes, input (32, 101)). Batch 18: 3-layer MLP depth control (vs h16x59_hd4)
+name: dnn_h16x59x32
+family: dnn
+hidden: [16, 59, 32]
+time_pool: 4
+input_norm: cmvn

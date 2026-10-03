@@ -1,0 +1,17 @@
+# 2019 params (12 classes, input (32, 101)). Budget B main arm (target ~2020, SparkNet c9g8 = 2023p).
+# As dtnet_a_het with widths [17, 16]; layer-2 branch windows (4 x 8) wrap around its 17 inputs.
+name: dtnet_b_het
+family: dtnet
+neurons: [17, 16]
+fan_in: [8, 8]
+tau: hetero
+branch_activation: relu
+layout: local
+branch_norm: true
+soma_tau: true
+input_transform: idct
+input_norm: cmvn
+branches: 4
+tau_min: 1.0
+tau_max: 50.0
+dropout: 0.0

@@ -1,0 +1,388 @@
+[
+  {
+    "model": "sparknet_a12k2f3g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 93.76377952755905,
+    "sd_val_pct": 0.35335627613582726,
+    "params": 3328,
+    "macs": 286628,
+    "model_config": "configs/model/sparknet_a12k2f3g16_paper.yaml",
+    "native_config": {
+      "channels": 12,
+      "gate_channels": 16,
+      "dendrites": 2,
+      "dendrite_fan_in": 3,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        1,
+        2,
+        3
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed0",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed1",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed2",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed3",
+      "outputs/sparknet-native-dendrites/a12k2f3g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_a16k1f16b1g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 94.85264341957256,
+    "sd_val_pct": 0.3663658580125498,
+    "params": 4428,
+    "macs": 397728,
+    "model_config": "configs/model/sparknet_a16k1f16b1g16_paper.yaml",
+    "native_config": {
+      "channels": 16,
+      "gate_channels": 16,
+      "dendrites": 1,
+      "dendrite_fan_in": 16,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        1
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed0",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed1",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed2",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed3",
+      "outputs/sparknet-native-dendrites/a16k1f16b1g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_a16k1f4g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 95.01012373453318,
+    "sd_val_pct": 0.17671394273705357,
+    "params": 4428,
+    "macs": 394496,
+    "model_config": "configs/model/sparknet_a16k1f4g16_paper.yaml",
+    "native_config": {
+      "channels": 16,
+      "gate_channels": 16,
+      "dendrites": 1,
+      "dendrite_fan_in": 4,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        1,
+        2,
+        3
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed0",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed1",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed2",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed3",
+      "outputs/sparknet-native-dendrites/a16k1f4g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_a16k2f4g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 95.18110236220473,
+    "sd_val_pct": 0.33193836402111243,
+    "params": 4716,
+    "macs": 418736,
+    "model_config": "configs/model/sparknet_a16k2f4g16_paper.yaml",
+    "native_config": {
+      "channels": 16,
+      "gate_channels": 16,
+      "dendrites": 2,
+      "dendrite_fan_in": 4,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        1,
+        2,
+        3
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed0",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed1",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed2",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed3",
+      "outputs/sparknet-native-dendrites/a16k2f4g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_b0a16k2f8g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 94.67716535433071,
+    "sd_val_pct": 0.2275443475093882,
+    "params": 4460,
+    "macs": 399344,
+    "model_config": "configs/model/sparknet_b0a16k2f8g16_paper.yaml",
+    "native_config": {
+      "channels": 16,
+      "gate_channels": 16,
+      "dendrites": 2,
+      "dendrite_fan_in": 8,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        0
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed0",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed1",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed2",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed3",
+      "outputs/sparknet-native-dendrites/b0a16k2f8g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_b0a16k4f4g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 94.91113610798651,
+    "sd_val_pct": 0.16562575765405008,
+    "params": 4524,
+    "macs": 402576,
+    "model_config": "configs/model/sparknet_b0a16k4f4g16_paper.yaml",
+    "native_config": {
+      "channels": 16,
+      "gate_channels": 16,
+      "dendrites": 4,
+      "dendrite_fan_in": 4,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        0
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed0",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed1",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed2",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed3",
+      "outputs/sparknet-native-dendrites/b0a16k4f4g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_b0a9k1f8g12_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 91.41057367829022,
+    "sd_val_pct": 0.42399888375755607,
+    "params": 2209,
+    "macs": 190226,
+    "model_config": "configs/model/sparknet_b0a9k1f8g12_paper.yaml",
+    "native_config": {
+      "channels": 9,
+      "gate_channels": 12,
+      "dendrites": 1,
+      "dendrite_fan_in": 8,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        0
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed0",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed1",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed2",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed3",
+      "outputs/sparknet-native-dendrites/b0a9k1f8g12-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_b0a9k2f8g12_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 91.59955005624298,
+    "sd_val_pct": 0.2978648061671691,
+    "params": 2299,
+    "macs": 198407,
+    "model_config": "configs/model/sparknet_b0a9k2f8g12_paper.yaml",
+    "native_config": {
+      "channels": 9,
+      "gate_channels": 12,
+      "dendrites": 2,
+      "dendrite_fan_in": 8,
+      "dendrite_mode": "add",
+      "dendrite_blocks": [
+        0
+      ]
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed0",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed1",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed2",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed3",
+      "outputs/sparknet-native-dendrites/b0a9k2f8g12-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_d14k2f3g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 92.94038245219348,
+    "sd_val_pct": 0.20643545101380087,
+    "params": 3362,
+    "macs": 286022,
+    "model_config": "configs/model/sparknet_d14k2f3g16_paper.yaml",
+    "native_config": {
+      "channels": 14,
+      "gate_channels": 16,
+      "dendrites": 2,
+      "dendrite_fan_in": 3
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed0",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed1",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed2",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed3",
+      "outputs/sparknet-native-dendrites/d14k2f3g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_d16k4f4g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 94.49718785151856,
+    "sd_val_pct": 0.3402955302801174,
+    "params": 4524,
+    "macs": 389648,
+    "model_config": "configs/model/sparknet_d16k4f4g16_paper.yaml",
+    "native_config": {
+      "channels": 16,
+      "gate_channels": 16,
+      "dendrites": 4,
+      "dendrite_fan_in": 4
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed0",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed1",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed2",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed3",
+      "outputs/sparknet-native-dendrites/d16k4f4g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_d18k2f4g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 94.0697412823397,
+    "sd_val_pct": 0.26930928686875616,
+    "params": 4474,
+    "macs": 390254,
+    "model_config": "configs/model/sparknet_d18k2f4g16_paper.yaml",
+    "native_config": {
+      "channels": 18,
+      "gate_channels": 16,
+      "dendrites": 2,
+      "dendrite_fan_in": 4
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed0",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed1",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed2",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed3",
+      "outputs/sparknet-native-dendrites/d18k2f4g16-seed4"
+    ]
+  },
+  {
+    "model": "sparknet_d20k2f3g16_paper",
+    "n": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "mean_val_pct": 94.64116985376828,
+    "sd_val_pct": 0.32422498808195793,
+    "params": 4904,
+    "macs": 429644,
+    "model_config": "configs/model/sparknet_d20k2f3g16_paper.yaml",
+    "native_config": {
+      "channels": 20,
+      "gate_channels": 16,
+      "dendrites": 2,
+      "dendrite_fan_in": 3
+    },
+    "runs": [
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed0",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed1",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed2",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed3",
+      "outputs/sparknet-native-dendrites/d20k2f3g16-seed4"
+    ]
+  }
+]

@@ -1,0 +1,11 @@
+# 30044 params (12 classes, input (32, 101)). Dendritic arm (vs h35 29587).
+# Hello Edge DNN: avg-pool time x4 (101->26), flatten time-major (832) -> Linear(h)+ReLU -> Linear(12).
+# Additive dendrites (2/neuron) on the hidden Linear (fan-in 32 = one frame, local windows)
+# and on the head (fan-in clamped to 16).
+name: dnn_h32_d2f32
+family: dnn
+hidden: [32]
+time_pool: 4
+dendrites: 2
+dendrite_fan_in: 32
+input_norm: cmvn

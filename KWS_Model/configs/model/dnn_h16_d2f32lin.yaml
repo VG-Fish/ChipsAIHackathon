@@ -1,0 +1,9 @@
+# 15052 params (12 classes, input (32, 101)). Batch 17 ablation: linear (identity) dendrites, h16_d2f32 control
+name: dnn_h16_d2f32lin
+family: dnn
+hidden: [16]
+dendrites: 2
+dendrite_fan_in: 32
+dendrite_activation: identity
+time_pool: 4
+input_norm: cmvn

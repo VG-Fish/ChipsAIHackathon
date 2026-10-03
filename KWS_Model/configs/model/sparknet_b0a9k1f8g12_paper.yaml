@@ -1,0 +1,17 @@
+# SparkNet C=9, gate_channels=12, keeping every conv and adding a DendriticPointwise
+# branch to blocks.0 pointwise (the 32 MFCC bins -> C): 1 ReLU dendrite(s) per neuron,
+# each reading 8 contiguous feature bins, the windows tiling the bins evenly
+# (restricted receptive field on an input that has an ordering, as in Chavlis &
+# Poirazi 2025). Trained jointly from scratch by gradient descent.
+#
+# Added 2026-09-28 for the native-dendrite study (batch 12): input-side dendrites
+# vs simply widening, at equal params. Not a published SparkNet configuration.
+family: sparknet
+name: sparknet_b0a9k1f8g12_paper
+channels: 9
+gate_channels: 12
+dendrites: 1
+dendrite_fan_in: 8
+dendrite_mode: add
+dendrite_blocks: [0]
+sparsity_weight: 1.0
